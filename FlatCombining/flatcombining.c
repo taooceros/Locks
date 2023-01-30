@@ -1,10 +1,15 @@
 #include "flatcombining.h"
 
+static void free_key(void* key)
+{
+	free(key);
+}
+
 void fc_init(fc_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
-	pthread_key_create(&lock->fcthread_info_key, NULL);
+	pthread_key_create(&lock->fcthread_info_key, &free_key);
 }
 
 static void scanCombineApply(fc_lock_t* lock)
@@ -15,7 +20,6 @@ static void scanCombineApply(fc_lock_t* lock)
 	thread_node_t* previous = NULL;
 
 	bool isHead = true;
-	bool cleanup = !lock->pass % 50;
 
 	while(current != NULL)
 	{
@@ -23,11 +27,11 @@ static void scanCombineApply(fc_lock_t* lock)
 		{
 			current->age = lock->pass;
 			current->response = current->delegate(current->arg1, current->arg2);
+			current->delegate = NULL;
 		}
 
 		if(isHead)
 		{
-			previous = current;
 			isHead = false;
 		}
 		else
@@ -44,7 +48,7 @@ static void scanCombineApply(fc_lock_t* lock)
 	}
 }
 
-static thread_node_t* retriveNode(fc_lock_t* lock)
+static thread_node_t* retrieveNode(fc_lock_t* lock)
 {
 	thread_node_t* node = (thread_node_t*)pthread_getspecific(lock->fcthread_info_key);
 
@@ -73,41 +77,37 @@ static void ensureNodeActive(fc_lock_t* lock, thread_node_t* node)
 	}
 }
 
-static int wait_response(thread_node_t* node)
-{
-	int counter = 0;
-	while(node->delegate != NULL)
-	{
-		if(++counter > 100)
-		{
-			counter = 0;
-			sched_yield();
-		}
-	}
-
-	return node->response;
-}
-
 int fc_lock(fc_lock_t* lock, int (*func_ptr)(int, int), int arg1, int arg2)
 {
-	thread_node_t* node = retriveNode(lock);
+	thread_node_t* node = retrieveNode(lock);
 	node->delegate = func_ptr;
 	node->arg1 = arg1;
 	node->arg2 = arg2;
 
 	ensureNodeActive(lock, node);
 	// lock has been taken
+	int counter = 0;
+
+outer:
 	if(lock->flag)
 	{
-		return wait_response(node);
+	spinwait:
+		while(node->delegate != NULL)
+		{
+			if(++counter > 100)
+			{
+				counter = 0;
+				sched_yield();
+				goto outer;
+			}
+		}
 	}
-	// try become the combinator
+	// try to become the combinator
 	else
 	{
 		if(__atomic_exchange_n(&lock->flag, 1, __ATOMIC_RELAXED))
 		{
-			// fail to become the combinator
-			return wait_response(node);
+			goto spinwait;
 		}
 		else
 		{
