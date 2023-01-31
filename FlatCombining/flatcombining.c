@@ -1,4 +1,5 @@
 #include "flatcombining.h"
+#include <emmintrin.h>
 
 static void free_key(void* key)
 {
@@ -100,6 +101,7 @@ outer:
 				sched_yield();
 				goto outer;
 			}
+			_mm_pause();
 		}
 	}
 	// try to become the combinator
