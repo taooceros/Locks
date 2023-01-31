@@ -88,17 +88,17 @@ void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	// lock has been taken
 	int counter = 0;
 
-outer:
+acquire_lock_or_spin:
 	if(lock->flag)
 	{
-	spinwait:
+	spin_and_wait_or_retry:
 		while(node->delegate != NULL)
 		{
 			if(++counter > 100)
 			{
 				counter = 0;
 				sched_yield();
-				goto outer;
+				goto acquire_lock_or_spin;
 			}
 			_mm_pause();
 		}
@@ -108,7 +108,7 @@ outer:
 	{
 		if(__atomic_exchange_n(&lock->flag, 1, __ATOMIC_RELAXED))
 		{
-			goto spinwait;
+			goto spin_and_wait_or_retry;
 		}
 		else
 		{
