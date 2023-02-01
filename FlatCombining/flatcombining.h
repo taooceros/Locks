@@ -7,21 +7,21 @@
 #include <stdlib.h>
 #include <sys/resource.h>
 
-typedef struct thread_node
+typedef struct fc_thread_node
 {
 	int age;
 	bool active;
 	void* (*delegate)(void*);
 	void* args;
 	void* response;
-	struct thread_node* next;
-} thread_node_t;
+	struct fc_thread_node* next;
+} fc_thread_node;
 
 typedef struct
 {
 	int pass;
 	int flag;
-	thread_node_t* head;
+	fc_thread_node* head;
 	pthread_key_t fcthread_info_key;
 } fc_lock_t;
 

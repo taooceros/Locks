@@ -17,8 +17,8 @@ static void scanCombineApply(fc_lock_t* lock)
 {
 	lock->pass++;
 
-	thread_node_t* current = lock->head;
-	thread_node_t* previous = NULL;
+	fc_thread_node* current = lock->head;
+	fc_thread_node* previous = NULL;
 
 	bool isHead = true;
 
@@ -49,13 +49,13 @@ static void scanCombineApply(fc_lock_t* lock)
 	}
 }
 
-static thread_node_t* retrieveNode(fc_lock_t* lock)
+static fc_thread_node* retrieveNode(fc_lock_t* lock)
 {
-	thread_node_t* node = (thread_node_t*)pthread_getspecific(lock->fcthread_info_key);
+	fc_thread_node* node = (fc_thread_node*)pthread_getspecific(lock->fcthread_info_key);
 
 	if(node == NULL)
 	{
-		node = (thread_node_t*)malloc(sizeof(thread_node_t));
+		node = (fc_thread_node*)malloc(sizeof(fc_thread_node));
 		node->active = false;
 		node->age = 0;
 	}
@@ -63,11 +63,11 @@ static thread_node_t* retrieveNode(fc_lock_t* lock)
 	return node;
 }
 
-static void ensureNodeActive(fc_lock_t* lock, thread_node_t* node)
+static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 {
 	if(!node->active)
 	{
-		thread_node_t** oldHead = &lock->head;
+		fc_thread_node** oldHead = &lock->head;
 		node->next = *oldHead;
 		while(!__atomic_compare_exchange(
 			&lock->head, oldHead, &node, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
@@ -80,7 +80,7 @@ static void ensureNodeActive(fc_lock_t* lock, thread_node_t* node)
 
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
-	thread_node_t* node = retrieveNode(lock);
+	fc_thread_node* node = retrieveNode(lock);
 	node->delegate = func_ptr;
 	node->args = arg;
 
