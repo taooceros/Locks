@@ -1,37 +1,86 @@
-#include <stdbool.h>
-#include <stddef.h>
+#include <ccsynch.h>
 
-typedef struct cc_thread_node
+static void free_key(void* key)
 {
-	void* req;
-	void* ret;
-	bool wait;
-	bool completed;
-	struct cc_thread_node* next;
-} node;
+	free(key);
+}
 
-typedef struct cc_synch
+static inline void node_init(node_t* node)
 {
-	node* Tail;
-} cc_synch_t;
+	node->result = NULL;
+	node->wait = false;
+	node->completed = false;
+	node->next = NULL;
+}
 
 void cc_synch_init(cc_synch_t* cc)
 {
-	cc->Tail->req = NULL;
-	cc->Tail->ret = NULL;
-	cc->Tail->wait = false;
-	cc->Tail->completed = false;
-	cc->Tail->next = NULL;
+	cc->Tail = malloc(sizeof(node_t));
+	node_init(cc->Tail);
+	pthread_key_create(&cc->ccthread_info_key, &free_key);
 }
 
-void* cc_synch(void* req)
+static inline node_t* retrieveNode(cc_synch_t* lock)
 {
-	node* nextNode;
-	node* currentNode;
-	node* tmpNode;
-	node* tmpNodeNext;
+	node_t* node = pthread_getspecific(lock->ccthread_info_key);
 
-    int counter = 0;
+	if(node == NULL)
+	{
+		node = malloc(sizeof(node_t));
+		node_init(node);
+	}
 
-    
+	return node;
+}
+
+void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
+{
+	node_t* nextNode;
+	node_t* currentNode;
+	node_t* tmpNode;
+	node_t* tmpNodeNext;
+
+	int counter = 0;
+
+	node_t* threadNode = retrieveNode(lock);
+
+	nextNode = threadNode;
+
+	nextNode->next = NULL;
+	nextNode->wait = true;
+	nextNode->completed = false;
+
+	atomic_exchange(&lock->Tail, &nextNode, &currentNode, __ATOMIC_ACQ_REL);
+
+	currentNode->request.delegate = delegate;
+	currentNode->request.args = args;
+	currentNode->next = nextNode;
+
+	pthread_setspecific(lock->ccthread_info_key, currentNode);
+
+	while(currentNode->wait)
+		_mm_pause();
+
+	if(currentNode->completed)
+		return currentNode->result;
+
+	// become the combiner
+
+	tmpNode = currentNode;
+
+	const int h = 50;
+
+	while(tmpNode->next != NULL && counter < h)
+	{
+		counter++;
+		tmpNodeNext = tmpNode->next;
+
+		tmpNode->result = tmpNode->request.delegate(tmpNode->request.args);
+		tmpNode->completed = true;
+		tmpNode->wait = false;
+		tmpNode = tmpNodeNext;
+	}
+
+	tmpNode->wait = false;
+	return currentNode->result;
 }
