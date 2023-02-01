@@ -27,7 +27,7 @@ static void scanCombineApply(fc_lock_t* lock)
 		if(current->delegate != NULL)
 		{
 			current->age = lock->pass;
-			current->response = current->delegate(current->arg1, current->arg2);
+			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 		}
 
@@ -78,12 +78,11 @@ static void ensureNodeActive(fc_lock_t* lock, thread_node_t* node)
 	}
 }
 
-int fc_lock(fc_lock_t* lock, int (*func_ptr)(int, int), int arg1, int arg2)
+void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	thread_node_t* node = retrieveNode(lock);
 	node->delegate = func_ptr;
-	node->arg1 = arg1;
-	node->arg2 = arg2;
+	node->args = arg;
 
 	ensureNodeActive(lock, node);
 	// lock has been taken

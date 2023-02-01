@@ -4,5 +4,9 @@ project(locks)
 
 set(CMAKE_C_FLAGS -pthread)
 
+add_compile_definitions(CYCLE_PER_US=2700)
+
 add_executable(example example.c
         FlatCombining/flatcombining.c)
+
+include_directories(proportional-share/u-scl)

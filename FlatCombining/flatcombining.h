@@ -11,10 +11,9 @@ typedef struct thread_node
 {
 	int age;
 	bool active;
-	int (*delegate)(int, int);
-	int arg1;
-	int arg2;
-	int response;
+	void* (*delegate)(void*);
+	void* args;
+	void* response;
 	struct thread_node* next;
 } thread_node_t;
 
@@ -28,4 +27,4 @@ typedef struct
 
 void fc_init(fc_lock_t* lock);
 
-int fc_lock(fc_lock_t* lock, int (*func_ptr)(int, int), int arg1, int arg2);
+void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg);
