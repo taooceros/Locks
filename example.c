@@ -1,8 +1,9 @@
 #define _GNU_SOURCE
 
-#include "FlatCombining/flatcombining.h"
+#include <ccsynch.h>
 #include <common.h>
 #include <cpuid.h>
+#include <flatcombining.h>
 #include <pthread.h>
 #include <rdtsc.h>
 #include <sched.h>
@@ -11,7 +12,8 @@
 
 volatile int global_counter = 0;
 
-fc_lock_t counter_lock;
+fc_lock_t counter_lock_fc;
+cc_synch_t counter_lock_cc;
 
 typedef unsigned long long ull;
 typedef struct
@@ -20,7 +22,7 @@ typedef struct
 	pthread_t thread;
 	int priority;
 #ifdef FAIRLOCK
-	int weight;
+//	int weight;
 #endif
 	int id;
 	double cs;
@@ -84,7 +86,7 @@ void* worker(void* arg)
 	ull now;
 	do
 	{
-		fc_lock(&counter_lock, &job, task);
+		fc_lock(&counter_lock_fc, &job, task);
 	} while(!*task->stop);
 
 	return NULL;
@@ -92,7 +94,8 @@ void* worker(void* arg)
 
 int main()
 {
-	fc_init(&counter_lock);
+	fc_init(&counter_lock_fc);
+	cc_synch_init(&counter_lock_cc);
 
 	const int thread_count = 12;
 
@@ -103,14 +106,14 @@ int main()
 	for(int i = 0; i < thread_count; i++)
 	{
 		tasks[i].stop = &stop;
-		tasks[i].cs = CYCLE_PER_US * (i % 2 ? 30 : 10);
+		tasks[i].cs = CYCLE_PER_US * (i % 2 ? 300 : 100);
 
 		int priority = 1;
 		tasks[i].priority = priority;
 #ifdef FAIRLOCK
-		int weight = prio_to_weight[priority + 20];
-		tasks[i].weight = weight;
-		tot_weight += weight;
+//		int weight = prio_to_weight[priority + 20];
+//		tasks[i].weight = weight;
+//		tot_weight += weight;
 #endif
 
 		tasks[i].ncpu = 12;
@@ -122,7 +125,7 @@ int main()
 		pthread_create(&threads[i], NULL, &worker, &tasks[i]);
 	}
 
-	sleep(20);
+	sleep(5);
 	stop = 1;
 
 	for(int i = 0; i < thread_count; i++)
