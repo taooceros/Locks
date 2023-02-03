@@ -10,17 +10,24 @@
 #include <stdio.h>
 #include <unistd.h>
 
-volatile int global_counter = 0;
+enum LOCK_TYPE
+{
+	FLAT_COMBINING,
+	CC_SYNCH
+};
+typedef unsigned long long ull;
+
+volatile ull global_counter = 0;
 
 fc_lock_t counter_lock_fc;
 cc_synch_t counter_lock_cc;
 
-typedef unsigned long long ull;
 typedef struct
 {
 	volatile int* stop;
 	pthread_t thread;
 	int priority;
+	int lock_type;
 #ifdef FAIRLOCK
 //	int weight;
 #endif
@@ -31,7 +38,7 @@ typedef struct
 	ull loop_in_cs;
 	ull lock_acquires;
 	ull lock_hold;
-} task_t __attribute__((aligned(64)));
+} task_t;
 
 void* job(void* arg)
 {
@@ -84,20 +91,26 @@ void* worker(void* arg)
 	}
 
 	ull now;
+	enum LOCK_TYPE lockType = task->lock_type;
 	do
 	{
-		fc_lock(&counter_lock_fc, &job, task);
+		switch(lockType)
+		{
+		case FLAT_COMBINING:
+			fc_lock(&counter_lock_fc, &job, task);
+		case CC_SYNCH:
+			cc_synch_lock(&counter_lock_cc, &job, task);
+		}
 	} while(!*task->stop);
 
 	return NULL;
 }
 
-int main()
+void test_lock(enum LOCK_TYPE lockType, bool verbose)
 {
-	fc_init(&counter_lock_fc);
-	cc_synch_init(&counter_lock_cc);
+	global_counter = 0;
 
-	const int thread_count = 12;
+	const int thread_count = 24;
 
 	pthread_t threads[thread_count];
 	task_t tasks[thread_count];
@@ -116,12 +129,16 @@ int main()
 //		tot_weight += weight;
 #endif
 
-		tasks[i].ncpu = 12;
+		tasks[i].ncpu = 0;
 		tasks[i].id = i;
-
+		tasks[i].lock_type = lockType;
 		tasks[i].loop_in_cs = 0;
 		tasks[i].lock_acquires = 0;
 		tasks[i].lock_hold = 0;
+	}
+
+	for(int i = 0; i < thread_count; ++i)
+	{
 		pthread_create(&threads[i], NULL, &worker, &tasks[i]);
 	}
 
@@ -133,40 +150,60 @@ int main()
 		pthread_join(threads[i], NULL);
 	}
 
-	for(int i = 0; i < thread_count; i++)
+	if(verbose)
 	{
-		printf("id %02d "
-			   "loop %10llu "
-			   "lock_acquires %8llu "
-			   "lock_hold(ms) %10.3f \n",
-			   tasks[i].id,
-			   tasks[i].loop_in_cs,
-			   tasks[i].lock_acquires,
-			   tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000));
+		for(int i = 0; i < thread_count; i++)
+		{
+			printf("id %02d "
+				   "loop %10llu "
+				   "lock_acquires %8llu "
+				   "lock_hold(ms) %10.3f \n",
+				   tasks[i].id,
+				   tasks[i].loop_in_cs,
+				   tasks[i].lock_acquires,
+				   tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000));
 #if defined(FAIRLOCK) && defined(DEBUG)
-		flthread_info_t* info = pthread_getspecific(lock.flthread_info_key);
-		printf("  slice %llu\n"
-			   "  own_slice_wait %llu\n"
-			   "  prev_slice_wait %llu\n"
-			   "  runnable_wait %llu\n"
-			   "  next_runnable_wait %llu\n"
-			   "  succ_wait %llu\n"
-			   "  reenter %llu\n"
-			   "  banned(actual) %llu\n"
-			   "  banned %llu\n"
-			   "  elapse %llu\n",
-			   task->lock_acquires - info->stat.reenter,
-			   info->stat.own_slice_wait,
-			   info->stat.prev_slice_wait,
-			   info->stat.runnable_wait,
-			   info->stat.next_runnable_wait,
-			   info->stat.succ_wait,
-			   info->stat.reenter,
-			   info->stat.banned_time,
-			   info->banned_until - info->stat.start,
-			   info->start_ticks - info->stat.start);
+			flthread_info_t* info = pthread_getspecific(lock.flthread_info_key);
+			printf("  slice %llu\n"
+				   "  own_slice_wait %llu\n"
+				   "  prev_slice_wait %llu\n"
+				   "  runnable_wait %llu\n"
+				   "  next_runnable_wait %llu\n"
+				   "  succ_wait %llu\n"
+				   "  reenter %llu\n"
+				   "  banned(actual) %llu\n"
+				   "  banned %llu\n"
+				   "  elapse %llu\n",
+				   task_t->lock_acquires - info->stat.reenter,
+				   info->stat.own_slice_wait,
+				   info->stat.prev_slice_wait,
+				   info->stat.runnable_wait,
+				   info->stat.next_runnable_wait,
+				   info->stat.succ_wait,
+				   info->stat.reenter,
+				   info->stat.banned_time,
+				   info->banned_until - info->stat.start,
+				   info->start_ticks - info->stat.start);
 #endif
+		}
 	}
 
-	printf("Global Result %d\n", global_counter);
+	ull loopResult = 0;
+
+	for(int i = 0; i < thread_count; ++i)
+	{
+		loopResult += tasks[i].loop_in_cs;
+	}
+
+	printf("Loop Result %lld\n", loopResult);
+	printf("Global Result %lld\n", global_counter);
+}
+
+int main()
+{
+	fc_init(&counter_lock_fc);
+	cc_synch_init(&counter_lock_cc);
+
+	test_lock(FLAT_COMBINING, false);
+	test_lock(CC_SYNCH, false);
 }

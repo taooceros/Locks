@@ -106,7 +106,7 @@ acquire_lock_or_spin:
 	// try to become the combinator
 	else
 	{
-		if(__atomic_exchange_n(&lock->flag, 1, __ATOMIC_RELAXED))
+		if(atomic_flag_test_and_set_explicit(&lock->flag, __ATOMIC_ACQUIRE))
 		{
 			goto spin_and_wait_or_retry;
 		}
@@ -114,8 +114,10 @@ acquire_lock_or_spin:
 		{
 			// act as the combinator
 			scanCombineApply(lock);
-			lock->flag = 0;
-			return node->response;
+			atomic_flag_clear_explicit(&lock->flag, __ATOMIC_RELEASE);
 		}
 	}
+
+	return node->response;
+
 }
