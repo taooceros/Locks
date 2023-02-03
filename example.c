@@ -106,7 +106,7 @@ int main()
 	for(int i = 0; i < thread_count; i++)
 	{
 		tasks[i].stop = &stop;
-		tasks[i].cs = CYCLE_PER_US * (i % 2 ? 300 : 100);
+		tasks[i].cs = (i % 2 ? 300 : 100);
 
 		int priority = 1;
 		tasks[i].priority = priority;
