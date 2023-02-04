@@ -1,9 +1,10 @@
 #include <assert.h>
 #include <ccsynch.h>
 #include <common.h>
+#include <execinfo.h>
 #include <flatcombining.h>
 
-#define ITERATION 50000
+#define ITERATION 500000
 #define THREAD_COUNT 32
 
 typedef enum
@@ -14,6 +15,7 @@ typedef enum
 
 typedef struct
 {
+	int id;
 	LOCK_TYPE type;
 } task_t;
 
@@ -24,9 +26,14 @@ cc_synch_t ccSynch;
 
 void* job(void* arg)
 {
+	task_t* task = arg;
 	u_int32_t counter = 0;
 	while(counter++ < ITERATION)
+	{
 		global_counter++;
+	}
+
+	return NULL;
 }
 
 void* worker(void* args)
@@ -34,9 +41,11 @@ void* worker(void* args)
 	switch(((task_t*)args)->type)
 	{
 	case FLAT_COMBINING:
-		fc_lock(&fcLock, &job, NULL);
+		fc_lock(&fcLock, &job, args);
+		break;
 	case CC_SYNCH:
-		cc_synch_lock(&ccSynch, &job, NULL);
+		cc_synch_lock(&ccSynch, &job, args);
+		break;
 	}
 }
 
@@ -45,14 +54,15 @@ int main()
 	fc_init(&fcLock);
 	cc_synch_init(&ccSynch);
 
-	task_t task1;
-	task1.type = FLAT_COMBINING;
+	task_t tasks[THREAD_COUNT];
 
 	pthread_t pthreads[THREAD_COUNT];
 
 	for(int i = 0; i < THREAD_COUNT; ++i)
 	{
-		pthread_create(&pthreads[i], NULL, &worker, &task1);
+		tasks[i].id = i;
+		tasks[i].type = FLAT_COMBINING;
+		pthread_create(&pthreads[i], NULL, &worker, &tasks[i]);
 	}
 
 	for(int i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)

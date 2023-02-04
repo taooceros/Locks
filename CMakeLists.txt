@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 
 project(locks)
 
-set(CMAKE_C_FLAGS "-pthread -g")
-set(CMAKE_C_FLAGS_DEBUG "-pthread -g")
+set(CMAKE_C_FLAGS "-pthread -g -Wall")
+set(CMAKE_C_FLAGS_DEBUG "-pthread -g -Wall")
 
 add_compile_definitions(CYCLE_PER_US=2700)
 

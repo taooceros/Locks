@@ -15,6 +15,7 @@ typedef struct fc_thread_node
 	void* args;
 	void* response;
 	struct fc_thread_node* next;
+	pthread_t pthread;
 } fc_thread_node;
 
 typedef struct

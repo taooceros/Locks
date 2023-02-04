@@ -18,9 +18,6 @@ static void scanCombineApply(fc_lock_t* lock)
 	lock->pass++;
 
 	fc_thread_node* current = lock->head;
-	fc_thread_node* previous = NULL;
-
-	bool isHead = true;
 
 	while(current != NULL)
 	{
@@ -30,17 +27,26 @@ static void scanCombineApply(fc_lock_t* lock)
 			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 		}
+		current = current->next;
+	}
+}
 
-		if(isHead)
-		{
-			isHead = false;
-		}
-		else
+static inline void tryCleanUp(fc_lock_t* lock)
+{
+	if(lock->pass % 50)
+		return;
+
+	fc_thread_node* previous = NULL;
+	fc_thread_node* current = lock->head;
+
+	while(current != NULL)
+	{
+		if(previous != NULL)
 		{
 			if(lock->pass - current->age > 50)
 			{
-				previous->next = current->next;
 				current->active = false;
+				previous->next = current->next;
 			}
 		}
 
@@ -58,6 +64,7 @@ static fc_thread_node* retrieveNode(fc_lock_t* lock)
 		node = (fc_thread_node*)malloc(sizeof(fc_thread_node));
 		node->active = false;
 		node->age = 0;
+		node->pthread = pthread_self();
 	}
 
 	return node;
@@ -67,14 +74,12 @@ static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 {
 	if(!node->active)
 	{
-		fc_thread_node** oldHead = &lock->head;
-		node->next = *oldHead;
-		while(!__atomic_compare_exchange(
-			&lock->head, oldHead, &node, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+		fc_thread_node* oldHead;
+		do
 		{
-			oldHead = &lock->head;
-			node->next = *oldHead;
-		}
+			oldHead = lock->head;
+			node->next = oldHead;
+		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
 	}
 }
 
@@ -83,6 +88,7 @@ void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	fc_thread_node* node = retrieveNode(lock);
 	node->delegate = func_ptr;
 	node->args = arg;
+	node->response = NULL;
 
 	ensureNodeActive(lock, node);
 	// lock has been taken
@@ -106,7 +112,7 @@ acquire_lock_or_spin:
 	// try to become the combinator
 	else
 	{
-		if(atomic_flag_test_and_set_explicit(&lock->flag, __ATOMIC_ACQUIRE))
+		if(atomic_flag_test_and_set(&lock->flag))
 		{
 			goto spin_and_wait_or_retry;
 		}
@@ -114,10 +120,10 @@ acquire_lock_or_spin:
 		{
 			// act as the combinator
 			scanCombineApply(lock);
-			atomic_flag_clear_explicit(&lock->flag, __ATOMIC_RELEASE);
+			tryCleanUp(lock);
+			atomic_flag_clear(&lock->flag);
 		}
 	}
 
 	return node->response;
-
 }
