@@ -98,8 +98,10 @@ void* worker(void* arg)
 		{
 		case FLAT_COMBINING:
 			fc_lock(&counter_lock_fc, &job, task);
+			break;
 		case CC_SYNCH:
 			cc_synch_lock(&counter_lock_cc, &job, task);
+			break;
 		}
 	} while(!*task->stop);
 
