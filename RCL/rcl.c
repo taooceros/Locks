@@ -6,6 +6,45 @@
 #include <sched.h>
 #include <stdio.h>
 
+static inline long futex(int* uaddr, int futex_op, int val, const struct timespec* timeout)
+{
+	return syscall(SYS_futex, uaddr, futex_op, val, timeout, NULL, 0);
+}
+
+static inline void wait_on_futex_value(int* uaddr, int value)
+{
+	while(atomic_load(uaddr) != value)
+	{
+		long rc = futex(uaddr, FUTEX_WAIT, value, NULL);
+		if(rc == -1)
+		{
+			perror("futex");
+			exit(1);
+		}
+		else if(rc != 0)
+		{
+			abort();
+		}
+	}
+}
+
+static inline void wake_futex_blocking(int* uaddr)
+{
+	while(1)
+	{
+		long rc = futex(uaddr, FUTEX_WAKE, 1, NULL);
+		if(rc == -1)
+		{
+			perror("futex");
+			exit(1);
+		}
+		else if(rc > 0)
+		{
+			return;
+		}
+	}
+}
+
 int number_of_clients = 0;
 
 void rcl_serving_thread(rcl_thread_t* t)

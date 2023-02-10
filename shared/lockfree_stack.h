@@ -5,7 +5,16 @@
 #ifndef LOCKS_LOCKFREE_STACK_H
 #define LOCKS_LOCKFREE_STACK_H
 
-typedef struct lockfree_stack_t lockfree_stack_t;
+typedef struct lockfree_stack_node_t
+{
+	void* data;
+	struct lockfree_stack_node_t* next;
+} lockfree_stack_node_t;
+
+typedef struct lockfree_stack_t
+{
+	lockfree_stack_node_t* head;
+} lockfree_stack_t;
 
 void lockfree_stack_init(lockfree_stack_t* stack);
 
