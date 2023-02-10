@@ -35,6 +35,7 @@ struct rcl_thread_t
 	rcl_server_t* server;
 	int timestamp;
 	int is_servicing;
+	pthread_t pthread;
 };
 
 typedef struct rcl_thread_node_t
@@ -45,13 +46,14 @@ typedef struct rcl_thread_node_t
 
 struct rcl_server_t
 {
-	rcl_thread_node_t* head;
+	rcl_thread_node_t* threads;
 	lockfree_stack_t* prepared_threads;
 	atomic_int_fast32_t num_free_threads;
 	atomic_int_fast32_t num_serving_threads;
 	int timestamp;
 	bool is_alive;
 	rcl_request_t* requests;
+	int management_alive;
 };
 
 #endif //LOCKS_RCL_H
