@@ -175,3 +175,29 @@ _Noreturn void rcl_management_thread(rcl_server_t* s)
 		wait_on_futex_value(&s->management_alive, true);
 	}
 }
+
+void rcl_server_init(rcl_server_t* s, int cpu)
+{
+	s->num_serving_threads = 0;
+	s->num_free_threads = 0;
+	lockfree_stack_init(s->prepared_threads);
+	s->threads = NULL;
+	s->timestamp = 0;
+	s->management_alive = false;
+	s->is_alive = false;
+	s->cpu = cpu;
+	pthread_create(&s->management_thread, NULL, (void* (*)(void*))rcl_management_thread, s);
+}
+
+__thread int client_index;
+__thread bool is_server_thread;
+__thread rcl_server_t *server;
+
+void rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
+{
+	int read_me;
+	rcl_request_t* request;
+
+	request = &l->server->requests[client_index];
+
+}

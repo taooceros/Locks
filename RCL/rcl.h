@@ -52,7 +52,9 @@ struct rcl_server_t
 	atomic_int_fast32_t num_serving_threads;
 	int timestamp;
 	bool is_alive;
+	int cpu;
 	rcl_request_t* requests;
+	pthread_t management_thread;
 	int management_alive;
 };
 
