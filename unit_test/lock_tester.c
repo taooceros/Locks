@@ -29,7 +29,7 @@ cc_synch_t ccSynch;
 
 void* job(void* arg)
 {
-	task_t* task = arg;
+	//	task_t* task = arg;
 	u_int32_t counter = 0;
 	while(counter++ < ITERATION)
 	{
@@ -50,6 +50,8 @@ void* worker(void* args)
 		cc_synch_lock(&ccSynch, &job, args);
 		break;
 	}
+
+	return NULL;
 }
 
 void lock_test()
@@ -73,6 +75,25 @@ void lock_test()
 		pthread_join(pthreads[i], NULL);
 	}
 
+	printf("Type: %s\n", "Flat Combining");
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION);
-	printf("ACTUAL %llu\n", global_counter);
+	printf("ACTUAL %lu\n", global_counter);
+
+	global_counter = 0;
+
+	for(int i = 0; i < THREAD_COUNT; ++i)
+	{
+		tasks[i].id = i;
+		tasks[i].type = CC_SYNCH;
+		pthread_create(&pthreads[i], NULL, &worker, &tasks[i]);
+	}
+
+	for(int i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
+	{
+		pthread_join(pthreads[i], NULL);
+	}
+
+	printf("Type: %s\n", "CCSynch");
+	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION);
+	printf("ACTUAL %lu\n", global_counter);
 }

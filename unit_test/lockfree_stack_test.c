@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define NUM_THREADS 16
-#define NUM_DATA 10000
+#define NUM_THREADS 128
+#define NUM_DATA 100000
 #define TOTAL_NUM_DATA (NUM_DATA * NUM_THREADS)
 
 atomic_int_fast32_t global_index = 0;
@@ -67,7 +67,7 @@ void lockfree_stack_test()
 	{
 		if(!success[i])
 		{
-			printf("Failed to pop data %d", i);
+			printf("Failed to pop data %d\n", i);
 		}
 	}
 
@@ -96,7 +96,7 @@ void lockfree_stack_test()
 	{
 		if(!success[i])
 		{
-			printf("Failed to pop data %d", i);
+			printf("Failed to pop data %d\n", i);
 		}
 	}
 }
