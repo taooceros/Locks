@@ -1,3 +1,6 @@
+#ifndef	LOCK_FLAT_COMBINING_H
+#define	LOCK_FLAT_COMBINING_H
+
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -6,12 +9,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/resource.h>
+#include <shared.h>
 
 typedef struct fc_thread_node
 {
 	int age;
 	bool active;
-	void* (*delegate)(void*);
+	func_ptr_t delegate;
 	void* args;
 	void* response;
 	struct fc_thread_node* next;
@@ -29,3 +33,5 @@ typedef struct
 void fc_init(fc_lock_t* lock);
 
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg);
+
+#endif	/* LOCK_FLAT_COMBINING_H */

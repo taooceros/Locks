@@ -5,17 +5,16 @@
 #ifndef LOCKS_CCSYNCH_H
 #define LOCKS_CCSYNCH_H
 
+#include "shared.h"
 #include <emmintrin.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 
-#define atomic_exchange(ptr, val, ret, memorder) __atomic_exchange(ptr, val, ret, memorder)
-
 typedef struct cc_request
 {
-	void* (*delegate)(void*);
+	func_ptr_t delegate;
 	void* args;
 } cc_request;
 

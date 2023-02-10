@@ -1,4 +1,5 @@
 #include <ccsynch.h>
+#include <stdatomic.h>
 
 static void free_key(void* key)
 {
@@ -50,7 +51,7 @@ void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
 	nextNode->wait = true;
 	nextNode->completed = false;
 
-	atomic_exchange(&lock->Tail, &nextNode, &currentNode, __ATOMIC_ACQ_REL);
+	currentNode = atomic_exchange(&lock->Tail, nextNode);
 
 	currentNode->request.delegate = delegate;
 	currentNode->request.args = args;

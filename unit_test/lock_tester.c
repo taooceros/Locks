@@ -1,8 +1,11 @@
-#include <assert.h>
+#include "lock_tester.h"
+
 #include <ccsynch.h>
 #include <common.h>
-#include <execinfo.h>
 #include <flatcombining.h>
+
+#include <assert.h>
+#include <execinfo.h>
 
 #define ITERATION 500000
 #define THREAD_COUNT 32
@@ -49,7 +52,7 @@ void* worker(void* args)
 	}
 }
 
-int main()
+void lock_test()
 {
 	fc_init(&fcLock);
 	cc_synch_init(&ccSynch);
@@ -71,5 +74,5 @@ int main()
 	}
 
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION);
-	printf("ACTUAL %ld\n", global_counter);
+	printf("ACTUAL %llu\n", global_counter);
 }

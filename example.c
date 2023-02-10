@@ -51,7 +51,6 @@ void* job(void* arg)
 	ull now;
 	ull then = initial + delta;
 
-	int counter = 0;
 	do
 	{
 		task->loop_in_cs++;
@@ -65,7 +64,6 @@ void* job(void* arg)
 
 void* worker(void* arg)
 {
-	int counter = 0;
 	task_t* task = arg;
 
 	if(task->ncpu != 0)
@@ -90,7 +88,6 @@ void* worker(void* arg)
 		}
 	}
 
-	ull now;
 	enum LOCK_TYPE lockType = task->lock_type;
 	do
 	{
