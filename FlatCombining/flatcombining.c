@@ -1,17 +1,11 @@
 #include "flatcombining.h"
 #include <emmintrin.h>
-#include <threads.h>
-
-static void free_key(void* key)
-{
-	free(key);
-}
 
 void fc_init(fc_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
-	pthread_key_create(&lock->fcthread_info_key, &free_key);
+	pthread_key_create(&lock->fcthread_info_key, NULL);
 }
 
 static void scanCombineApply(fc_lock_t* lock)
@@ -56,9 +50,9 @@ static inline void tryCleanUp(fc_lock_t* lock)
 	}
 }
 
-static fc_thread_node* retrieveNode()
+static fc_thread_node* retrieveNode(fc_lock_t* lock)
 {
-	static thread_local fc_thread_node* node = NULL;
+	fc_thread_node* node = (fc_thread_node*)pthread_getspecific(lock->fcthread_info_key);
 
 	if(node == NULL)
 	{
@@ -66,6 +60,7 @@ static fc_thread_node* retrieveNode()
 		node->active = false;
 		node->age = 0;
 		node->pthread = pthread_self();
+		pthread_setspecific(lock->fcthread_info_key, node);
 	}
 
 	return node;
@@ -88,7 +83,7 @@ static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
-	fc_thread_node* node = retrieveNode();
+	fc_thread_node* node = retrieveNode(lock);
 	node->delegate = func_ptr;
 	node->args = arg;
 	node->response = NULL;
