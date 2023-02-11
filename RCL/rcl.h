@@ -26,8 +26,9 @@ struct rcl_lock_t
 struct rcl_request_t
 {
 	func_ptr_t delegate;
-	void* args;
+	void* context;
 	rcl_lock_t* lock;
+	int real_me;
 };
 
 struct rcl_thread_t

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
+#include <threads.h>
 
 static inline long futex(int* uaddr, int futex_op, int val, const struct timespec* timeout)
 {
@@ -63,6 +64,7 @@ void rcl_serving_thread(rcl_thread_t* t)
 			rcl_request_t* r = &s->requests[i];
 			if(r->delegate != NULL)
 			{
+				atomic_thread_fence(memory_order_acquire);
 				rcl_lock_t* l = r->lock;
 
 				int not_holding = 0;
@@ -71,8 +73,11 @@ void rcl_serving_thread(rcl_thread_t* t)
 					func_ptr_t delegate = r->delegate;
 					if(delegate != NULL)
 					{
-						r->args = delegate(r->args);
+						atomic_thread_fence(memory_order_release);
+						r->context = delegate(r->context);
+						atomic_thread_fence(memory_order_acquire);
 						r->delegate = NULL;
+						atomic_thread_fence(memory_order_acquire);
 					}
 					l->holder = 0;
 				}
@@ -189,15 +194,57 @@ void rcl_server_init(rcl_server_t* s, int cpu)
 	pthread_create(&s->management_thread, NULL, (void* (*)(void*))rcl_management_thread, s);
 }
 
-__thread int client_index;
-__thread bool is_server_thread;
-__thread rcl_server_t *server;
+thread_local int client_index;
+thread_local bool is_server_thread;
+thread_local rcl_server_t* my_server;
 
-void rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
+void* rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
 {
-	int read_me;
+	int real_me;
 	rcl_request_t* request;
 
 	request = &l->server->requests[client_index];
 
+	if(!is_server_thread)
+	{
+		real_me = client_index;
+	}
+	else
+	{
+		real_me = my_server->requests[client_index].real_me;
+	}
+
+	if(!is_server_thread || my_server != l->server)
+	{
+		request->lock = l;
+		request->context = context;
+		request->real_me = real_me;
+
+		atomic_thread_fence(memory_order_release);
+		request->delegate = delegate;
+		atomic_thread_fence(memory_order_release);
+
+		while(request->delegate != NULL)
+		{
+			sched_yield();
+		}
+
+		return request->context;
+	}
+	else
+	{
+		int not_hold = 0;
+		while(!atomic_compare_exchange_weak(&l->holder, &not_hold, real_me))
+		{
+			sched_yield();
+		}
+
+		atomic_thread_fence(memory_order_acquire);
+		context = delegate(context);
+		atomic_thread_fence(memory_order_release);
+
+		l->holder = 0;
+		return context;
+	}
 }
+
