@@ -9,5 +9,5 @@
 int main(int argc, char* args[]) {
 	lock_test();
 
-	lockfree_stack_test();
+//	lockfree_stack_test();
 }

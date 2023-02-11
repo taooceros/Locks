@@ -11,6 +11,7 @@ add_compile_definitions(CYCLE_PER_US=2700)
 include_directories(proportional-share/u-scl)
 include_directories(CCsynch FlatCombining)
 include_directories(shared)
+include_directories(RCL)
 
 add_executable(example example.c
         FlatCombining/flatcombining.c CCsynch/ccsynch.c RCL/rcl.c shared/lockfree_stack.c shared/lockfree_stack.h)

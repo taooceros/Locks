@@ -2,11 +2,15 @@
 // Created by 1 on 2/6/2023.
 //
 
+#define _GNU_SOURCE
+
 #include "rcl.h"
 #include <pthread.h>
 #include <sched.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <threads.h>
+#include <unistd.h>
 
 static inline long futex(int* uaddr, int futex_op, int val, const struct timespec* timeout)
 {
@@ -49,7 +53,7 @@ static inline void wake_futex_blocking(int* uaddr)
 
 int number_of_clients = 0;
 
-_Noreturn void rcl_serving_thread(rcl_thread_t* t)
+static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 {
 	rcl_server_t* s = t->server;
 
@@ -105,9 +109,16 @@ _Noreturn void rcl_serving_thread(rcl_thread_t* t)
 
 rcl_thread_t* allocate_serving_threads(rcl_server_t* s) { }
 
-void rcl_start_serving_thread(rcl_thread_t* t)
+static void rcl_start_serving_thread(rcl_thread_t* t)
 {
-	pthread_create(&t->pthread, NULL, (void* (*)(void*))rcl_serving_thread, t);
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	cpu_set_t cpus;
+
+	CPU_ZERO(&cpus);
+	CPU_SET(t->server->cpu, &cpus);
+	pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
+	pthread_create(&t->pthread, &attr, (void* (*)(void*))rcl_serving_thread, t);
 }
 
 _Noreturn void backup_thread(rcl_server_t* server)
@@ -185,18 +196,48 @@ void rcl_server_init(rcl_server_t* s, int cpu)
 {
 	s->num_serving_threads = 0;
 	s->num_free_threads = 0;
+	s->prepared_threads = malloc(sizeof(lockfree_stack_t));
+
 	lockfree_stack_init(s->prepared_threads);
 	s->threads = NULL;
 	s->timestamp = 0;
 	s->management_alive = false;
 	s->is_alive = false;
 	s->cpu = cpu;
-	pthread_create(&s->management_thread, NULL, (void* (*)(void*))rcl_management_thread, s);
+
+	// pthread_create(&s->management_thread, NULL, (void* (*)(void*))rcl_management_thread, s);
+	// Degraded Version
+
+	s->threads = malloc(sizeof(rcl_thread_node_t));
+	s->threads->next = NULL;
+
+	rcl_thread_t* thread = malloc(sizeof(rcl_thread_t));
+	thread->server = s;
+	s->threads->thread = thread;
+
+	rcl_start_serving_thread(thread);
+
+	s->num_free_threads++;
+	s->num_serving_threads++;
+}
+
+void rcl_lock_init(rcl_lock_t* l, rcl_server_t* s)
+{
+	l->server = s;
+	l->holder = 0;
 }
 
 thread_local int client_index;
 thread_local bool is_server_thread;
 thread_local rcl_server_t* my_server;
+
+void rcl_register_client(rcl_server_t* s)
+{
+	int index = atomic_fetch_add(&number_of_clients, 1);
+	client_index = index;
+	is_server_thread = false;
+	my_server = s;
+}
 
 void* rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
 {
@@ -247,4 +288,3 @@ void* rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
 		return context;
 	}
 }
-

@@ -54,9 +54,16 @@ struct rcl_server_t
 	int timestamp;
 	bool is_alive;
 	int cpu;
-	rcl_request_t* requests;
 	pthread_t management_thread;
 	int management_alive;
+	rcl_request_t requests[128];
 };
+void rcl_lock_init(rcl_lock_t* l, rcl_server_t* s);
+
+void rcl_server_init(rcl_server_t* s, int cpu);
+
+void rcl_register_client(rcl_server_t* s);
+
+void* rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context);
 
 #endif //LOCKS_RCL_H
