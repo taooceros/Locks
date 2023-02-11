@@ -49,7 +49,7 @@ static inline void wake_futex_blocking(int* uaddr)
 
 int number_of_clients = 0;
 
-void rcl_serving_thread(rcl_thread_t* t)
+_Noreturn void rcl_serving_thread(rcl_thread_t* t)
 {
 	rcl_server_t* s = t->server;
 
