@@ -1,5 +1,6 @@
 #include <ccsynch.h>
 #include <stdatomic.h>
+#include <threads.h>
 
 static void free_key(void* key)
 {
@@ -21,10 +22,10 @@ void cc_synch_init(cc_synch_t* cc)
 	pthread_key_create(&cc->ccthread_info_key, &free_key);
 }
 
-static inline node_t* retrieveNode(cc_synch_t* lock)
-{
-	node_t* node = pthread_getspecific(lock->ccthread_info_key);
+thread_local node_t* node = NULL;
 
+static inline node_t* retrieveNode()
+{
 	if(node == NULL)
 	{
 		node = malloc(sizeof(node_t));
@@ -43,7 +44,7 @@ void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
 
 	int counter = 0;
 
-	node_t* threadNode = retrieveNode(lock);
+	node_t* threadNode = retrieveNode();
 
 	nextNode = threadNode;
 
@@ -57,7 +58,7 @@ void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
 	currentNode->request.args = args;
 	currentNode->next = nextNode;
 
-	pthread_setspecific(lock->ccthread_info_key, currentNode);
+	node = currentNode;
 
 	while(currentNode->wait)
 		_mm_pause();

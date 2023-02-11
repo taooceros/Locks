@@ -1,5 +1,6 @@
 #include "flatcombining.h"
 #include <emmintrin.h>
+#include <threads.h>
 
 static void free_key(void* key)
 {
@@ -55,9 +56,9 @@ static inline void tryCleanUp(fc_lock_t* lock)
 	}
 }
 
-static fc_thread_node* retrieveNode(fc_lock_t* lock)
+static fc_thread_node* retrieveNode()
 {
-	static __thread fc_thread_node* node = NULL;
+	static thread_local fc_thread_node* node = NULL;
 
 	if(node == NULL)
 	{
@@ -87,7 +88,7 @@ static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
-	fc_thread_node* node = retrieveNode(lock);
+	fc_thread_node* node = retrieveNode();
 	node->delegate = func_ptr;
 	node->args = arg;
 	node->response = NULL;
