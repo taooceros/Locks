@@ -11,9 +11,9 @@
 #include <execinfo.h>
 #include <sched.h>
 
-#define ITERATION 50000
+#define ITERATION 5000
 #define THREAD_COUNT 32
-#define REPEAT_COUNT 64
+#define REPEAT_COUNT 512
 
 typedef enum
 {
@@ -33,8 +33,8 @@ u_int64_t volatile global_counter = 0;
 fc_lock_t fcLock;
 cc_synch_t ccSynch;
 
-rcl_lock_t rclLock;
-rcl_server_t rclServer;
+rcl_lock_t coutner_lock_rcl;
+rcl_server_t rcl_server;
 
 void* job(void* arg)
 {
@@ -55,7 +55,7 @@ void* worker(void* args)
 	int counter = 0;
 	if (task->type == RCL)
 	{
-		rcl_register_client(&rclServer);
+		rcl_register_client(&rcl_server);
 	}
 
 	while(counter++ < REPEAT_COUNT)
@@ -69,7 +69,7 @@ void* worker(void* args)
 			cc_synch_lock(&ccSynch, &job, args);
 			break;
 		case RCL:
-			rcl_lock(&rclLock, &job, args);
+			rcl_lock(&coutner_lock_rcl, &job, args);
 		}
 	}
 
@@ -126,9 +126,9 @@ void rcl_test()
 
 	printf("Number of processors: %d\n", numberOfProcessors);
 
-	rcl_server_init(&rclServer, numberOfProcessors - 1);
+	rcl_server_init(&rcl_server, numberOfProcessors - 1);
 
-	rcl_lock_init(&rclLock, &rclServer);
+	rcl_lock_init(&coutner_lock_rcl, &rcl_server);
 
 	task_t tasks[THREAD_COUNT];
 	pthread_t pthreads[THREAD_COUNT];

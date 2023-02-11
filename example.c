@@ -1,19 +1,25 @@
 #define _GNU_SOURCE
 
-#include <ccsynch.h>
 #include <common.h>
 #include <cpuid.h>
-#include <flatcombining.h>
 #include <pthread.h>
+
+#include <ccsynch.h>
+#include <flatcombining.h>
+#include <rcl.h>
+
 #include <rdtsc.h>
 #include <sched.h>
 #include <stdio.h>
 #include <unistd.h>
 
+#define THREAD_COUNT 128
+
 enum LOCK_TYPE
 {
 	FLAT_COMBINING,
-	CC_SYNCH
+	CC_SYNCH,
+	RCL
 };
 typedef unsigned long long ull;
 
@@ -21,6 +27,8 @@ volatile ull global_counter = 0;
 
 fc_lock_t counter_lock_fc;
 cc_synch_t counter_lock_cc;
+rcl_lock_t coutner_lock_rcl;
+rcl_server_t rcl_server;
 
 typedef struct
 {
@@ -66,29 +74,13 @@ void* worker(void* arg)
 {
 	task_t* task = arg;
 
-	if(task->ncpu != 0)
+	enum LOCK_TYPE lockType = task->lock_type;
+
+	if(lockType == RCL)
 	{
-		cpu_set_t cpuset;
-		CPU_ZERO(&cpuset);
-		int ret;
-		for(int i = 0; i < task->ncpu; i++)
-		{
-			if(i < 8 || i >= 24)
-				CPU_SET(i, &cpuset);
-			else if(i < 16)
-				CPU_SET(i + 8, &cpuset);
-			else
-				CPU_SET(i - 8, &cpuset);
-		}
-		ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-		if(ret != 0)
-		{
-			perror("pthread_set_affinity_np");
-			exit(-1);
-		}
+		rcl_register_client(&rcl_server);
 	}
 
-	enum LOCK_TYPE lockType = task->lock_type;
 	do
 	{
 		switch(lockType)
@@ -99,6 +91,9 @@ void* worker(void* arg)
 		case CC_SYNCH:
 			cc_synch_lock(&counter_lock_cc, &job, task);
 			break;
+		case RCL:
+			rcl_lock(&coutner_lock_rcl, &job, task);
+			break;
 		}
 	} while(!*task->stop);
 
@@ -107,15 +102,21 @@ void* worker(void* arg)
 
 void test_lock(enum LOCK_TYPE lockType, bool verbose)
 {
+	int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+
+	if(lockType == RCL)
+	{
+		rcl_server_init(&rcl_server, num_cpus - 1);
+		rcl_lock_init(&coutner_lock_rcl, &rcl_server);
+	}
+
 	global_counter = 0;
 
-	const int thread_count = 24;
-
-	pthread_t threads[thread_count];
-	task_t tasks[thread_count];
+	pthread_t threads[THREAD_COUNT];
+	task_t tasks[THREAD_COUNT];
 	int stop __attribute__((aligned(64))) = 0;
 
-	for(int i = 0; i < thread_count; i++)
+	for(int i = 0; i < THREAD_COUNT; i++)
 	{
 		tasks[i].stop = &stop;
 		tasks[i].cs = (i % 2 ? 300 : 100);
@@ -128,7 +129,7 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 //		tot_weight += weight;
 #endif
 
-		tasks[i].ncpu = 0;
+		tasks[i].ncpu = num_cpus;
 		tasks[i].id = i;
 		tasks[i].lock_type = lockType;
 		tasks[i].loop_in_cs = 0;
@@ -136,22 +137,35 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 		tasks[i].lock_hold = 0;
 	}
 
-	for(int i = 0; i < thread_count; ++i)
+	pthread_attr_t attr;
+	cpu_set_t cpu_set;
+
+	pthread_attr_init(&attr);
+
+	for(int i = 0; i < THREAD_COUNT; ++i)
 	{
-		pthread_create(&threads[i], NULL, &worker, &tasks[i]);
+		CPU_ZERO(&cpu_set);
+
+		if(lockType == RCL)
+			CPU_SET(i % (tasks[i].ncpu - 1), &cpu_set);
+		else
+			CPU_SET(i % tasks[i].ncpu, &cpu_set);
+
+		tasks[i].id = i;
+		pthread_create(&threads[i], &attr, &worker, &tasks[i]);
 	}
 
-	sleep(5);
+	sleep(2);
 	stop = 1;
 
-	for(int i = 0; i < thread_count; i++)
+	for(int i = 0; i < THREAD_COUNT; i++)
 	{
 		pthread_join(threads[i], NULL);
 	}
 
 	if(verbose)
 	{
-		for(int i = 0; i < thread_count; i++)
+		for(int i = 0; i < THREAD_COUNT; i++)
 		{
 			printf("id %02d "
 				   "loop %10llu "
@@ -189,13 +203,13 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 
 	ull loopResult = 0;
 
-	for(int i = 0; i < thread_count; ++i)
+	for(int i = 0; i < THREAD_COUNT; ++i)
 	{
 		loopResult += tasks[i].loop_in_cs;
 	}
 
 	printf("Loop Result %lld\n", loopResult);
-	printf("Global Result %lld\n", global_counter);
+	printf("Global Result %lld\n\n\n", global_counter);
 }
 
 int main()
@@ -203,6 +217,9 @@ int main()
 	fc_init(&counter_lock_fc);
 	cc_synch_init(&counter_lock_cc);
 
-	test_lock(FLAT_COMBINING, false);
-	test_lock(CC_SYNCH, false);
+	test_lock(FLAT_COMBINING, true);
+	test_lock(CC_SYNCH, true);
+
+	// rcl need to be tested at the end because it occupies a core as server
+	test_lock(RCL, true);
 }
