@@ -97,7 +97,7 @@ void fc_cc_test(){
 
 	printf("Type: %s\n", "Flat Combining");
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
-	printf("ACTUAL %lu\n", global_counter);
+	printf("ACTUAL %lu\n\n", global_counter);
 
 	global_counter = 0;
 
@@ -115,11 +115,13 @@ void fc_cc_test(){
 
 	printf("Type: %s\n", "CCSynch");
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
-	printf("ACTUAL %lu\n", global_counter);
+	printf("ACTUAL %lu\n\n", global_counter);
 }
 
 void rcl_test()
 {
+	global_counter = 0;
+
 	int numberOfProcessors = sysconf(_SC_NPROCESSORS_ONLN);
 
 	printf("Number of processors: %d\n", numberOfProcessors);
@@ -152,11 +154,11 @@ void rcl_test()
 
 	printf("Type: %s\n", "RCL");
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
-	printf("ACTUAL %lu\n", global_counter);
+	printf("ACTUAL %lu\n\n", global_counter);
 }
 
 void lock_test()
 {
-//	fc_cc_test();
+	fc_cc_test();
 	rcl_test();
 }

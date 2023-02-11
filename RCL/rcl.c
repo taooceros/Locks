@@ -275,7 +275,8 @@ void* rcl_lock(rcl_lock_t* l, func_ptr_t delegate, void* context)
 	else
 	{
 		int not_hold = 0;
-		while(!atomic_compare_exchange_weak(&l->holder, &not_hold, real_me))
+		while(!atomic_compare_exchange_weak_explicit(
+			&l->holder, &not_hold, real_me, memory_order_acquire, memory_order_relaxed))
 		{
 			sched_yield();
 		}
