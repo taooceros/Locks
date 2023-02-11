@@ -7,8 +7,9 @@
 #include <assert.h>
 #include <execinfo.h>
 
-#define ITERATION 500000
+#define ITERATION 50000
 #define THREAD_COUNT 32
+#define REPEAT_COUNT 64
 
 typedef enum
 {
@@ -41,14 +42,18 @@ void* job(void* arg)
 
 void* worker(void* args)
 {
-	switch(((task_t*)args)->type)
+	int counter = 0;
+	while(counter++ < REPEAT_COUNT)
 	{
-	case FLAT_COMBINING:
-		fc_lock(&fcLock, &job, args);
-		break;
-	case CC_SYNCH:
-		cc_synch_lock(&ccSynch, &job, args);
-		break;
+		switch(((task_t*)args)->type)
+		{
+		case FLAT_COMBINING:
+			fc_lock(&fcLock, &job, args);
+			break;
+		case CC_SYNCH:
+			cc_synch_lock(&ccSynch, &job, args);
+			break;
+		}
 	}
 
 	return NULL;
@@ -76,7 +81,7 @@ void lock_test()
 	}
 
 	printf("Type: %s\n", "Flat Combining");
-	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION);
+	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
 	printf("ACTUAL %lu\n", global_counter);
 
 	global_counter = 0;
@@ -94,6 +99,6 @@ void lock_test()
 	}
 
 	printf("Type: %s\n", "CCSynch");
-	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION);
+	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
 	printf("ACTUAL %lu\n", global_counter);
 }

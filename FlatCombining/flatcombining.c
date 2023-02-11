@@ -57,7 +57,7 @@ static inline void tryCleanUp(fc_lock_t* lock)
 
 static fc_thread_node* retrieveNode(fc_lock_t* lock)
 {
-	fc_thread_node* node = (fc_thread_node*)pthread_getspecific(lock->fcthread_info_key);
+	static __thread fc_thread_node* node = NULL;
 
 	if(node == NULL)
 	{
@@ -80,6 +80,8 @@ static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 			oldHead = lock->head;
 			node->next = oldHead;
 		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
+
+		node->active = true;
 	}
 }
 
