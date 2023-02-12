@@ -72,7 +72,8 @@ static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 				rcl_lock_t* l = r->lock;
 
 				int not_holding = 0;
-				if(!atomic_compare_exchange_weak(&l->holder, &not_holding, i + 1))
+
+				if(atomic_compare_exchange_strong(&l->holder, &not_holding, r->real_me + 1))
 				{
 					func_ptr_t delegate = r->delegate;
 					if(delegate != NULL)

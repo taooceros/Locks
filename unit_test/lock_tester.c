@@ -12,7 +12,7 @@
 #include <sched.h>
 
 #define ITERATION 5000
-#define THREAD_COUNT 32
+#define THREAD_COUNT 2
 #define REPEAT_COUNT 512
 
 typedef enum

@@ -155,7 +155,7 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 		pthread_create(&threads[i], &attr, &worker, &tasks[i]);
 	}
 
-	sleep(2);
+	sleep(8);
 	stop = 1;
 
 	for(int i = 0; i < THREAD_COUNT; i++)
