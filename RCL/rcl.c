@@ -73,16 +73,20 @@ static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 
 				int not_holding = 0;
 
-				if(atomic_compare_exchange_strong(&l->holder, &not_holding, r->real_me + 1))
+				if(atomic_compare_exchange_strong_explicit(&l->holder,
+														   &not_holding,
+														   r->real_me + 1,
+														   memory_order_relaxed,
+														   memory_order_release))
 				{
 					func_ptr_t delegate = r->delegate;
 					if(delegate != NULL)
 					{
-						atomic_thread_fence(memory_order_release);
+						atomic_thread_fence(memory_order_acquire);
 						r->context = delegate(r->context);
-						atomic_thread_fence(memory_order_acquire);
+						atomic_thread_fence(memory_order_release);
 						r->delegate = NULL;
-						atomic_thread_fence(memory_order_acquire);
+						atomic_thread_fence(memory_order_release);
 					}
 					l->holder = 0;
 				}
