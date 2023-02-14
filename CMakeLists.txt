@@ -2,9 +2,10 @@ cmake_minimum_required(VERSION 3.22)
 
 project(locks)
 
-set(CMAKE_C_FLAGS "-pthread -g -Wall")
+set(CMAKE_C_FLAGS "-pthread -g -Wall -O2")
 set(CMAKE_C_FLAGS_DEBUG "-pthread -g -Wall")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_definitions(CYCLE_PER_US=2700)
 

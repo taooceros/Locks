@@ -13,14 +13,17 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "example.h"
+
+#define GENERATE_ENUM_STRINGS
+#include "example.h"
+
+#undef GENERATE_ENUM_STRINGS
+
 #define THREAD_COUNT 128
 
-enum LOCK_TYPE
-{
-	FLAT_COMBINING,
-	CC_SYNCH,
-	RCL
-};
+#define DURATION_SCALE 10
+
 typedef unsigned long long ull;
 
 volatile ull global_counter = 0;
@@ -74,7 +77,7 @@ void* worker(void* arg)
 {
 	task_t* task = arg;
 
-	enum LOCK_TYPE lockType = task->lock_type;
+	LOCK_TYPE lockType = task->lock_type;
 
 	if(lockType == RCL)
 	{
@@ -100,12 +103,15 @@ void* worker(void* arg)
 	return NULL;
 }
 
-void test_lock(enum LOCK_TYPE lockType, bool verbose)
+void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
 {
 	int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
-	if(lockType == RCL)
+	static bool start_rcl_server = false;
+
+	if(lockType == RCL && !start_rcl_server)
 	{
+		start_rcl_server = true;
 		rcl_server_init(&rcl_server, num_cpus - 1);
 		rcl_lock_init(&coutner_lock_rcl, &rcl_server);
 	}
@@ -155,7 +161,7 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 		pthread_create(&threads[i], &attr, &worker, &tasks[i]);
 	}
 
-	sleep(8);
+	sleep(duration);
 	stop = 1;
 
 	for(int i = 0; i < THREAD_COUNT; i++)
@@ -167,37 +173,13 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 	{
 		for(int i = 0; i < THREAD_COUNT; i++)
 		{
-			printf("id %02d "
-				   "loop %10llu "
-				   "lock_acquires %8llu "
-				   "lock_hold(ms) %10.3f \n",
+			printf("%s,%d,%llu,%llu,%.3f,%d\n",
+				   GetStringLOCK_TYPE(lockType),
 				   tasks[i].id,
 				   tasks[i].loop_in_cs,
 				   tasks[i].lock_acquires,
-				   tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000));
-#if defined(FAIRLOCK) && defined(DEBUG)
-			flthread_info_t* info = pthread_getspecific(lock.flthread_info_key);
-			printf("  slice %llu\n"
-				   "  own_slice_wait %llu\n"
-				   "  prev_slice_wait %llu\n"
-				   "  runnable_wait %llu\n"
-				   "  next_runnable_wait %llu\n"
-				   "  succ_wait %llu\n"
-				   "  reenter %llu\n"
-				   "  banned(actual) %llu\n"
-				   "  banned %llu\n"
-				   "  elapse %llu\n",
-				   task_t->lock_acquires - info->stat.reenter,
-				   info->stat.own_slice_wait,
-				   info->stat.prev_slice_wait,
-				   info->stat.runnable_wait,
-				   info->stat.next_runnable_wait,
-				   info->stat.succ_wait,
-				   info->stat.reenter,
-				   info->stat.banned_time,
-				   info->banned_until - info->stat.start,
-				   info->start_ticks - info->stat.start);
-#endif
+				   tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000),
+				   duration);
 		}
 	}
 
@@ -207,19 +189,30 @@ void test_lock(enum LOCK_TYPE lockType, bool verbose)
 	{
 		loopResult += tasks[i].loop_in_cs;
 	}
-
-	printf("Loop Result %lld\n", loopResult);
-	printf("Global Result %lld\n\n\n", global_counter);
 }
 
 int main()
 {
+	FILE* fp = fopen("../output/result.txt", "wb");
+	dup2(fileno(fp), STDOUT_FILENO);
+
+	printf("lock type,id,loop,lock_acquires,lock_hold(ms),test duration\n");
+
 	fc_init(&counter_lock_fc);
 	cc_synch_init(&counter_lock_cc);
 
-	test_lock(FLAT_COMBINING, true);
-	test_lock(CC_SYNCH, true);
+	int counter = 0;
+	while(counter++ < 10)
+		test_lock(FLAT_COMBINING, true, counter * DURATION_SCALE);
+
+	counter = 0;
+	while(counter++ < 10)
+		test_lock(CC_SYNCH, true, counter * DURATION_SCALE);
 
 	// rcl need to be tested at the end because it occupies a core as server
-	test_lock(RCL, true);
+	counter = 0;
+	while(counter++ < 10)
+		test_lock(RCL, true, counter * DURATION_SCALE);
+
+	fclose(fp);
 }

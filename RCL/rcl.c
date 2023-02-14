@@ -77,7 +77,7 @@ static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 														   &not_holding,
 														   r->real_me + 1,
 														   memory_order_relaxed,
-														   memory_order_release))
+														   memory_order_relaxed))
 				{
 					func_ptr_t delegate = r->delegate;
 					if(delegate != NULL)
@@ -112,7 +112,10 @@ static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 	}
 }
 
-rcl_thread_t* allocate_serving_threads(rcl_server_t* s) { }
+rcl_thread_t* allocate_serving_threads(rcl_server_t* s)
+{
+	return NULL;
+}
 
 static void rcl_start_serving_thread(rcl_thread_t* t)
 {
