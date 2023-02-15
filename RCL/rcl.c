@@ -9,7 +9,6 @@
 #include <sched.h>
 #include <spawn.h>
 #include <stdio.h>
-#include <threads.h>
 #include <unistd.h>
 
 static inline long futex(int* uaddr, int futex_op, int val, const struct timespec* timeout)
@@ -235,9 +234,9 @@ void rcl_lock_init(rcl_lock_t* l, rcl_server_t* s)
 	l->holder = 0;
 }
 
-thread_local int client_index;
-thread_local bool is_server_thread;
-thread_local rcl_server_t* my_server;
+_Thread_local int client_index;
+_Thread_local bool is_server_thread;
+_Thread_local rcl_server_t* my_server;
 
 void rcl_register_client(rcl_server_t* s)
 {
