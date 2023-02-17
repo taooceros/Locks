@@ -4,6 +4,7 @@ if is_mode("debug") then
     add_defines("DEBUG")
 end
 
+add_cflags("-pthread")
 
 add_includedirs("FlatCombining/")
 add_includedirs("FlatCombiningFair/")
