@@ -6,6 +6,7 @@
 
 #include <ccsynch.h>
 #include <flatcombining.h>
+#include <flatcombiningfair.h>
 #include <rcl.h>
 
 #include <rdtsc.h>
@@ -17,7 +18,6 @@
 #include "locktypeenum.h"
 
 #define GENERATE_ENUM_STRINGS
-#include "flatcombiningfair.h"
 #include "locktypeenum.h"
 
 #undef GENERATE_ENUM_STRINGS
@@ -222,17 +222,16 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus)
 
 	fclose(output);
 
-
-
 	free(output_name);
 }
 
 void lock_test(LOCK_TYPE lockType, bool verbose)
 {
-	int ncpu = sysconf(_SC_NPROCESSORS_CONF);
+	int ncpu = sysconf(_SC_NPROCESSORS_CONF) << 1;
 
-	while(false) //((ncpu >>= 1))
+	while((ncpu >>= 1))
 	{
+		printf("testing %s for ncpu %d", GetStringLOCK_TYPE(lockType), ncpu);
 		inner_lock_test(lockType, verbose, ncpu);
 	}
 }
@@ -243,8 +242,8 @@ int main()
 	fcf_init(&counter_lock_fcf);
 	cc_synch_init(&counter_lock_cc);
 
-	//	lock_test(FLAT_COMBINING, true);
+	lock_test(FLAT_COMBINING, true);
 	lock_test(FLAT_COMBINING_FAIR, true);
-	//	lock_test(CC_SYNCH, true);
-	//	lock_test(RCL, true);
+	lock_test(CC_SYNCH, true);
+	lock_test(RCL, true);
 }
