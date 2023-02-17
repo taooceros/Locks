@@ -24,7 +24,7 @@
 
 #define THREAD_COUNT 40
 
-#define EXP_DURATION 1
+#define EXP_DURATION 60
 
 typedef unsigned long long ull;
 
@@ -208,7 +208,7 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus)
 					tasks[i].cpu,
 					tasks[i].loop_in_cs,
 					tasks[i].lock_acquires,
-					tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000),
+					tasks[i].lock_hold / (double)(CYCLE_PER_US * 1000),
 					EXP_DURATION);
 		}
 	}
@@ -227,11 +227,11 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus)
 
 void lock_test(LOCK_TYPE lockType, bool verbose)
 {
-	int ncpu = sysconf(_SC_NPROCESSORS_CONF) << 1;
+	int ncpu = sysconf(_SC_NPROCESSORS_CONF) * 2;
 
-	while((ncpu >>= 1))
+	while((ncpu >>= 1) > 1)
 	{
-		printf("testing %s for ncpu %d", GetStringLOCK_TYPE(lockType), ncpu);
+		printf("testing %s for ncpu %d\n", GetStringLOCK_TYPE(lockType), ncpu);
 		inner_lock_test(lockType, verbose, ncpu);
 	}
 }
