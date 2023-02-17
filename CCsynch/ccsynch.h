@@ -29,7 +29,7 @@ typedef struct cc_thread_node
 
 typedef struct cc_synch
 {
-	node_t* Tail;
+	_Atomic(node_t*) Tail;
 	pthread_key_t ccthread_info_key;
 } cc_synch_t;
 
