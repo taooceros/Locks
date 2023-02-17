@@ -11,24 +11,27 @@
 #include <rdtsc.h>
 #include <sched.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
-#include "example.h"
+#include "locktypeenum.h"
 
 #define GENERATE_ENUM_STRINGS
-#include "example.h"
+#include "flatcombiningfair.h"
+#include "locktypeenum.h"
 
 #undef GENERATE_ENUM_STRINGS
 
-#define THREAD_COUNT 128
+#define THREAD_COUNT 40
 
-#define DURATION_SCALE 10
+#define EXP_DURATION 1
 
 typedef unsigned long long ull;
 
 volatile ull global_counter = 0;
 
 fc_lock_t counter_lock_fc;
+fcf_lock_t counter_lock_fcf;
 cc_synch_t counter_lock_cc;
 rcl_lock_t coutner_lock_rcl;
 rcl_server_t rcl_server;
@@ -44,7 +47,7 @@ typedef struct
 #endif
 	int id;
 	double cs;
-	int ncpu;
+	int cpu;
 	// outputs
 	ull loop_in_cs;
 	ull lock_acquires;
@@ -91,6 +94,9 @@ void* worker(void* arg)
 		case FLAT_COMBINING:
 			fc_lock(&counter_lock_fc, &job, task);
 			break;
+		case FLAT_COMBINING_FAIR:
+			fcf_lock(&counter_lock_fcf, &job, task);
+			break;
 		case CC_SYNCH:
 			cc_synch_lock(&counter_lock_cc, &job, task);
 			break;
@@ -103,16 +109,38 @@ void* worker(void* arg)
 	return NULL;
 }
 
-void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
+char* get_output_name(LOCK_TYPE type, int ncpus)
 {
-	int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	char* name = malloc(strlen(GetStringLOCK_TYPE(type)) + 16);
+	strcpy(name, GetStringLOCK_TYPE(type));
 
+	char ncpus_buf[16];
+
+	sprintf(ncpus_buf, "_%d.csv", ncpus);
+	strcat(name, ncpus_buf);
+	return name;
+}
+
+FILE* setup_output(const char* name)
+{
+	FILE* output = fopen(name, "wb+");
+	fprintf(output,
+			"lock type,id,cpuid,loop,lock_acquires,lock_hold(ms),inner_test_lock duration\n");
+	return output;
+}
+
+void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus)
+{
 	static bool start_rcl_server = false;
+
+	char* output_name = get_output_name(lockType, ncpus);
+
+	FILE* output = setup_output(output_name);
 
 	if(lockType == RCL && !start_rcl_server)
 	{
 		start_rcl_server = true;
-		rcl_server_init(&rcl_server, num_cpus - 1);
+		rcl_server_init(&rcl_server, ncpus - 1);
 		rcl_lock_init(&coutner_lock_rcl, &rcl_server);
 	}
 
@@ -135,7 +163,6 @@ void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
 //		tot_weight += weight;
 #endif
 
-		tasks[i].ncpu = num_cpus;
 		tasks[i].id = i;
 		tasks[i].lock_type = lockType;
 		tasks[i].loop_in_cs = 0;
@@ -148,20 +175,21 @@ void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
 
 	pthread_attr_init(&attr);
 
+	// TODO: modify to accommodate NUMA
 	for(int i = 0; i < THREAD_COUNT; ++i)
 	{
 		CPU_ZERO(&cpu_set);
 
-		if(lockType == RCL)
-			CPU_SET(i % (tasks[i].ncpu - 1), &cpu_set);
-		else
-			CPU_SET(i % tasks[i].ncpu, &cpu_set);
+		int cpu_id = lockType == RCL ? (i % (ncpus - 1)) : i % ncpus;
+		CPU_SET(cpu_id, &cpu_set);
 
 		tasks[i].id = i;
+		tasks[i].cpu = cpu_id;
+
 		pthread_create(&threads[i], &attr, &worker, &tasks[i]);
 	}
 
-	sleep(duration);
+	sleep(EXP_DURATION);
 	stop = 1;
 
 	for(int i = 0; i < THREAD_COUNT; i++)
@@ -173,13 +201,15 @@ void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
 	{
 		for(int i = 0; i < THREAD_COUNT; i++)
 		{
-			printf("%s,%d,%llu,%llu,%.3f,%d\n",
-				   GetStringLOCK_TYPE(lockType),
-				   tasks[i].id,
-				   tasks[i].loop_in_cs,
-				   tasks[i].lock_acquires,
-				   tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000),
-				   duration);
+			fprintf(output,
+					"%s,%d,%d,%llu,%llu,%.3f,%d\n",
+					GetStringLOCK_TYPE(lockType),
+					tasks[i].id,
+					tasks[i].cpu,
+					tasks[i].loop_in_cs,
+					tasks[i].lock_acquires,
+					tasks[i].lock_hold / (float)(CYCLE_PER_US * 1000),
+					EXP_DURATION);
 		}
 	}
 
@@ -189,30 +219,32 @@ void test_lock(LOCK_TYPE lockType, bool verbose, int duration)
 	{
 		loopResult += tasks[i].loop_in_cs;
 	}
+
+	fclose(output);
+
+
+
+	free(output_name);
+}
+
+void lock_test(LOCK_TYPE lockType, bool verbose)
+{
+	int ncpu = sysconf(_SC_NPROCESSORS_CONF);
+
+	while(false) //((ncpu >>= 1))
+	{
+		inner_lock_test(lockType, verbose, ncpu);
+	}
 }
 
 int main()
 {
-	FILE* fp = fopen("../output/result.txt", "wb");
-	dup2(fileno(fp), STDOUT_FILENO);
-
-	printf("lock type,id,loop,lock_acquires,lock_hold(ms),test duration\n");
-
 	fc_init(&counter_lock_fc);
+	fcf_init(&counter_lock_fcf);
 	cc_synch_init(&counter_lock_cc);
 
-	int counter = 0;
-	while(counter++ < 10)
-		test_lock(FLAT_COMBINING, true, counter * DURATION_SCALE);
-
-	counter = 0;
-	while(counter++ < 10)
-		test_lock(CC_SYNCH, true, counter * DURATION_SCALE);
-
-	// rcl need to be tested at the end because it occupies a core as server
-	counter = 0;
-	while(counter++ < 10)
-		test_lock(RCL, true, counter * DURATION_SCALE);
-
-	fclose(fp);
+	//	lock_test(FLAT_COMBINING, true);
+	lock_test(FLAT_COMBINING_FAIR, true);
+	//	lock_test(CC_SYNCH, true);
+	//	lock_test(RCL, true);
 }

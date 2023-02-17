@@ -15,6 +15,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+typedef unsigned long long ull;
+
 typedef void* (*func_ptr_t)(void*);
 
 #endif //LOCKS_SHARED_H

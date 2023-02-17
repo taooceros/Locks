@@ -71,7 +71,7 @@ void lockfree_stack_test()
 		}
 	}
 
-	// test pop concurrently
+	// inner_test_lock pop concurrently
 
 	// insert data
 

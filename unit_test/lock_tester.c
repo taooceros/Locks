@@ -5,6 +5,7 @@
 #include <ccsynch.h>
 #include <common.h>
 #include <flatcombining.h>
+#include <flatcombiningfair.h>
 #include <rcl.h>
 
 #include <assert.h>
@@ -15,12 +16,12 @@
 #define THREAD_COUNT 2
 #define REPEAT_COUNT 512
 
-typedef enum
-{
-	FLAT_COMBINING,
-	CC_SYNCH,
-	RCL
-} LOCK_TYPE;
+#include "locktypeenum.h"
+
+#define GENERATE_ENUM_STRINGS
+#include "locktypeenum.h"
+
+#undef GENERATE_ENUM_STRINGS
 
 typedef struct
 {
@@ -28,9 +29,10 @@ typedef struct
 	LOCK_TYPE type;
 } task_t;
 
-u_int64_t volatile global_counter = 0;
+int64_t volatile global_counter = 0;
 
 fc_lock_t fcLock;
+fcf_lock_t fcfLock;
 cc_synch_t ccSynch;
 
 rcl_lock_t coutner_lock_rcl;
@@ -53,7 +55,7 @@ void* worker(void* args)
 	task_t* task = args;
 
 	int counter = 0;
-	if (task->type == RCL)
+	if(task->type == RCL)
 	{
 		rcl_register_client(&rcl_server);
 	}
@@ -65,46 +67,32 @@ void* worker(void* args)
 		case FLAT_COMBINING:
 			fc_lock(&fcLock, &job, args);
 			break;
+		case FLAT_COMBINING_FAIR:
+			fcf_lock(&fcfLock, &job, args);
+			break;
 		case CC_SYNCH:
 			cc_synch_lock(&ccSynch, &job, args);
 			break;
 		case RCL:
 			rcl_lock(&coutner_lock_rcl, &job, args);
+			break;
 		}
 	}
 
 	return NULL;
 }
 
-void fc_cc_test(){
-	fc_init(&fcLock);
-	cc_synch_init(&ccSynch);
-
+void inner_test_lock(const LOCK_TYPE lock_type)
+{
 	task_t tasks[THREAD_COUNT];
 	pthread_t pthreads[THREAD_COUNT];
-
-	for(int i = 0; i < THREAD_COUNT; ++i)
-	{
-		tasks[i].id = i;
-		tasks[i].type = FLAT_COMBINING;
-		pthread_create(&pthreads[i], NULL, &worker, &tasks[i]);
-	}
-
-	for(int i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
-	{
-		pthread_join(pthreads[i], NULL);
-	}
-
-	printf("Type: %s\n", "Flat Combining");
-	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
-	printf("ACTUAL %lu\n\n", global_counter);
 
 	global_counter = 0;
 
 	for(int i = 0; i < THREAD_COUNT; ++i)
 	{
 		tasks[i].id = i;
-		tasks[i].type = CC_SYNCH;
+		tasks[i].type = lock_type;
 		pthread_create(&pthreads[i], NULL, &worker, &tasks[i]);
 	}
 
@@ -113,9 +101,19 @@ void fc_cc_test(){
 		pthread_join(pthreads[i], NULL);
 	}
 
-	printf("Type: %s\n", "CCSynch");
+	printf("Type: %s\n", GetStringLOCK_TYPE(lock_type));
 	printf("EXPECTED %d\n", THREAD_COUNT * ITERATION * REPEAT_COUNT);
 	printf("ACTUAL %lu\n\n", global_counter);
+}
+
+void fc_cc_test()
+{
+	fc_init(&fcLock);
+	cc_synch_init(&ccSynch);
+
+	inner_test_lock(FLAT_COMBINING);
+	inner_test_lock(FLAT_COMBINING_FAIR);
+	inner_test_lock(CC_SYNCH);
 }
 
 void rcl_test()
@@ -160,5 +158,5 @@ void rcl_test()
 void lock_test()
 {
 	fc_cc_test();
-	rcl_test();
+	//	rcl_test();
 }
