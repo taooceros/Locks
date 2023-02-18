@@ -3,7 +3,7 @@ add_rules("mode.debug", "mode.release")
 add_cflags("-g", "-pthread", "-O2")
 add_links("pthread")
 
-set_toolset("cc", "/usr/bin/clang")
+set_toolset("cc", "/usr/bin/gcc-9")
 
 if is_mode("debug") then
     add_defines("DEBUG")
