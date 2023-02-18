@@ -109,6 +109,7 @@ void inner_test_lock(const LOCK_TYPE lock_type)
 void fc_cc_test()
 {
 	fc_init(&fcLock);
+	fcf_init(&fcfLock);
 	cc_synch_init(&ccSynch);
 
 	inner_test_lock(FLAT_COMBINING);

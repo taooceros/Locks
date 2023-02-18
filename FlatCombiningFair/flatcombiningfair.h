@@ -26,10 +26,13 @@ typedef struct fcf_thread_node
 typedef struct
 {
 	int pass;
-	atomic_bool flag;
-	_Atomic(fcf_thread_node*) head;
-	pthread_key_t fcthread_info_key;
+	bool flag;
+	fcf_thread_node* head;
+	pthread_key_t fcfthread_info_key;
 	atomic_int num_waiting_threads;
+	// statistics
+	long long num_exec;
+	long long avg_cs;
 } fcf_lock_t;
 
 void fcf_init(fcf_lock_t* lock);

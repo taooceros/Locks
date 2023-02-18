@@ -6,7 +6,7 @@
 #define LOCKS_CCSYNCH_H
 
 #include "shared.h"
-#include <emmintrin.h>
+#include <immintrin.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
