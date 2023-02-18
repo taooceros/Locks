@@ -1,6 +1,7 @@
 #ifndef LOCK_FLAT_COMBINING_FAIR_H
 #define LOCK_FLAT_COMBINING_FAIR_H
 
+#include <common.h>
 #include <pthread.h>
 #include <sched.h>
 #include <shared.h>
@@ -26,10 +27,10 @@ typedef struct fcf_thread_node
 typedef struct
 {
 	int pass;
-	int flag;
-	fcf_thread_node* head;
+	atomic_flag flag;
+	_Atomic(fcf_thread_node*) head;
 	pthread_key_t fcthread_info_key;
-	atomic_int num_threads;
+	atomic_int num_waiting_threads;
 } fcf_lock_t;
 
 void fcf_init(fcf_lock_t* lock);

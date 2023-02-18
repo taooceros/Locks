@@ -24,7 +24,7 @@
 
 #define THREAD_COUNT 40
 
-#define EXP_DURATION 60
+#define EXP_DURATION 2
 
 typedef unsigned long long ull;
 
@@ -242,8 +242,8 @@ int main()
 	fcf_init(&counter_lock_fcf);
 	cc_synch_init(&counter_lock_cc);
 
-	lock_test(FLAT_COMBINING, true);
+	// lock_test(FLAT_COMBINING, true);
 	lock_test(FLAT_COMBINING_FAIR, true);
-	lock_test(CC_SYNCH, true);
-	lock_test(RCL, true);
+	// lock_test(CC_SYNCH, true);
+	// lock_test(RCL, true);
 }

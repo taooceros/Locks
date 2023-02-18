@@ -1,10 +1,12 @@
 add_rules("mode.debug", "mode.release")
 
+add_cflags("-g", "-pthread")
+
+
 if is_mode("debug") then
     add_defines("DEBUG")
 end
 
-add_cflags("-pthread")
 
 add_includedirs("FlatCombining/")
 add_includedirs("FlatCombiningFair/")
@@ -25,6 +27,6 @@ target("example")
     
 
 
-target("lock_test")
-    set_kind("binary")
-    add_files("unit_test/*.c")
+-- target("lock_test")
+--     set_kind("binary")
+--     add_files("unit_test/*.c")

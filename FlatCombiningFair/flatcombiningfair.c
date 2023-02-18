@@ -1,12 +1,13 @@
 #include "flatcombiningfair.h"
 #include <emmintrin.h>
 #include <rdtsc.h>
+#include <stdio.h>
 
 void fcf_init(fcf_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
-	lock->num_threads = 0;
+	lock->num_waiting_threads = 0;
 	pthread_key_create(&lock->fcthread_info_key, NULL);
 }
 
@@ -23,13 +24,18 @@ static void scanCombineApply(fcf_lock_t* lock)
 			ull begin = rdtscp();
 			if(current->banned_until > begin)
 			{
+				printf("should wait %lld\n", (current->banned_until - begin) / CYCLE_PER_MS);
+
 				goto scan_continue;
 			}
+
 			current->age = lock->pass;
 			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 			ull end = rdtscp();
-			current->banned_until = (end - begin) * lock->num_threads;
+			// TODO: why this doesn't work??????????????????????????/
+			// lock->num_waiting_threads--;
+			current->banned_until = begin + (end - begin) * lock->num_waiting_threads / 2;
 		}
 
 	scan_continue:
@@ -53,7 +59,6 @@ static inline void tryCleanUp(fcf_lock_t* lock)
 			{
 				current->active = false;
 				previous->next = current->next;
-				lock->num_threads--;
 			}
 		}
 
@@ -91,7 +96,6 @@ static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
 
 		node->active = true;
-		lock->num_threads++;
 	}
 }
 
@@ -105,37 +109,34 @@ void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	ensureNodeActive(lock, node);
 	// lock has been taken
 	int counter = 0;
+	lock->num_waiting_threads++;
 
-acquire_lock_or_spin:
-	if(lock->flag)
+	while(atomic_flag_test_and_set(&lock->flag))
 	{
-	spin_and_wait_or_retry:
 		while(node->delegate != NULL)
 		{
 			if(++counter > 100)
 			{
 				counter = 0;
 				sched_yield();
-				goto acquire_lock_or_spin;
+				break;
 			}
 			_mm_pause();
 		}
+
+		if(node->delegate == NULL)
+			break;
 	}
-	// try to become the combinator
-	else
-	{
-		if(atomic_flag_test_and_set(&lock->flag))
-		{
-			goto spin_and_wait_or_retry;
-		}
-		else
-		{
-			// act as the combinator
-			scanCombineApply(lock);
-			tryCleanUp(lock);
-			atomic_flag_clear(&lock->flag);
-		}
+
+	if(node->delegate != NULL)
+	{ // act as the combinator
+		scanCombineApply(lock);
+		tryCleanUp(lock);
+		atomic_flag_clear(&lock->flag);
 	}
+
+	// TODO: why????
+	lock->num_waiting_threads--;
 
 	return node->response;
 }

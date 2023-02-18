@@ -70,7 +70,7 @@ void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
 
 	tmpNode = currentNode;
 
-	const int h = 16;
+	const int h = 64;
 
 	while(tmpNode->next != NULL && counter < h)
 	{
