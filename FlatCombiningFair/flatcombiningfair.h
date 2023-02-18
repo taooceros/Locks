@@ -26,7 +26,7 @@ typedef struct fcf_thread_node
 typedef struct
 {
 	int pass;
-	atomic_flag flag;
+	atomic_bool flag;
 	_Atomic(fcf_thread_node*) head;
 	pthread_key_t fcthread_info_key;
 	atomic_int num_waiting_threads;

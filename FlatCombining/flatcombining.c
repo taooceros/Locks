@@ -110,7 +110,7 @@ acquire_lock_or_spin:
 	// try to become the combinator
 	else
 	{
-		if(atomic_flag_test_and_set(&lock->flag))
+		if(atomic_exchange(&lock->flag, 1))
 		{
 			goto spin_and_wait_or_retry;
 		}
@@ -119,7 +119,7 @@ acquire_lock_or_spin:
 			// act as the combinator
 			scanCombineApply(lock);
 			tryCleanUp(lock);
-			atomic_flag_clear(&lock->flag);
+			atomic_store(&lock->flag, false);
 		}
 	}
 

@@ -1,5 +1,5 @@
 #include "flatcombiningfair.h"
-#include <emmintrin.h>
+#include <immintrin.h>
 #include <rdtsc.h>
 #include <stdio.h>
 
@@ -17,12 +17,12 @@ static void scanCombineApply(fcf_lock_t* lock)
 
 	fcf_thread_node* current = lock->head;
 
-	while(current != NULL)
+	while (current != NULL)
 	{
-		if(current->delegate != NULL)
+		if (current->delegate != NULL)
 		{
 			ull begin = rdtscp();
-			if(current->banned_until > begin)
+			if (current->banned_until > begin)
 			{
 				// printf("should wait %lld\n", (current->banned_until - begin) / CYCLE_PER_MS);
 
@@ -35,30 +35,38 @@ static void scanCombineApply(fcf_lock_t* lock)
 			ull end = rdtscp();
 			// TODO: why this doesn't work??????????????????????????/
 			// lock->num_waiting_threads--;
-			current->banned_until = begin + (end - begin) * lock->num_waiting_threads;
+			current->banned_until = begin + (end - begin) * (lock->num_waiting_threads - 1);
 		}
 
 	scan_continue:
 		current = current->next;
 	}
+
+	static int counter = 0;
+
+	// printf("finish scan once %d\n", counter++);
 }
 
 static inline void tryCleanUp(fcf_lock_t* lock)
 {
-	if(lock->pass % 50)
+	if (lock->pass % 50)
 		return;
 
 	fcf_thread_node* previous = NULL;
 	fcf_thread_node* current = lock->head;
 
-	while(current != NULL)
+	while (current != NULL)
 	{
-		if(previous != NULL)
+		if (previous != NULL)
 		{
-			if(lock->pass - current->age > 50)
+			if (lock->pass - current->age > 50)
 			{
 				current->active = false;
 				previous->next = current->next;
+				current = current->next;
+				// printf("remove node \n");
+				if (current == NULL)
+					return;
 			}
 		}
 
@@ -71,7 +79,7 @@ static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
 {
 	fcf_thread_node* node = (fcf_thread_node*)pthread_getspecific(lock->fcthread_info_key);
 
-	if(node == NULL)
+	if (node == NULL)
 	{
 		node = (fcf_thread_node*)malloc(sizeof(fcf_thread_node));
 		node->active = false;
@@ -86,14 +94,14 @@ static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
 
 static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 {
-	if(!node->active)
+	if (!node->active)
 	{
 		fcf_thread_node* oldHead;
 		do
 		{
 			oldHead = lock->head;
 			node->next = oldHead;
-		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
+		} while (!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
 
 		node->active = true;
 	}
@@ -111,28 +119,35 @@ void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	int counter = 0;
 	lock->num_waiting_threads++;
 
-	while(atomic_flag_test_and_set(&lock->flag))
+acquire_lock_or_spin:
+	if (lock->flag)
 	{
-		while(node->delegate != NULL)
+	spin_and_wait_or_retry:
+		while (node->delegate != NULL)
 		{
-			if(++counter > 100)
+			if (++counter > 100)
 			{
 				counter = 0;
 				sched_yield();
-				break;
+				goto acquire_lock_or_spin;
 			}
 			_mm_pause();
 		}
-
-		if(node->delegate == NULL)
-			break;
 	}
-
-	if(node->delegate != NULL)
-	{ // act as the combinator
-		scanCombineApply(lock);
-		tryCleanUp(lock);
-		atomic_flag_clear(&lock->flag);
+	// try to become the combinator
+	else
+	{
+		if (atomic_exchange(&lock->flag, true))
+		{
+			goto spin_and_wait_or_retry;
+		}
+		else
+		{
+			// act as the combinator
+			scanCombineApply(lock);
+			tryCleanUp(lock);
+			lock->flag = 0;
+		}
 	}
 
 	// TODO: why????
