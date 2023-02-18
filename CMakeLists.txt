@@ -9,7 +9,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_definitions(CYCLE_PER_US=2700)
 
-include_directories(proportional-share/u-scl)
 include_directories(CCsynch FlatCombining FlatCombiningFair)
 include_directories(shared)
 include_directories(RCL)

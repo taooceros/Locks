@@ -1,7 +1,6 @@
 #ifndef LOCK_FLAT_COMBINING_FAIR_H
 #define LOCK_FLAT_COMBINING_FAIR_H
 
-#include <common.h>
 #include <pthread.h>
 #include <sched.h>
 #include <shared.h>

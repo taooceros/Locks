@@ -1,7 +1,7 @@
 add_rules("mode.debug", "mode.release")
 
 add_cflags("-g", "-pthread")
-
+add_links("pthread")
 
 if is_mode("debug") then
     add_defines("DEBUG")
@@ -24,9 +24,9 @@ add_files("RCL/*.c")
 target("example")
     set_kind("binary")
     add_files("example.c")
-    
+    set_targetdir("bin")
 
-
--- target("lock_test")
---     set_kind("binary")
---     add_files("unit_test/*.c")
+target("lock_test")
+    set_kind("binary")
+    add_files("unit_test/*.c")
+    set_targetdir("tests")

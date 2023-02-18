@@ -24,7 +24,7 @@ static void scanCombineApply(fcf_lock_t* lock)
 			ull begin = rdtscp();
 			if(current->banned_until > begin)
 			{
-				printf("should wait %lld\n", (current->banned_until - begin) / CYCLE_PER_MS);
+				// printf("should wait %lld\n", (current->banned_until - begin) / CYCLE_PER_MS);
 
 				goto scan_continue;
 			}
@@ -35,7 +35,7 @@ static void scanCombineApply(fcf_lock_t* lock)
 			ull end = rdtscp();
 			// TODO: why this doesn't work??????????????????????????/
 			// lock->num_waiting_threads--;
-			current->banned_until = begin + (end - begin) * lock->num_waiting_threads / 2;
+			current->banned_until = begin + (end - begin) * lock->num_waiting_threads;
 		}
 
 	scan_continue:
