@@ -23,8 +23,11 @@
 #undef GENERATE_ENUM_STRINGS
 
 // #define THREAD_COUNT 40
-
+#if DEBUUG
 #define EXP_DURATION 5
+#else
+#define EXP_DURATION 120
+#endif
 
 typedef unsigned long long ull;
 
@@ -258,8 +261,8 @@ void lock_test(LOCK_TYPE lockType, bool verbose)
 
 int main()
 {
-	// lock_test(FLAT_COMBINING, true);
+	lock_test(FLAT_COMBINING, true);
 	lock_test(FLAT_COMBINING_FAIR, true);
-	// lock_test(CC_SYNCH, true);
-	// lock_test(RCL, true);
+	lock_test(CC_SYNCH, true);
+	lock_test(RCL, true);
 }
