@@ -24,9 +24,9 @@
 
 // #define THREAD_COUNT 40
 #if DEBUUG
-#define EXP_DURATION 5
+#	define EXP_DURATION 5
 #else
-#define EXP_DURATION 120
+#	define EXP_DURATION 120
 #endif
 
 typedef unsigned long long ull;
@@ -250,7 +250,7 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 void lock_test(LOCK_TYPE lockType, bool verbose)
 {
-	int ncpu = 40; //sysconf(_SC_NPROCESSORS_CONF) * 2;
+	int ncpu = sysconf(_SC_NPROCESSORS_CONF) * 2;
 
 	while((ncpu >>= 1) > 1)
 	{
