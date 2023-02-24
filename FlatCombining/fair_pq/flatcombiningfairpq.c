@@ -1,54 +1,75 @@
-#include <stdatomic.h>
-#include <stdbool.h>
-#define SPIN_LIMIT 50
-
-#include "flatcombiningfairpq.h"
 #include <common.h>
 #include <immintrin.h>
 #include <rdtsc.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 
-void fcfpq_init(fcf_lock_t* lock)
+#include "flatcombiningfairpq.h"
+#include <priority_queue.h>
+
+#define var __auto_type
+
+void fcfpqpq_init(fcfpq_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
 	lock->num_waiting_threads = 0;
 	lock->avg_cs = 0;
 	lock->num_exec = 0;
-	pthread_key_create(&lock->fcfthread_info_key, NULL);
+	pq_init(lock->thread_pq);
+	pthread_key_create(&lock->fcfpqthread_info_key, NULL);
 }
 
-static void scanCombineApply(fcf_lock_t* lock)
+static void registerNewNodes(fcfpq_lock_t* lock)
+{
+	var head = lock->head;
+	var current = head;
+
+	while(current != NULL)
+	{
+		if(current->active == false)
+		{
+			current->active = true;
+			pq_push(lock->thread_pq, current->usage, current);
+		}
+
+		current = current->next;
+	}
+	head->next = NULL;
+}
+
+static void scanCombineApply(fcfpq_lock_t* lock)
 {
 	lock->pass++;
 
-	fcf_thread_node* current = lock->head;
+	fcfpq_thread_node* current;
+	int usage;
 
-	while(current != NULL)
+	if(pq_pop(lock->thread_pq, &usage, (void**)&current))
+	{
+		return;
+	}
+
+	ull begin = rdtscp();
+	ull now;
+
+	while(((now = rdtscp()) - begin) > FC_THREAD_MAX_NS &&
+		  pq_pop(lock->thread_pq, &usage, (void**)&current))
 	{
 		if(current->delegate != NULL)
 		{
 			ull begin = rdtscp();
 			current->age = lock->pass;
-			if(current->banned_until > begin)
-			{
-				// printf("%ld should wait %lld\n",
-				// 	   current->pthread,
-				// 	   (current->banned_until - begin) / CYCLE_PER_MS);
-				goto scan_continue;
-			}
 
 			lock->num_exec++;
 			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 			ull end = rdtscp();
-			// TODO: why this doesn't work??????????????????????????/
-			// lock->num_waiting_threads--;
 
-			long long cs = end - begin;
-			lock->avg_cs = lock->avg_cs + (cs - lock->avg_cs) / lock->num_exec;
-			// printf("average cs %lld\n", lock->avg_cs);
-			current->banned_until = end + (cs) * (lock->num_waiting_threads) - lock->avg_cs;
+			usage -= end - begin;
+			current->usage = usage;
+			current->active = false;
 		}
 
 	scan_continue:
@@ -60,13 +81,15 @@ static void scanCombineApply(fcf_lock_t* lock)
 	// printf("finish scan once %d\n", counter++);
 }
 
-static inline void tryCleanUp(fcf_lock_t* lock)
+static inline void tryCleanUp(fcfpq_lock_t* lock)
 {
+	return;
+
 	if(lock->pass % 50)
 		return;
 
-	fcf_thread_node* previous = NULL;
-	fcf_thread_node* current = lock->head;
+	fcfpq_thread_node* previous = NULL;
+	fcfpq_thread_node* current = lock->head;
 
 	while(current != NULL)
 	{
@@ -88,28 +111,28 @@ static inline void tryCleanUp(fcf_lock_t* lock)
 	}
 }
 
-static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
+static fcfpq_thread_node* retrieveNode(fcfpq_lock_t* lock)
 {
-	fcf_thread_node* node = (fcf_thread_node*)pthread_getspecific(lock->fcfthread_info_key);
+	fcfpq_thread_node* node = (fcfpq_thread_node*)pthread_getspecific(lock->fcfpqthread_info_key);
 
 	if(node == NULL)
 	{
-		node = (fcf_thread_node*)malloc(sizeof(fcf_thread_node));
+		node = (fcfpq_thread_node*)malloc(sizeof(fcfpq_thread_node));
 		node->active = false;
 		node->age = 0;
 		node->pthread = pthread_self();
-		node->banned_until = 0;
-		pthread_setspecific(lock->fcfthread_info_key, node);
+		node->usage = 0;
+		pthread_setspecific(lock->fcfpqthread_info_key, node);
 	}
 
 	return node;
 }
 
-static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
+static void ensureNodeActive(fcfpq_lock_t* lock, fcfpq_thread_node* node)
 {
 	if(!node->active)
 	{
-		fcf_thread_node* oldHead;
+		fcfpq_thread_node* oldHead;
 		do
 		{
 			oldHead = lock->head;
@@ -120,9 +143,9 @@ static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 	}
 }
 
-void* fcfpq_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
+void* fcfpqpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
-	fcf_thread_node* node = retrieveNode(lock);
+	fcfpq_thread_node* node = retrieveNode(lock);
 	node->delegate = func_ptr;
 	node->args = arg;
 	node->response = NULL;

@@ -7,6 +7,7 @@
 #ifndef SPIN_LIMIT
 #	define SPIN_LIMIT 20
 #endif
+
 #define SLEEP_GRANULARITY 8
 
 #ifndef CYCLE_PER_US
