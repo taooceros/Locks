@@ -13,16 +13,16 @@ else
 end
 
 
-add_includedirs("FlatCombining/")
-add_includedirs("FlatCombiningFair/")
+add_includedirs("FlatCombining/original")
+add_includedirs("FlatCombining/fair_ban")
+add_includedirs("FlatCombining/fair_pq")
 add_includedirs("CCsynch/")
 add_includedirs("RCL/")
 add_includedirs("shared")
 add_defines("CYCLE_PER_US=2400")
 
 add_files("shared/*.c")
-add_files("FlatCombining/*.c")
-add_files("FlatCombiningFair/*.c")
+add_files("FlatCombining/**/*.c")
 add_files("CCsynch/*.c")
 add_files("RCL/*.c")
 

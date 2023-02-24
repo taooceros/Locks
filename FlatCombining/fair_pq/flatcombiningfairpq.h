@@ -1,5 +1,5 @@
-#ifndef LOCK_FLAT_COMBINING_FAIR_H
-#define LOCK_FLAT_COMBINING_FAIR_H
+#ifndef LOCK_FLAT_COMBINING_FAIR_PQ_H
+#define LOCK_FLAT_COMBINING_FAIR_PQ_H
 
 #include <pthread.h>
 #include <sched.h>
@@ -35,8 +35,8 @@ typedef struct
 	long long avg_cs;
 } fcf_lock_t;
 
-void fcf_init(fcf_lock_t* lock);
+void fcfpq_init(fcf_lock_t* lock);
 
-void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg);
+void* fcfpq_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg);
 
 #endif /* LOCK_FLAT_COMBINING_FAIR_H */

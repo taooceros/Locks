@@ -84,8 +84,9 @@ static void ensureNodeActive(fc_lock_t* lock, fc_thread_node* node)
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	fc_thread_node* node = retrieveNode(lock);
-	node->delegate = func_ptr;
 	node->args = arg;
+	node->delegate = func_ptr;
+	
 	node->response = NULL;
 
 	ensureNodeActive(lock, node);
