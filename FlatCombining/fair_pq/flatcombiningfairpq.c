@@ -10,14 +10,14 @@
 
 #define var __auto_type
 
-void fcfpqpq_init(fcfpq_lock_t* lock)
+void fcfpq_init(fcfpq_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
 	lock->num_waiting_threads = 0;
 	lock->avg_cs = 0;
 	lock->num_exec = 0;
-	pq_init(lock->thread_pq);
+	pq_init(&lock->thread_pq);
 	pthread_key_create(&lock->fcfpqthread_info_key, NULL);
 }
 
@@ -31,7 +31,7 @@ static void registerNewNodes(fcfpq_lock_t* lock)
 		if(current->active == false)
 		{
 			current->active = true;
-			pq_push(lock->thread_pq, current->usage, current);
+			pq_push(&lock->thread_pq, current->usage, current);
 		}
 
 		current = current->next;
@@ -46,7 +46,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	fcfpq_thread_node* current;
 	int usage;
 
-	if(pq_pop(lock->thread_pq, &usage, (void**)&current))
+	if(pq_pop(&lock->thread_pq, &usage, (void**)&current))
 	{
 		return;
 	}
@@ -55,7 +55,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	ull now;
 
 	while(((now = rdtscp()) - begin) > FC_THREAD_MAX_NS &&
-		  pq_pop(lock->thread_pq, &usage, (void**)&current))
+		  pq_pop(&lock->thread_pq, &usage, (void**)&current))
 	{
 		if(current->delegate != NULL)
 		{
@@ -143,7 +143,7 @@ static void ensureNodeActive(fcfpq_lock_t* lock, fcfpq_thread_node* node)
 	}
 }
 
-void* fcfpqpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
+void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	fcfpq_thread_node* node = retrieveNode(lock);
 	node->delegate = func_ptr;

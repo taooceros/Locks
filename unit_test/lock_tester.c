@@ -1,4 +1,6 @@
-#define _GNU_SOURCE
+#include "flatcombiningfairpq.h"
+#include <sched.h>
+
 
 #include "lock_tester.h"
 
@@ -10,7 +12,6 @@
 
 #include <assert.h>
 #include <execinfo.h>
-#include <sched.h>
 
 #define ITERATION 5000
 #define THREAD_COUNT 2
@@ -33,6 +34,7 @@ int64_t volatile global_counter = 0;
 
 fc_lock_t fcLock;
 fcf_lock_t fcfLock;
+fcfpq_lock_t fcfpqLock;
 cc_synch_t ccSynch;
 
 rcl_lock_t coutner_lock_rcl;
@@ -68,6 +70,9 @@ void* worker(void* args)
 			fc_lock(&fcLock, &job, args);
 			break;
 		case FLAT_COMBINING_FAIR:
+			fcf_lock(&fcfLock, &job, args);
+			break;
+		case FLAT_COMBINING_FAIR_PQ:
 			fcf_lock(&fcfLock, &job, args);
 			break;
 		case CC_SYNCH:
@@ -110,10 +115,12 @@ void fc_cc_test()
 {
 	fc_init(&fcLock);
 	fcf_init(&fcfLock);
+	fcfpq_init(&fcfpqLock);
 	cc_synch_init(&ccSynch);
 
 	inner_test_lock(FLAT_COMBINING);
 	inner_test_lock(FLAT_COMBINING_FAIR);
+	inner_test_lock(FLAT_COMBINING_FAIR_PQ);
 	inner_test_lock(CC_SYNCH);
 }
 

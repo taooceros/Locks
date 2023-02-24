@@ -2,7 +2,7 @@ add_rules("mode.debug", "mode.release")
 
 add_links("pthread")
 
-set_toolset("cc", "/usr/bin/gcc-12")
+set_toolset("cc", "/usr/bin/gcc")
 
 
 if is_mode("debug") then
@@ -20,7 +20,8 @@ add_includedirs("CCsynch/")
 add_includedirs("RCL/")
 add_includedirs("shared")
 add_defines("CYCLE_PER_US=2400",
-            "FC_THREAD_MAX_NS=CYCLE_PER_US*1000")
+            "FC_THREAD_MAX_NS=CYCLE_PER_US*1000",
+            "_GNU_SOURCE")
 
 add_files("shared/*.c")
 add_files("FlatCombining/**/*.c")

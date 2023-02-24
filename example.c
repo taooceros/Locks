@@ -1,5 +1,3 @@
-#define _GNU_SOURCE
-
 #include <common.h>
 #include <cpuid.h>
 #include <pthread.h>
@@ -201,10 +199,10 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 	// TODO: modify to accommodate NUMA
 	for(int i = 0; i < nthreads; ++i)
 	{
-		// CPU_ZERO(&cpu_set);
+		CPU_ZERO(&cpu_set);
 
 		int cpu_id = lockType == RCL ? (i % (ncpus - 1)) : i % ncpus;
-		// CPU_SET(cpu_id, &cpu_set);
+		CPU_SET(cpu_id, &cpu_set);
 
 		tasks[i].id = i;
 		tasks[i].cpu = cpu_id;

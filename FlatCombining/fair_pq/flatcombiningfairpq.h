@@ -38,11 +38,11 @@ typedef struct
 	// statistics
 	long long num_exec;
 	long long avg_cs;
-	pq_t* thread_pq;
+	pq_t thread_pq;
 } fcfpq_lock_t;
 
-void fcfpqpq_init(fcfpq_lock_t* lock);
+void fcfpq_init(fcfpq_lock_t* lock);
 
-void* fcfpqpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg);
+void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg);
 
 #endif /* LOCK_FLAT_COMBINING_FAIR_H */
