@@ -65,22 +65,23 @@ static inline void tryCleanUp(fcf_lock_t* lock)
 	if(lock->pass % 50)
 		return;
 
-	fcf_thread_node* previous = NULL;
-	fcf_thread_node* current = lock->head;
+	// this should not happen
+	if(lock->head == NULL)
+		return;
+
+	fcf_thread_node* previous = lock->head;
+	fcf_thread_node* current = previous->next;
 
 	while(current != NULL)
 	{
-		if(previous != NULL)
+		if(lock->pass - current->age> 50)
 		{
-			if(lock->pass - current->age > 50)
-			{
-				current->active = false;
-				previous->next = current->next;
-				current = current->next;
-				// printf("remove node \n");
-				if(current == NULL)
-					return;
-			}
+			current->active = false;
+			previous->next = current->next;
+			current = current->next;
+			// printf("remove node \n");
+			if(current == NULL)
+				return;
 		}
 
 		previous = current;
@@ -124,8 +125,8 @@ void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	fcf_thread_node* node = retrieveNode(lock);
 	node->args = arg;
-	node->delegate = func_ptr;
 	node->response = NULL;
+	node->delegate = func_ptr;
 
 	ensureNodeActive(lock, node);
 	// lock has been taken

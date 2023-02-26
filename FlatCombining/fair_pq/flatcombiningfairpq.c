@@ -51,7 +51,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	ull begin = rdtscp();
 	ull now;
 
-	while(((now = rdtscp()) - begin) < FC_THREAD_MAX_NS &&
+	while(((now = rdtscp()) - begin) < FC_THREAD_MAX_CYCLE &&
 		  !pq_pop(&lock->thread_pq, &usage, (void**)&current))
 	{
 		current->queued = false;
@@ -120,6 +120,10 @@ static fcfpq_thread_node* retrieveNode(fcfpq_lock_t* lock)
 		node->age = 0;
 		node->pthread = pthread_self();
 		node->usage = 0;
+		node->delegate = NULL;
+		node->args = NULL;
+		node->response = NULL;
+		node->queued = false;
 		pthread_setspecific(lock->fcfpqthread_info_key, node);
 	}
 
