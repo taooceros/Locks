@@ -2,7 +2,6 @@
 // Created by 1 on 2/6/2023.
 //
 
-#define _GNU_SOURCE
 
 #include "rcl.h"
 #include <pthread.h>
