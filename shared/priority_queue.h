@@ -20,7 +20,7 @@ typedef struct __pq
 int pq_init(pq_t* pq);
 int pq_push(pq_t* pq, int priority, void* data);
 int pq_pop(pq_t* pq, int* priority, void** data);
-void* pq_peek(pq_t* pq);
+int pq_peek(pq_t* pq, int* priority, void** data);
 int pq_change_priority(pq_t* pq, int index, int new_priority);
 
 #endif

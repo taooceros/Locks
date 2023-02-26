@@ -42,6 +42,10 @@ static inline void tryCleanUp(fc_lock_t* lock)
 			{
 				current->active = false;
 				previous->next = current->next;
+				current = current->next;
+				// printf("remove node \n");
+				if(current == NULL)
+					return;
 			}
 		}
 
@@ -85,9 +89,9 @@ void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	fc_thread_node* node = retrieveNode(lock);
 	node->args = arg;
+	node->response = NULL;
 	node->delegate = func_ptr;
 	
-	node->response = NULL;
 
 	ensureNodeActive(lock, node);
 	// lock has been taken

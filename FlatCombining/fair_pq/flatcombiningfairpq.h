@@ -21,6 +21,7 @@ typedef struct fcfpq_thread_node
 	int age;
 	bool active;
 	func_ptr_t delegate;
+	bool queued;
 	void* args;
 	void* response;
 	struct fcfpq_thread_node* next;
@@ -34,7 +35,6 @@ typedef struct
 	bool flag;
 	fcfpq_thread_node* head;
 	pthread_key_t fcfpqthread_info_key;
-	atomic_int num_waiting_threads;
 	// statistics
 	long long num_exec;
 	long long avg_cs;

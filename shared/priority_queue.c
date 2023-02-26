@@ -1,4 +1,5 @@
 #include "priority_queue.h"
+#include <stdio.h>
 #include <stdlib.h>
 
 #define var __auto_type
@@ -77,9 +78,15 @@ int pq_push(pq_t* pq, int priority, void* data)
 	{
 		pq->capacity *= 2;
 		var old_data = pq->data;
+
+		printf("size %d\n", pq->capacity);
+		printf("pointer %p\n", pq->data);
+
 		pq->data = (pq_node_t*)realloc(pq->data, pq->capacity * sizeof(pq_node_t));
+
 		if(pq->data == NULL)
 		{
+			printf("error\n");
 			pq->data = old_data;
 			return -1;
 		}
@@ -137,9 +144,17 @@ int pq_change_priority(pq_t* pq, int index, int new_priority)
 	return 0;
 }
 
-void* pq_peek(pq_t* pq)
+int pq_peek(pq_t* pq, int* priority, void** data)
 {
 	if(pq->size == 0)
-		return NULL;
-	return pq->data[0].data;
+		return -1;
+
+	var node = &pq->data[0];
+
+	if(priority != NULL)
+		*priority = node->priority;
+	if(data != NULL)
+		*data = node->data;
+
+	return 0;
 }

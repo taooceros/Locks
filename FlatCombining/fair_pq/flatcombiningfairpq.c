@@ -14,29 +14,26 @@ void fcfpq_init(fcfpq_lock_t* lock)
 {
 	lock->pass = 0;
 	lock->head = NULL;
-	lock->num_waiting_threads = 0;
 	lock->avg_cs = 0;
 	lock->num_exec = 0;
 	pq_init(&lock->thread_pq);
 	pthread_key_create(&lock->fcfpqthread_info_key, NULL);
 }
 
-static void registerNewNodes(fcfpq_lock_t* lock)
+static void addNewRegisteredJob(fcfpq_lock_t* lock)
 {
-	var head = lock->head;
-	var current = head;
+	var current = lock->head;
 
 	while(current != NULL)
 	{
-		if(current->active == false)
+		if(current->queued == false && current->delegate != NULL)
 		{
-			current->active = true;
 			pq_push(&lock->thread_pq, current->usage, current);
+			current->queued = true;
 		}
 
 		current = current->next;
 	}
-	head->next = NULL;
 }
 
 static void scanCombineApply(fcfpq_lock_t* lock)
@@ -46,7 +43,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	fcfpq_thread_node* current;
 	int usage;
 
-	if(pq_pop(&lock->thread_pq, &usage, (void**)&current))
+	if(pq_peek(&lock->thread_pq, &usage, (void**)&current) == -1)
 	{
 		return;
 	}
@@ -54,9 +51,11 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	ull begin = rdtscp();
 	ull now;
 
-	while(((now = rdtscp()) - begin) > FC_THREAD_MAX_NS &&
-		  pq_pop(&lock->thread_pq, &usage, (void**)&current))
+	while(((now = rdtscp()) - begin) < FC_THREAD_MAX_NS &&
+		  !pq_pop(&lock->thread_pq, &usage, (void**)&current))
 	{
+		current->queued = false;
+
 		if(current->delegate != NULL)
 		{
 			ull begin = rdtscp();
@@ -69,7 +68,6 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 
 			usage -= end - begin;
 			current->usage = usage;
-			current->active = false;
 		}
 
 	scan_continue:
@@ -154,10 +152,8 @@ void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	// lock has been taken
 	int counter = 0;
 
-	lock->num_waiting_threads++;
-
 acquire_lock_or_spin:
-	if(lock->flag)
+	if(lock->flag && node->delegate != NULL)
 	{
 	spin_and_wait_or_retry:
 		while(node->delegate != NULL)
@@ -181,6 +177,7 @@ acquire_lock_or_spin:
 		else
 		{
 			// act as the combinator
+			addNewRegisteredJob(lock);
 			scanCombineApply(lock);
 			tryCleanUp(lock);
 			atomic_store(&lock->flag, false);
@@ -190,9 +187,6 @@ acquire_lock_or_spin:
 			// TODO: deadlock when try to become the combiner again???
 		}
 	}
-
-	// TODO: why????
-	lock->num_waiting_threads--;
 
 	return node->response;
 }

@@ -4,12 +4,12 @@ add_links("pthread")
 
 set_toolset("cc", "/usr/bin/gcc")
 
-
 if is_mode("debug") then
     add_defines("DEBUG")
-    add_cflags("-g", "-pthread")
-else 
-    add_cflags("-g", "-pthread")
+    set_optimize("fastest")
+end
+if is_mode("release") then
+    set_optimize("faster")
 end
 
 
