@@ -6,6 +6,7 @@
 #include <flatcombining.h>
 #include <flatcombiningfair.h>
 #include <rcl.h>
+#include <ticket.h>
 
 #include <rdtsc.h>
 #include <sched.h>
@@ -13,6 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "flatcombiningfairpq.h"
 #include "locktypeenum.h"
 
 #define GENERATE_ENUM_STRINGS
@@ -22,20 +24,28 @@
 
 // #define THREAD_COUNT 40
 #if DEBUUG
-#	define EXP_DURATION 5
+#	define EXP_DURATION 2
 #else
-#	define EXP_DURATION 120
+#	define EXP_DURATION 60
 #endif
 
 typedef unsigned long long ull;
 
 volatile ull global_counter = 0;
 
+// define lock
 fc_lock_t counter_lock_fc;
 fcf_lock_t counter_lock_fcf;
+fcfpq_lock_t counter_lock_fcfpq;
 cc_synch_t counter_lock_cc;
 rcl_lock_t coutner_lock_rcl;
 rcl_server_t rcl_server;
+// spinlock
+pthread_spinlock_t counter_lock_spin;
+// mutex
+pthread_mutex_t counter_lock_mutex;
+// ticket lock
+ticket_lock_t counter_lock_ticket;
 
 typedef struct
 {
@@ -61,7 +71,7 @@ void* job(void* arg)
 
 	task->lock_acquires++;
 
-	const ull delta = CYCLE_PER_MS * task->cs;
+	const ull delta = CYCLE_PER_US * task->cs;
 	ull initial = rdtscp();
 	ull now;
 	ull then = initial + delta;
@@ -98,11 +108,30 @@ void* worker(void* arg)
 		case FLAT_COMBINING_FAIR:
 			fcf_lock(&counter_lock_fcf, &job, task);
 			break;
+		case FLAT_COMBINING_FAIR_PQ:
+			fcfpq_lock(&counter_lock_fcfpq, &job, &task);
+			break;
 		case CC_SYNCH:
 			cc_synch_lock(&counter_lock_cc, &job, task);
 			break;
 		case RCL:
 			rcl_lock(&coutner_lock_rcl, &job, task);
+			break;
+		case SPIN_LOCK:
+			pthread_spin_lock(&counter_lock_spin);
+			job(task);
+			pthread_spin_unlock(&counter_lock_spin);
+			sched_yield();
+			break;
+		case MUTEX:
+			pthread_mutex_lock(&counter_lock_mutex);
+			job(task);
+			pthread_mutex_unlock(&counter_lock_mutex);
+			break;
+		case TICKET_LOCK:
+			ticket_lock(&counter_lock_ticket);
+			job(task);
+			ticket_unlock(&counter_lock_ticket);
 			break;
 		}
 	} while(!*task->stop);
@@ -151,6 +180,18 @@ void init_lock(LOCK_TYPE lockType, int ncpus)
 			rcl_server_init(&rcl_server, ncpus - 1);
 			rcl_lock_init(&coutner_lock_rcl, &rcl_server);
 		}
+		break;
+	case SPIN_LOCK:
+		pthread_spin_init(&counter_lock_spin, PTHREAD_PROCESS_PRIVATE);
+		break;
+	case MUTEX:
+		pthread_mutex_init(&counter_lock_mutex, NULL);
+		break;
+	case TICKET_LOCK:
+		ticket_init(&counter_lock_ticket);
+		break;
+	case FLAT_COMBINING_FAIR_PQ:
+		fcfpq_init(&counter_lock_fcfpq);
 		break;
 	}
 }
@@ -259,8 +300,12 @@ void lock_test(LOCK_TYPE lockType, bool verbose)
 
 int main()
 {
+	lock_test(MUTEX, true);
+	lock_test(SPIN_LOCK, true);
+	lock_test(TICKET_LOCK, true);
 	lock_test(FLAT_COMBINING, true);
 	lock_test(FLAT_COMBINING_FAIR, true);
+	// lock_test(FLAT_COMBINING_FAIR_PQ, true);
 	lock_test(CC_SYNCH, true);
 	lock_test(RCL, true);
 }
