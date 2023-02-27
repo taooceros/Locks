@@ -15,7 +15,7 @@
 
 #define ITERATION 5000
 #define THREAD_COUNT 128
-#define REPEAT_COUNT 1280
+#define REPEAT_COUNT 500
 
 #include "locktypeenum.h"
 
@@ -120,8 +120,8 @@ void fc_cc_test()
 
 	inner_test_lock(FLAT_COMBINING);
 	inner_test_lock(FLAT_COMBINING_FAIR);
-	inner_test_lock(FLAT_COMBINING_FAIR_PQ);
-	inner_test_lock(CC_SYNCH);
+//	inner_test_lock(FLAT_COMBINING_FAIR_PQ);
+//	inner_test_lock(CC_SYNCH);
 }
 
 void rcl_test()

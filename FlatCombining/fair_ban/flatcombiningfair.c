@@ -18,15 +18,58 @@ void fcf_init(fcf_lock_t* lock)
 	pthread_key_create(&lock->fcfthread_info_key, NULL);
 }
 
-static void scanCombineApply(fcf_lock_t* lock)
+static inline void tryCleanUp(int pass, fcf_thread_node* start)
 {
-	lock->pass++;
+	if(start == NULL)
+		return;
 
-	fcf_thread_node* current = lock->head;
+	fcf_thread_node* previous = start;
+	fcf_thread_node* current = start->next;
 
 	while(current != NULL)
 	{
-		if(current->delegate != NULL)
+		if(pass - current->age > 50 && atomic_load(&current->delegate) != NULL)
+		{
+			current->active = false;
+			previous->next = current->next;
+			current = current->next;
+			if(start->next == NULL)
+			{
+				printf("weird\n");
+			}
+			if(current == NULL)
+				return;
+		}
+
+		previous = current;
+		current = current->next;
+	}
+}
+
+static void scanCombineApply(fcf_lock_t* lock)
+{
+	if(lock->head->next == NULL)
+	{
+		printf("damn\n");
+	}
+
+	lock->pass++;
+
+	fcf_thread_node* curHead = lock->head;
+
+	fcf_thread_node* current = curHead;
+
+	while(current != NULL)
+	{
+		if(lock->pass - current->age > 50)
+		{
+			//			printf("%d too old node %d %lu\n",
+			//				   current->delegate != NULL,
+			//				   lock->pass - current->age,
+			//				   current->pthread);
+		}
+
+		if(atomic_load_explicit(&current->delegate, memory_order_acquire) != NULL)
 		{
 			ull begin = rdtscp();
 			current->age = lock->pass;
@@ -40,7 +83,7 @@ static void scanCombineApply(fcf_lock_t* lock)
 
 			lock->num_exec++;
 			current->response = current->delegate(current->args);
-			current->delegate = NULL;
+			atomic_store(&current->delegate, NULL);
 			ull end = rdtscp();
 			// TODO: why this doesn't work??????????????????????????/
 			// lock->num_waiting_threads--;
@@ -55,38 +98,11 @@ static void scanCombineApply(fcf_lock_t* lock)
 		current = current->next;
 	}
 
+	tryCleanUp(lock->pass, curHead);
+
 	static int counter = 0;
 
 	// printf("finish scan once %d\n", counter++);
-}
-
-static inline void tryCleanUp(fcf_lock_t* lock)
-{
-	if(lock->pass % 50)
-		return;
-
-	// this should not happen
-	if(lock->head == NULL)
-		return;
-
-	fcf_thread_node* previous = lock->head;
-	fcf_thread_node* current = previous->next;
-
-	while(current != NULL)
-	{
-		if(lock->pass - current->age> 50)
-		{
-			current->active = false;
-			previous->next = current->next;
-			current = current->next;
-			// printf("remove node \n");
-			if(current == NULL)
-				return;
-		}
-
-		previous = current;
-		current = current->next;
-	}
 }
 
 static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
@@ -98,7 +114,7 @@ static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
 		node = (fcf_thread_node*)malloc(sizeof(fcf_thread_node));
 		node->active = false;
 		node->age = 0;
-		node->pthread = pthread_self();
+		node->pthread = gettid();
 		node->banned_until = 0;
 		pthread_setspecific(lock->fcfthread_info_key, node);
 	}
@@ -108,7 +124,7 @@ static fcf_thread_node* retrieveNode(fcf_lock_t* lock)
 
 static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 {
-	if(!node->active)
+	if(!atomic_load(&node->active))
 	{
 		fcf_thread_node* oldHead;
 		do
@@ -117,7 +133,8 @@ static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 			node->next = oldHead;
 		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
 
-		node->active = true;
+		//		printf("add node %lu\n", node->pthread);
+		atomic_store_explicit(&node->active, true, memory_order_release);
 	}
 }
 
@@ -126,7 +143,7 @@ void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	fcf_thread_node* node = retrieveNode(lock);
 	node->args = arg;
 	node->response = NULL;
-	node->delegate = func_ptr;
+	atomic_store_explicit(&node->delegate, func_ptr, memory_order_release);
 
 	ensureNodeActive(lock, node);
 	// lock has been taken
@@ -138,7 +155,7 @@ acquire_lock_or_spin:
 	if(lock->flag)
 	{
 	spin_and_wait_or_retry:
-		while(node->delegate != NULL)
+		while(atomic_load(&node->delegate) != NULL)
 		{
 			if(++counter > SPIN_LIMIT)
 			{
@@ -160,7 +177,6 @@ acquire_lock_or_spin:
 		{
 			// act as the combinator
 			scanCombineApply(lock);
-			tryCleanUp(lock);
 			atomic_store(&lock->flag, false);
 
 			if(node->delegate != NULL)

@@ -22,6 +22,7 @@ FILE(GLOB_RECURSE RCL RCL/*.c)
 FILE(GLOB_RECURSE SHARED shared/*.c)
 FILE(GLOB TICKET ticket/*.c)
 
+FILE(GLOB TESTS unit_test/*.c)
 
 add_executable(example example.c
         ${FC}
@@ -31,14 +32,12 @@ add_executable(example example.c
         ${TICKET})
 
 add_executable(test
-        shared/lockfree_stack.c
-        unit_test/lockfree_stack_test.c
-        "unit_test/unit_test.c"
-        "unit_test/lock_tester.c"
-        FlatCombining/original/flatcombining.c
-        FlatCombining/fair_ban/flatcombiningfair.c
-        FlatCombining/fair_pq/flatcombiningfairpq.c
-        CCsynch/ccsynch.c RCL/rcl.c RCL/rcl.h)
+        ${TESTS}
+        ${FC}
+        ${CCSYNCH}
+        ${RCL}
+        ${SHARED}
+        ${TICKET})
 
 
 add_executable(usclexample proportional-share/u-scl/example/main.c shared/lockfree_stack.c shared/lockfree_stack.h)
