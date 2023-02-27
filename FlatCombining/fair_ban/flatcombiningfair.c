@@ -30,7 +30,7 @@ static inline void tryCleanUp(int pass, fcf_thread_node* start)
 	{
 		if(pass - current->age > 50 && atomic_load(&current->delegate) != NULL)
 		{
-			current->active = false;
+			atomic_store(&current->active, false);
 			previous->next = current->next;
 			current = current->next;
 			if(start->next == NULL)
@@ -134,7 +134,7 @@ static void ensureNodeActive(fcf_lock_t* lock, fcf_thread_node* node)
 		} while(!atomic_compare_exchange_weak(&(lock->head), &oldHead, node));
 
 		//		printf("add node %lu\n", node->pthread);
-		atomic_store_explicit(&node->active, true, memory_order_release);
+		node->active = true;
 	}
 }
 
@@ -152,6 +152,8 @@ void* fcf_lock(fcf_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	lock->num_waiting_threads++;
 
 acquire_lock_or_spin:
+	ensureNodeActive(lock, node);
+
 	if(lock->flag)
 	{
 	spin_and_wait_or_retry:

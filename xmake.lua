@@ -21,7 +21,7 @@ add_includedirs("RCL/")
 add_includedirs("ticket/")
 add_includedirs("shared")
 add_defines("CYCLE_PER_US=2400",
-            "FC_THREAD_MAX_NS=CYCLE_PER_US*1000",
+            "FC_THREAD_MAX_CYCLE=CYCLE_PER_MS",
             "_GNU_SOURCE")
 
 add_files("shared/*.c")

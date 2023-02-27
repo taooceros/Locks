@@ -1,7 +1,6 @@
 #include "flatcombiningfairpq.h"
 #include <sched.h>
 
-
 #include "lock_tester.h"
 
 #include <ccsynch.h>
@@ -13,9 +12,9 @@
 #include <assert.h>
 #include <execinfo.h>
 
-#define ITERATION 5000
-#define THREAD_COUNT 128
-#define REPEAT_COUNT 500
+#define ITERATION 500
+#define THREAD_COUNT 512
+#define REPEAT_COUNT 300
 
 #include "locktypeenum.h"
 
@@ -118,10 +117,11 @@ void fc_cc_test()
 	fcfpq_init(&fcfpqLock);
 	cc_synch_init(&ccSynch);
 
+	inner_test_lock(CC_SYNCH);
+
 	inner_test_lock(FLAT_COMBINING);
 	inner_test_lock(FLAT_COMBINING_FAIR);
-//	inner_test_lock(FLAT_COMBINING_FAIR_PQ);
-//	inner_test_lock(CC_SYNCH);
+	// inner_test_lock(FLAT_COMBINING_FAIR_PQ);
 }
 
 void rcl_test()
@@ -165,6 +165,7 @@ void rcl_test()
 
 void lock_test()
 {
+	rcl_test();
+
 	fc_cc_test();
-	//	rcl_test();
 }

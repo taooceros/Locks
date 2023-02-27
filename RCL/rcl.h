@@ -56,7 +56,7 @@ struct rcl_server_t
 	int cpu;
 	pthread_t management_thread;
 	int management_alive;
-	rcl_request_t requests[128];
+	rcl_request_t requests[1024];
 };
 void rcl_lock_init(rcl_lock_t* l, rcl_server_t* s);
 

@@ -152,11 +152,12 @@ void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	node->args = arg;
 	node->response = NULL;
 
-	ensureNodeActive(lock, node);
-	// lock has been taken
 	int counter = 0;
 
 acquire_lock_or_spin:
+	ensureNodeActive(lock, node);
+	// lock has been taken
+
 	if(lock->flag && node->delegate != NULL)
 	{
 	spin_and_wait_or_retry:

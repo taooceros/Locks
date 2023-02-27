@@ -199,6 +199,8 @@ void init_lock(LOCK_TYPE lockType, int ncpus)
 
 void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 {
+	static bool start_rcl_server = false;
+
 	init_lock(lockType, ncpus);
 
 	char* output_name = get_output_name(lockType, ncpus);
@@ -243,7 +245,6 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 		int cpu_id = lockType == RCL ? (i % (ncpus - 1)) : i % ncpus;
 		CPU_SET(cpu_id, &cpu_set);
-		pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpu_set);
 
 		tasks[i].id = i;
 		tasks[i].cpu = cpu_id;
@@ -300,12 +301,12 @@ void lock_test(LOCK_TYPE lockType, bool verbose)
 
 int main()
 {
-//	 lock_test(MUTEX, true);
+	// lock_test(MUTEX, true);
 	// lock_test(SPIN_LOCK, true);
 	// lock_test(TICKET_LOCK, true);
 	// lock_test(FLAT_COMBINING, true);
-	lock_test(FLAT_COMBINING_FAIR, true);
-	// lock_test(FLAT_COMBINING_FAIR_PQ, true);
+	// lock_test(FLAT_COMBINING_FAIR, true);
+	lock_test(FLAT_COMBINING_FAIR_PQ, true);
 	// lock_test(CC_SYNCH, true);
 	// lock_test(RCL, true);
 }

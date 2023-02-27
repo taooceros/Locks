@@ -1,5 +1,6 @@
 #include "flatcombining.h"
 #include <emmintrin.h>
+#include <stdatomic.h>
 
 void fc_init(fc_lock_t* lock)
 {
@@ -91,13 +92,11 @@ void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	node->args = arg;
 	node->response = NULL;
 	node->delegate = func_ptr;
-	
 
-	ensureNodeActive(lock, node);
-	// lock has been taken
 	int counter = 0;
 
 acquire_lock_or_spin:
+	ensureNodeActive(lock, node);
 	if(lock->flag)
 	{
 	spin_and_wait_or_retry:
@@ -127,6 +126,8 @@ acquire_lock_or_spin:
 			atomic_store(&lock->flag, false);
 		}
 	}
+
+	atomic_thread_fence(memory_order_release);
 
 	return node->response;
 }
