@@ -12,8 +12,8 @@
 #include <stdlib.h>
 #include <sys/resource.h>
 
-#ifndef FC_THREAD_MAX_NS
-#error "FC_THREAD_MAX not defined"
+#ifndef FC_THREAD_MAX_CYCLE
+#error "FC_THREAD_MAX_CYCLE not defined"
 #endif
 
 typedef struct fcfpq_thread_node
