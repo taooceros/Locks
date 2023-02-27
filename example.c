@@ -305,8 +305,8 @@ int main()
 	// lock_test(SPIN_LOCK, true);
 	// lock_test(TICKET_LOCK, true);
 	// lock_test(FLAT_COMBINING, true);
-	// lock_test(FLAT_COMBINING_FAIR, true);
-	lock_test(FLAT_COMBINING_FAIR_PQ, true);
+	lock_test(FLAT_COMBINING_FAIR, true);
+	// lock_test(FLAT_COMBINING_FAIR_PQ, true);
 	// lock_test(CC_SYNCH, true);
 	// lock_test(RCL, true);
 }

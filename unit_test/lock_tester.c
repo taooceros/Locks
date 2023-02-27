@@ -14,8 +14,8 @@
 #include <execinfo.h>
 
 #define ITERATION 5000
-#define THREAD_COUNT 2
-#define REPEAT_COUNT 512
+#define THREAD_COUNT 128
+#define REPEAT_COUNT 1280
 
 #include "locktypeenum.h"
 
