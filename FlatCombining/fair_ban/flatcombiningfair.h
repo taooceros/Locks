@@ -14,8 +14,8 @@
 typedef struct fcf_thread_node
 {
 	int age;
-	bool active;
-	func_ptr_t delegate;
+	atomic_bool active;
+	_Atomic(func_ptr_t) delegate;
 	void* args;
 	void* response;
 	struct fcf_thread_node* next;
@@ -26,8 +26,8 @@ typedef struct fcf_thread_node
 typedef struct
 {
 	int pass;
-	bool flag;
-	fcf_thread_node* head;
+	atomic_bool flag;
+	_Atomic(fcf_thread_node*) head;
 	pthread_key_t fcfthread_info_key;
 	atomic_int num_waiting_threads;
 	// statistics

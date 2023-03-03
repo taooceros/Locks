@@ -20,7 +20,7 @@ typedef struct rcl_server_t rcl_server_t;
 struct rcl_lock_t
 {
 	rcl_server_t* server;
-	int holder;
+	atomic_int holder;
 };
 
 struct rcl_request_t

@@ -1,7 +1,7 @@
 #ifndef LOCK_FLAT_COMBINING_FAIR_PQ_H
 #define LOCK_FLAT_COMBINING_FAIR_PQ_H
 
-#include "priority_queue.h"
+#include <priority_queue.h>
 #include <pthread.h>
 #include <sched.h>
 #include <shared.h>
@@ -32,8 +32,8 @@ typedef struct fcfpq_thread_node
 typedef struct
 {
 	int pass;
-	bool flag;
-	fcfpq_thread_node* head;
+	atomic_bool flag;
+	_Atomic(fcfpq_thread_node*) head;
 	pthread_key_t fcfpqthread_info_key;
 	// statistics
 	long long num_exec;

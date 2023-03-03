@@ -13,7 +13,7 @@ typedef struct lockfree_stack_node_t
 
 typedef struct lockfree_stack_t
 {
-	lockfree_stack_node_t* head;
+	_Atomic(lockfree_stack_node_t*) head;
 } lockfree_stack_t;
 
 void lockfree_stack_init(lockfree_stack_t* stack);
