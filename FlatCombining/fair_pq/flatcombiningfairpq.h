@@ -1,7 +1,7 @@
 #ifndef LOCK_FLAT_COMBINING_FAIR_PQ_H
 #define LOCK_FLAT_COMBINING_FAIR_PQ_H
 
-#include <priority_queue.h>
+#include <pqueue.h>
 #include <pthread.h>
 #include <sched.h>
 #include <shared.h>
@@ -13,7 +13,7 @@
 #include <sys/resource.h>
 
 #ifndef FC_THREAD_MAX_CYCLE
-#error "FC_THREAD_MAX_CYCLE not defined"
+#	error "FC_THREAD_MAX_CYCLE not defined"
 #endif
 
 typedef struct fcfpq_thread_node
@@ -27,6 +27,7 @@ typedef struct fcfpq_thread_node
 	struct fcfpq_thread_node* next;
 	pthread_t pthread;
 	ull usage;
+	int pos;
 } fcfpq_thread_node;
 
 typedef struct
@@ -38,7 +39,7 @@ typedef struct
 	// statistics
 	long long num_exec;
 	long long avg_cs;
-	pq_t thread_pq;
+	pqueue_t* thread_pq;
 } fcfpq_lock_t;
 
 void fcfpq_init(fcfpq_lock_t* lock);

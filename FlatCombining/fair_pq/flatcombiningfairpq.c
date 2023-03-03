@@ -6,9 +6,34 @@
 #include <stdio.h>
 
 #include "flatcombiningfairpq.h"
-#include <priority_queue.h>
+#include <pqueue.h>
 
 #define var __auto_type
+
+static int cmp_pri(pqueue_pri_t next, pqueue_pri_t curr)
+{
+	return (next < curr);
+}
+
+static pqueue_pri_t get_pri(void* a)
+{
+	return ((fcfpq_thread_node*)a)->usage;
+}
+
+static void set_pri(void* a, pqueue_pri_t pri)
+{
+	((fcfpq_thread_node*)a)->usage = pri;
+}
+
+static size_t get_pos(void* a)
+{
+	return ((fcfpq_thread_node*)a)->pos;
+}
+
+static void set_pos(void* a, size_t pos)
+{
+	((fcfpq_thread_node*)a)->pos = pos;
+}
 
 void fcfpq_init(fcfpq_lock_t* lock)
 {
@@ -16,7 +41,7 @@ void fcfpq_init(fcfpq_lock_t* lock)
 	lock->head = NULL;
 	lock->avg_cs = 0;
 	lock->num_exec = 0;
-	pq_init(&lock->thread_pq);
+	lock->thread_pq = pqueue_init(16, cmp_pri, get_pri, set_pri, get_pos, set_pos);
 	pthread_key_create(&lock->fcfpqthread_info_key, NULL);
 }
 
@@ -28,8 +53,7 @@ static void addNewRegisteredJob(fcfpq_lock_t* lock)
 	{
 		if(current->queued == false && current->delegate != NULL)
 		{
-			pq_push(&lock->thread_pq, current->usage, current);
-			current->queued = true;
+			pqueue_insert(lock->thread_pq, current);
 		}
 
 		current = current->next;
@@ -43,7 +67,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	fcfpq_thread_node* current;
 	int usage;
 
-	if(pq_peek(&lock->thread_pq, &usage, (void**)&current) == -1)
+	if(pqueue_peek(lock->thread_pq) == NULL)
 	{
 		return;
 	}
@@ -52,7 +76,7 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	ull now;
 
 	while(((now = rdtscp()) - begin) < FC_THREAD_MAX_CYCLE &&
-		  !pq_pop(&lock->thread_pq, &usage, (void**)&current))
+		  (current = pqueue_pop(lock->thread_pq)) != NULL)
 	{
 		current->queued = false;
 
@@ -69,9 +93,6 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 			usage -= end - begin;
 			current->usage = usage;
 		}
-
-	scan_continue:
-		current = current->next;
 	}
 
 	static int counter = 0;

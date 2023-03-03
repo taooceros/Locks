@@ -2,7 +2,7 @@ add_rules("mode.debug", "mode.release")
 
 add_links("pthread")
 
-set_toolset("cc", "clang-15")
+set_toolset("cc", "clang")
 
 if is_mode("debug") then
     add_defines("DEBUG")
@@ -20,15 +20,17 @@ add_includedirs("CCsynch/")
 add_includedirs("RCL/")
 add_includedirs("ticket/")
 add_includedirs("shared")
+add_includedirs("libpqueue/src")
 add_defines("CYCLE_PER_US=2400",
             "FC_THREAD_MAX_CYCLE=CYCLE_PER_MS",
             "_GNU_SOURCE")
 
-add_files("shared/*.c")
-add_files("FlatCombining/**/*.c")
-add_files("CCsynch/*.c")
-add_files("RCL/*.c")
-add_files("ticket/*.c")
+add_files("shared/*.c", 
+          "libpqueue/src/pqueue.c",
+          "FlatCombining/**/*.c",
+          "CCsynch/*.c",
+          "RCL/*.c",
+          "ticket/*.c")
 
 target("example")
     set_kind("binary")
