@@ -6,16 +6,18 @@ cd bin
 
 for cpu in 2 4 8 16 32
 do
-    ./example --thread $cpu --cpu $cpu --fc
-    ./example --thread $cpu --cpu $cpu --fcf
+    # ./example --thread $cpu --cpu $cpu --fc
+    # ./example --thread $cpu --cpu $cpu --fcf
     ./example --thread $cpu --cpu $cpu --fcfpq
-    ./example --thread $cpu --cpu $cpu --cc
-    ./example --thread $cpu --cpu $cpu --rcl
+    # ./example --thread $cpu --cpu $cpu --cc
+    # ./example --thread $cpu --cpu $cpu --rcl
 done
 
 cpu=32
 thread=64
 
-./example --thread $thread --cpu $cpu --fc
-./example --thread $thread --cpu $cpu --cc
-./example --thread $thread --cpu $cpu --rcl
+# ./example --thread $thread --cpu $cpu --fc
+# ./example --thread $thread --cpu $cpu --fcf
+./example --thread $thread --cpu $cpu --fcfpq
+# ./example --thread $thread --cpu $cpu --cc
+# ./example --thread $thread --cpu $cpu --rcl

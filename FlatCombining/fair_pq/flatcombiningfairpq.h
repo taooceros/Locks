@@ -20,7 +20,7 @@ typedef struct fcfpq_thread_node
 {
 	int age;
 	bool active;
-	func_ptr_t delegate;
+	_Atomic(func_ptr_t) delegate;
 	bool queued;
 	void* args;
 	void* response;

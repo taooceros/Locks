@@ -13,7 +13,7 @@
 
 static int cmp_pri(pqueue_pri_t next, pqueue_pri_t curr)
 {
-	return (next <= curr);
+	return (next >= curr);
 }
 
 static pqueue_pri_t get_pri(void* a)
@@ -77,31 +77,27 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	ull now;
 
 	while((((now = rdtscp()) - begin) < FC_THREAD_MAX_CYCLE) &&
-		  (current = pqueue_pop(lock->thread_pq)) != NULL)
+		  (current = pqueue_peek(lock->thread_pq)) != NULL)
 	{
-		current->queued = false;
-
-		if(current->delegate != NULL)
+		if(atomic_load_explicit(&current->delegate, memory_order_acquire) != NULL)
 		{
-
 			ull begin = rdtscp();
-			// fprintf(stderr, "%d\n", lock->pass);
 			current->age = lock->pass;
 
 			lock->num_exec++;
-			// struct timespec requesttime;
-			// struct timespec remainingtime;
-			// requesttime.tv_nsec = 1000 * 100;
-			// nanosleep(&requesttime, &remainingtime);
-
-			// fprintf(stderr, "%p\n", current->args);
-			// fprintf(stderr, "%p\n", &begin);
-
 			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 			ull end = rdtscp();
-			current->usage += end - begin;
+			long long cs = end - begin;
+			lock->avg_cs = lock->avg_cs + (cs - lock->avg_cs) / lock->num_exec;
+
+			current->usage += cs;
+			pqueue_change_priority(lock->thread_pq, current->usage, current);
+			continue;
 		}
+
+		current->usage += lock->avg_cs;
+		pqueue_change_priority(lock->thread_pq, current->usage, current);
 	}
 
 	// printf("finish scan once %d\n", counter++);
@@ -184,7 +180,7 @@ void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 	fcfpq_thread_node* node = retrieveNode(lock);
 	node->args = arg;
 	node->response = NULL;
-	node->delegate = func_ptr;
+	atomic_store_explicit(&node->delegate, func_ptr, memory_order_release);
 
 	int counter = 0;
 
@@ -227,7 +223,7 @@ acquire_lock_or_spin:
 
 			if(node->delegate != NULL)
 			{
-				fprintf(stderr, "line %d\n", __LINE__);
+				// fprintf(stderr, "line %d\n", __LINE__);
 				goto acquire_lock_or_spin;
 			}
 			// TODO: deadlock when try to become the combiner again???

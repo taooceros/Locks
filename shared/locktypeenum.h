@@ -16,7 +16,7 @@ BEGIN_ENUM(LOCK_TYPE){
 	// flat combining fair (banning)
 	DECL_ENUM_ELEMENT_STR(FLAT_COMBINING_FAIR, "Flat Combining (fair)")
 	// flat combining fair (priority queue)
-	DECL_ENUM_ELEMENT_STR(FLAT_COMBINING_FAIR_PQ, "Flat Combining (fair, priority queue)")
+	DECL_ENUM_ELEMENT_STR(FLAT_COMBINING_FAIR_PQ, "Flat Combining (fair priority queue)")
 	// cc synch
 	DECL_ENUM_ELEMENT_STR(CC_SYNCH, "CC Synch")
 	// remote core locking

@@ -248,7 +248,6 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 		tasks[i].lock_hold = 0;
 	}
 
-
 	pthread_attr_t attr;
 	cpu_set_t cpu_set;
 
@@ -376,4 +375,5 @@ int main(int argc, char* argv[])
 		}
 		}
 	}
+	lock_test(FLAT_COMBINING_FAIR_PQ, ncpu, nthread, true);
 }
