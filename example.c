@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <common.h>
 #include <cpuid.h>
 #include <getopt.h>
@@ -92,7 +93,7 @@ void* job(void* arg)
 
 void* worker(void* arg)
 {
-	fprintf(stderr, "should to return to %p\n", __builtin_return_address(0));
+	// fprintf(stderr, "should to return to %p\n", __builtin_return_address(0));
 
 	task_t* task = arg;
 
@@ -139,27 +140,26 @@ void* worker(void* arg)
 			ticket_unlock(&counter_lock_ticket);
 			break;
 		}
-		sleep(1);
-		fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
+		// fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
 
 	} while(!*task->stop);
 
-	fprintf(stderr, "successfully exit thread %d\n", task->id);
+	// fprintf(stderr, "successfully exit thread %d\n", task->id);
 
-	fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
+	// fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
 
 	return NULL;
 }
 
 char* get_output_name(LOCK_TYPE type, int ncpus, int nthreads)
 {
-	char* name = malloc(strlen(GetStringLOCK_TYPE(type)) + 16);
+	char* name = malloc(strlen(GetStringLOCK_TYPE(type)) + 32);
 	strcpy(name, GetStringLOCK_TYPE(type));
-
-	char ncpus_buf[16];
+	char ncpus_buf[32];
 
 	sprintf(ncpus_buf, "_%d_%d.csv", ncpus, nthreads);
 	strcat(name, ncpus_buf);
+
 	return name;
 }
 
@@ -172,7 +172,6 @@ FILE* setup_output(const char* name)
 
 void init_lock(LOCK_TYPE lockType, int ncpus)
 {
-
 	static bool start_rcl_server = false;
 
 	switch(lockType)
@@ -223,7 +222,7 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 	for(int i = 0; i < nthreads; i++)
 	{
-		threads[i] = 0;
+		threads[i] = 0l;
 	}
 
 	task_t tasks[nthreads];
@@ -249,6 +248,7 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 		tasks[i].lock_hold = 0;
 	}
 
+
 	pthread_attr_t attr;
 	cpu_set_t cpu_set;
 
@@ -272,7 +272,6 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 	sleep(EXP_DURATION);
 	stop = 1;
-	fprintf(stderr, "what the fuck\n");
 
 	for(int i = 0; i < nthreads; i++)
 	{
@@ -303,6 +302,8 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 		loopResult += tasks[i].loop_in_cs;
 	}
 
+	assert(global_counter == loopResult);
+
 	fclose(output);
 
 	free(output_name);
@@ -310,7 +311,7 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 void lock_test(LOCK_TYPE lockType, int ncpu, int nthread, bool verbose)
 {
-	printf("testing %s for ncpu %d\n", GetStringLOCK_TYPE(lockType), ncpu);
+	printf("testing %s for %d cpus %d threads\n", GetStringLOCK_TYPE(lockType), ncpu, nthread);
 	inner_lock_test(lockType, verbose, ncpu, nthread);
 }
 
@@ -334,7 +335,7 @@ int main(int argc, char* argv[])
 	int nthread = sysconf(_SC_NPROCESSORS_CONF);
 	while((opt = getopt_long_only(argc, argv, "", long_options, &optionIndex)) != -1)
 	{
-		// printf("%d\n", optionIndex);
+		// printf("%s\n", optarg);
 		switch(optionIndex)
 		{
 		case 0: {
@@ -375,5 +376,4 @@ int main(int argc, char* argv[])
 		}
 		}
 	}
-	lock_test(FLAT_COMBINING_FAIR_PQ, 1, 1, true);
 }

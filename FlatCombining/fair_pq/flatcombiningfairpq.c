@@ -70,7 +70,6 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 
 	if(pqueue_peek(lock->thread_pq) == NULL)
 	{
-		fprintf(stderr, "nothing to do?? %d\n", __LINE__);
 		return;
 	}
 

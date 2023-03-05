@@ -48,11 +48,6 @@ static inline void tryCleanUp(int pass, fcf_thread_node* start)
 
 static void scanCombineApply(fcf_lock_t* lock)
 {
-	if(lock->head->next == NULL)
-	{
-		printf("damn\n");
-	}
-
 	lock->pass++;
 
 	fcf_thread_node* curHead = lock->head;

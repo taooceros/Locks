@@ -8,10 +8,15 @@
             "type": "xmake",
             "request": "launch",
             "name": "Debug XMake target",
-            "target": "target name",
+            "target": "example",
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": {
-                "task": "xmake build",
+            "args": [
+                "--cpu 32",
+                "--thread 32",
+                "--fc"
+            ],
+            "preLaunchTask":{
+                "task": "xmake",
                 "type": "build"
             },
             "stopAtEntry": false

@@ -4,8 +4,18 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "xmake build",
-            "type": "xmake"
+            "label": "xmake",
+            "type": "shell",
+            "command": "xmake",
+            "args": [
+                "build",
+                "example"
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
         }
     ]
 }
