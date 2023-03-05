@@ -12,7 +12,7 @@ void ticket_init(ticket_lock_t* lock)
 
 void ticket_lock(ticket_lock_t* lock)
 {
-	int ticket = atomic_fetch_add(&lock->next_ticket, 1);
+	atomic_uint_fast32_t ticket = atomic_fetch_add(&lock->next_ticket, 1);
 	while(lock->now_serving != ticket)
 		_mm_pause();
 }

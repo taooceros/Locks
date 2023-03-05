@@ -2,14 +2,15 @@ add_rules("mode.debug", "mode.release")
 
 add_links("pthread")
 
-set_toolset("cc", "clang")
+set_toolset("cc", "gcc")
 
 if is_mode("debug") then
     add_defines("DEBUG")
-    set_optimize("fastest")
+    set_warnings("all")
 end
 if is_mode("release") then
     set_optimize("faster")
+    set_warnings("all")
 end
 
 

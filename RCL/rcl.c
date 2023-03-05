@@ -2,24 +2,24 @@
 // Created by 1 on 2/6/2023.
 //
 
-
 #include "rcl.h"
 #include <pthread.h>
 #include <sched.h>
 #include <spawn.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <unistd.h>
 
-static inline long futex(int* uaddr, int futex_op, int val, const struct timespec* timeout)
+static inline long futex(atomic_uint* uaddr, int futex_op, int val, const struct timespec* timeout)
 {
 	return syscall(SYS_futex, uaddr, futex_op, val, timeout, NULL, 0);
 }
 
-static inline void wait_on_futex_value(atomic_int* uaddr, int value)
+static inline void wait_on_futex_value(atomic_uint* uaddr, int value)
 {
 	while(atomic_load(uaddr) != value)
 	{
-		long rc = futex((int*)uaddr, FUTEX_WAIT, value, NULL);
+		long rc = futex(uaddr, FUTEX_WAIT, value, NULL);
 		if(rc == -1)
 		{
 			perror("futex");
@@ -32,7 +32,7 @@ static inline void wait_on_futex_value(atomic_int* uaddr, int value)
 	}
 }
 
-static inline void wake_futex_blocking(int* uaddr)
+static inline void wake_futex_blocking(atomic_uint* uaddr)
 {
 	while(1)
 	{
@@ -112,6 +112,8 @@ static _Noreturn void* rcl_serving_thread(rcl_thread_t* t)
 
 rcl_thread_t* allocate_serving_threads(rcl_server_t* s)
 {
+	// ignore
+	s->num_serving_threads = 1;
 	return NULL;
 }
 

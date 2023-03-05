@@ -11,6 +11,7 @@
 
 #include <assert.h>
 #include <execinfo.h>
+#include <stddef.h>
 
 #define ITERATION 500
 #define THREAD_COUNT 512
@@ -41,14 +42,14 @@ rcl_server_t rcl_server;
 
 void* job(void* arg)
 {
-	//	task_t* task = arg;
+	task_t* task = arg;
 	u_int32_t counter = 0;
 	while(counter++ < ITERATION)
 	{
 		global_counter++;
 	}
 
-	return NULL;
+	return task;
 }
 
 void* worker(void* args)
@@ -80,6 +81,8 @@ void* worker(void* args)
 		case RCL:
 			rcl_lock(&coutner_lock_rcl, &job, args);
 			break;
+		default:
+			break;
 		}
 	}
 
@@ -100,7 +103,7 @@ void inner_test_lock(const LOCK_TYPE lock_type)
 		pthread_create(&pthreads[i], NULL, &worker, &tasks[i]);
 	}
 
-	for(int i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
+	for(size_t i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
 	{
 		pthread_join(pthreads[i], NULL);
 	}
@@ -153,7 +156,7 @@ void rcl_test()
 		pthread_create(&pthreads[i], &attr, &worker, &tasks[i]);
 	}
 
-	for(int i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
+	for(size_t i = 0; i < sizeof(pthreads) / sizeof(pthreads[0]); ++i)
 	{
 		pthread_join(pthreads[i], NULL);
 	}

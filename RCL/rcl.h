@@ -35,7 +35,7 @@ struct rcl_thread_t
 {
 	rcl_server_t* server;
 	int timestamp;
-	int is_servicing;
+	atomic_uint is_servicing;
 	pthread_t pthread;
 };
 
@@ -55,7 +55,7 @@ struct rcl_server_t
 	bool is_alive;
 	int cpu;
 	pthread_t management_thread;
-	int management_alive;
+	atomic_uint management_alive;
 	rcl_request_t requests[1024];
 };
 void rcl_lock_init(rcl_lock_t* l, rcl_server_t* s);

@@ -85,7 +85,7 @@ static void scanCombineApply(fcf_lock_t* lock)
 			current->response = current->delegate(current->args);
 			atomic_store(&current->delegate, NULL);
 			ull end = rdtscp();
-			// TODO: why this doesn't work??????????????????????????/
+			// TODO: why this doesn't work?
 			// lock->num_waiting_threads--;
 
 			long long cs = end - begin;
@@ -99,8 +99,6 @@ static void scanCombineApply(fcf_lock_t* lock)
 	}
 
 	tryCleanUp(lock->pass, curHead);
-
-	static int counter = 0;
 
 	// printf("finish scan once %d\n", counter++);
 }

@@ -7,12 +7,13 @@
 
 #include "flatcombiningfairpq.h"
 #include <pqueue.h>
+#include <time.h>
 
 #define var __auto_type
 
 static int cmp_pri(pqueue_pri_t next, pqueue_pri_t curr)
 {
-	return (next < curr);
+	return (next <= curr);
 }
 
 static pqueue_pri_t get_pri(void* a)
@@ -41,7 +42,7 @@ void fcfpq_init(fcfpq_lock_t* lock)
 	lock->head = NULL;
 	lock->avg_cs = 0;
 	lock->num_exec = 0;
-	lock->thread_pq = pqueue_init(16, cmp_pri, get_pri, set_pri, get_pos, set_pos);
+	lock->thread_pq = pqueue_init(64, cmp_pri, get_pri, set_pri, get_pos, set_pos);
 	pthread_key_create(&lock->fcfpqthread_info_key, NULL);
 }
 
@@ -54,6 +55,7 @@ static void addNewRegisteredJob(fcfpq_lock_t* lock)
 		if(current->queued == false && current->delegate != NULL)
 		{
 			pqueue_insert(lock->thread_pq, current);
+			current->queued = true;
 		}
 
 		current = current->next;
@@ -65,37 +67,43 @@ static void scanCombineApply(fcfpq_lock_t* lock)
 	lock->pass++;
 
 	fcfpq_thread_node* current;
-	int usage;
 
 	if(pqueue_peek(lock->thread_pq) == NULL)
 	{
+		fprintf(stderr, "nothing to do?? %d\n", __LINE__);
 		return;
 	}
 
 	ull begin = rdtscp();
 	ull now;
 
-	while(((now = rdtscp()) - begin) < FC_THREAD_MAX_CYCLE &&
+	while((((now = rdtscp()) - begin) < FC_THREAD_MAX_CYCLE) &&
 		  (current = pqueue_pop(lock->thread_pq)) != NULL)
 	{
 		current->queued = false;
 
 		if(current->delegate != NULL)
 		{
+
 			ull begin = rdtscp();
+			// fprintf(stderr, "%d\n", lock->pass);
 			current->age = lock->pass;
 
 			lock->num_exec++;
+			// struct timespec requesttime;
+			// struct timespec remainingtime;
+			// requesttime.tv_nsec = 1000 * 100;
+			// nanosleep(&requesttime, &remainingtime);
+
+			// fprintf(stderr, "%p\n", current->args);
+			// fprintf(stderr, "%p\n", &begin);
+
 			current->response = current->delegate(current->args);
 			current->delegate = NULL;
 			ull end = rdtscp();
-
-			usage -= end - begin;
-			current->usage = usage;
+			current->usage += end - begin;
 		}
 	}
-
-	static int counter = 0;
 
 	// printf("finish scan once %d\n", counter++);
 }
@@ -137,6 +145,12 @@ static fcfpq_thread_node* retrieveNode(fcfpq_lock_t* lock)
 	if(node == NULL)
 	{
 		node = (fcfpq_thread_node*)malloc(sizeof(fcfpq_thread_node));
+		if(node == NULL)
+		{
+			printf("malloc failed\n");
+			exit(-1);
+		}
+
 		node->active = false;
 		node->age = 0;
 		node->pthread = pthread_self();
@@ -169,14 +183,16 @@ static void ensureNodeActive(fcfpq_lock_t* lock, fcfpq_thread_node* node)
 void* fcfpq_lock(fcfpq_lock_t* lock, void* (*func_ptr)(void*), void* arg)
 {
 	fcfpq_thread_node* node = retrieveNode(lock);
-	node->delegate = func_ptr;
 	node->args = arg;
 	node->response = NULL;
+	node->delegate = func_ptr;
 
 	int counter = 0;
 
 acquire_lock_or_spin:
-	ensureNodeActive(lock, node);
+
+	ensureNodeActive(lock, node); // ensure that thread is running
+
 	// lock has been taken
 
 	if(lock->flag && node->delegate != NULL)
@@ -205,14 +221,21 @@ acquire_lock_or_spin:
 			// act as the combinator
 			addNewRegisteredJob(lock);
 			scanCombineApply(lock);
+
 			tryCleanUp(lock);
+
 			atomic_store(&lock->flag, false);
 
 			if(node->delegate != NULL)
+			{
+				fprintf(stderr, "line %d\n", __LINE__);
 				goto acquire_lock_or_spin;
+			}
 			// TODO: deadlock when try to become the combiner again???
 		}
 	}
+
+	// fprintf(stderr, "return to %p\n", __builtin_return_address(0));
 
 	return node->response;
 }

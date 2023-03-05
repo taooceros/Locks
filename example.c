@@ -1,6 +1,9 @@
 #include <common.h>
 #include <cpuid.h>
+#include <getopt.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include <ccsynch.h>
 #include <flatcombining.h>
@@ -22,12 +25,11 @@
 
 #undef GENERATE_ENUM_STRINGS
 
-
 // #define THREAD_COUNT 40
 #ifdef DEBUG
 #	define EXP_DURATION 2
 #else
-#	define EXP_DURATION 2 
+#	define EXP_DURATION 2
 #endif
 
 typedef unsigned long long ull;
@@ -90,6 +92,8 @@ void* job(void* arg)
 
 void* worker(void* arg)
 {
+	fprintf(stderr, "should to return to %p\n", __builtin_return_address(0));
+
 	task_t* task = arg;
 
 	LOCK_TYPE lockType = task->lock_type;
@@ -110,7 +114,7 @@ void* worker(void* arg)
 			fcf_lock(&counter_lock_fcf, &job, task);
 			break;
 		case FLAT_COMBINING_FAIR_PQ:
-			fcfpq_lock(&counter_lock_fcfpq, &job, &task);
+			fcfpq_lock(&counter_lock_fcfpq, &job, task);
 			break;
 		case CC_SYNCH:
 			cc_synch_lock(&counter_lock_cc, &job, task);
@@ -135,19 +139,26 @@ void* worker(void* arg)
 			ticket_unlock(&counter_lock_ticket);
 			break;
 		}
+		sleep(1);
+		fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
+
 	} while(!*task->stop);
+
+	fprintf(stderr, "successfully exit thread %d\n", task->id);
+
+	fprintf(stderr, "expect to return to %p\n", __builtin_return_address(0));
 
 	return NULL;
 }
 
-char* get_output_name(LOCK_TYPE type, int ncpus)
+char* get_output_name(LOCK_TYPE type, int ncpus, int nthreads)
 {
 	char* name = malloc(strlen(GetStringLOCK_TYPE(type)) + 16);
 	strcpy(name, GetStringLOCK_TYPE(type));
 
 	char ncpus_buf[16];
 
-	sprintf(ncpus_buf, "_%d.csv", ncpus);
+	sprintf(ncpus_buf, "_%d_%d.csv", ncpus, nthreads);
 	strcat(name, ncpus_buf);
 	return name;
 }
@@ -161,6 +172,7 @@ FILE* setup_output(const char* name)
 
 void init_lock(LOCK_TYPE lockType, int ncpus)
 {
+
 	static bool start_rcl_server = false;
 
 	switch(lockType)
@@ -199,17 +211,21 @@ void init_lock(LOCK_TYPE lockType, int ncpus)
 
 void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 {
-	static bool start_rcl_server = false;
-
 	init_lock(lockType, ncpus);
 
-	char* output_name = get_output_name(lockType, ncpus);
+	char* output_name = get_output_name(lockType, ncpus, nthreads);
 
 	FILE* output = setup_output(output_name);
 
 	global_counter = 0;
 
 	pthread_t threads[nthreads];
+
+	for(int i = 0; i < nthreads; i++)
+	{
+		threads[i] = 0;
+	}
+
 	task_t tasks[nthreads];
 	int stop __attribute__((aligned(64))) = 0;
 
@@ -246,6 +262,8 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 		int cpu_id = lockType == RCL ? (i % (ncpus - 1)) : i % ncpus;
 		CPU_SET(cpu_id, &cpu_set);
 
+		pthread_attr_setaffinity_np(&attr, sizeof(cpu_set), &cpu_set);
+
 		tasks[i].id = i;
 		tasks[i].cpu = cpu_id;
 
@@ -254,10 +272,12 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 
 	sleep(EXP_DURATION);
 	stop = 1;
+	fprintf(stderr, "what the fuck\n");
 
 	for(int i = 0; i < nthreads; i++)
 	{
-		pthread_join(threads[i], NULL);
+		void* ret;
+		pthread_join(threads[i], &ret);
 	}
 
 	if(verbose)
@@ -288,25 +308,72 @@ void inner_lock_test(LOCK_TYPE lockType, bool verbose, int ncpus, int nthreads)
 	free(output_name);
 }
 
-void lock_test(LOCK_TYPE lockType, bool verbose)
+void lock_test(LOCK_TYPE lockType, int ncpu, int nthread, bool verbose)
 {
-	int ncpu = sysconf(_SC_NPROCESSORS_CONF) * 2;
-
-	while((ncpu >>= 1) > 1)
-	{
-		printf("testing %s for ncpu %d\n", GetStringLOCK_TYPE(lockType), ncpu);
-		inner_lock_test(lockType, verbose, ncpu, ncpu);
-	}
+	printf("testing %s for ncpu %d\n", GetStringLOCK_TYPE(lockType), ncpu);
+	inner_lock_test(lockType, verbose, ncpu, nthread);
 }
 
-int main()
+static struct option long_options[] = {
+	{"fc", no_argument, 0, 0},
+	{"cc", no_argument, 0, 0},
+	{"fcf", no_argument, 0, 0},
+	{"fcfpq", no_argument, 0, 0},
+	{"spin", no_argument, 0, 0},
+	{"mutex", no_argument, 0, 0},
+	{"rcl", no_argument, 0, 0},
+	{"cpu", required_argument, 0, 0},
+	{"thread", required_argument, 0, 0},
+};
+
+int main(int argc, char* argv[])
 {
-	// lock_test(MUTEX, true);
-	// lock_test(SPIN_LOCK, true);
-	// lock_test(TICKET_LOCK, true);
-	// lock_test(FLAT_COMBINING, true);
-	// lock_test(FLAT_COMBINING_FAIR, true);
-	lock_test(FLAT_COMBINING_FAIR_PQ, true);
-	// lock_test(CC_SYNCH, true);
-	// lock_test(RCL, true);
+	int opt;
+	int optionIndex;
+	int ncpu = sysconf(_SC_NPROCESSORS_CONF);
+	int nthread = sysconf(_SC_NPROCESSORS_CONF);
+	while((opt = getopt_long_only(argc, argv, "", long_options, &optionIndex)) != -1)
+	{
+		// printf("%d\n", optionIndex);
+		switch(optionIndex)
+		{
+		case 0: {
+			lock_test(FLAT_COMBINING, ncpu, nthread, true);
+			break;
+		}
+		case 1: {
+			lock_test(CC_SYNCH, ncpu, nthread, true);
+			break;
+		}
+		case 2: {
+			lock_test(FLAT_COMBINING_FAIR, ncpu, nthread, true);
+			break;
+		}
+		case 3: {
+			lock_test(FLAT_COMBINING_FAIR_PQ, ncpu, nthread, true);
+			break;
+		}
+		case 4: {
+			lock_test(SPIN_LOCK, ncpu, nthread, true);
+			break;
+		}
+		case 5: {
+			lock_test(MUTEX, ncpu, nthread, true);
+			break;
+		}
+		case 6: {
+			lock_test(RCL, ncpu, nthread, true);
+			break;
+		}
+		case 7: {
+			ncpu = atoi(optarg);
+			break;
+		}
+		case 8: {
+			nthread = atoi(optarg);
+			break;
+		}
+		}
+	}
+	lock_test(FLAT_COMBINING_FAIR_PQ, 1, 1, true);
 }
