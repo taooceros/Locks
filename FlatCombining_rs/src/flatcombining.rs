@@ -1,6 +1,5 @@
 use std::{
     cell::{SyncUnsafeCell, UnsafeCell},
-    marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::{
         atomic::{AtomicBool, AtomicI32, Ordering},
@@ -13,8 +12,6 @@ use std::hint::spin_loop;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{LinkedList, LinkedListAtomicLink};
 use thread_local::ThreadLocal;
-
-use crate::I32Unsafe;
 
 struct FcLockInner<T> {
     local_node: ThreadLocal<Arc<Node<T>>>,
@@ -130,7 +127,7 @@ impl<T: Send + Sync> FcLock<T> {
         }
     }
     fn scan_and_combining(&self, nodes: &mut LinkedList<NodeAdapter<T>>, pass: i32) {
-        let mut cursor = nodes.cursor();
+        let mut cursor = nodes.cursor_mut();
 
         cursor.move_next();
 
@@ -148,6 +145,12 @@ impl<T: Send + Sync> FcLock<T> {
                     fnc(FcGuard { lock: &self });
                     (*node_data).age = pass;
                     (*node_data).f = None;
+                } else {
+                    if (*node_data).age < pass - 50 {
+                        (*node_data).active = false;
+                        cursor.remove();
+                        println!("remove");
+                    }
                 }
             }
 

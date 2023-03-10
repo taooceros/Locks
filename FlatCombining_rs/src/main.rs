@@ -1,7 +1,6 @@
 #![feature(sync_unsafe_cell)]
 
-use std::cell::UnsafeCell;
-use std::ops::{Deref, DerefMut};
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -21,20 +20,31 @@ fn main() {
 
     let mut handles = vec![];
 
-    let i = Mutex::new(0);
+    let counter_mutex = Arc::new(Mutex::new(0));
 
-    for i in 0..32 {
-        let id = i;
+    for i in 0..16 {
         let lock_ref = counter.clone();
+        let lock_ref_mutex = counter_mutex.clone();
+
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
-            println!("Thread {} started", id);
-            for _ in 0..100000 {
-                // unsafe {
-                //     *(counter_ref.0) += 1;
-                // }
+            println!("Thread {} started", i);
+            for _ in 0..100 {
                 lock_ref.lock(|mut guard| {
-                    *guard += 1;
+                    for _ in 0..100000 {
+                        // unsafe {
+                        //     *(counter_ref.0) += 1;
+                        // }
+                        *guard += 1;
+
+                        // let mut l = lock_ref_mutex.lock().unwrap();
+                        // (*l) += 1;
+                    }
                 });
+
+                // let mut counter = lock_ref_mutex.lock().unwrap();
+                // for _ in 0..100000 {
+                //     (*counter) += 1;
+                // }
             }
         });
         handles.push(handle);
@@ -47,5 +57,7 @@ fn main() {
     counter.lock(|guard| {
         let counter = *guard;
         println!("{}", counter);
-    })
+    });
+
+    println!("{}", counter_mutex.lock().unwrap());
 }
