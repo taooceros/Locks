@@ -16,21 +16,21 @@ unsafe impl Send for I32Unsafe {}
 unsafe impl Sync for I32Unsafe {}
 
 fn main() {
-    let counter = Arc::new(FcLock::new(0));
+    let counter = Arc::new(FcLock::new(0i64));
 
     let mut handles = vec![];
 
-    let counter_mutex = Arc::new(Mutex::new(0));
+    let counter_mutex = Arc::new(Mutex::new(0i64));
 
-    for i in 0..16 {
+    for i in 0..128 {
         let lock_ref = counter.clone();
         let lock_ref_mutex = counter_mutex.clone();
 
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
-            println!("Thread {} started", i);
-            for _ in 0..100 {
+            // println!("Thread {} started", i);
+            for _ in 0..100000 {
                 lock_ref.lock(|mut guard| {
-                    for _ in 0..100000 {
+                    for _ in 0..10000000 {
                         // unsafe {
                         //     *(counter_ref.0) += 1;
                         // }
@@ -42,7 +42,7 @@ fn main() {
                 });
 
                 // let mut counter = lock_ref_mutex.lock().unwrap();
-                // for _ in 0..100000 {
+                // for _ in 0..10000000 {
                 //     (*counter) += 1;
                 // }
             }
