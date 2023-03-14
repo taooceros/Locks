@@ -1,15 +1,13 @@
 use std::{
-    arch::x86_64::__rdtscp,
     fmt,
     fs::{self, create_dir, remove_dir_all},
     io::Write,
-    ops::DerefMut,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Mutex, Arc,
     },
-    thread::{self, JoinHandle, yield_now},
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -18,17 +16,19 @@ use quanta::{Clock, Instant, Upkeep};
 
 use crate::flatcombining::{FcGuard, FcLock};
 
-#[derive(Debug, Clone, Copy)]
 enum LockType {
-    FlatCombining,
-    Mutex,
+    FlatCombining(FcLock<u64>),
+    Mutex(Mutex<u64>),
 }
+
+unsafe impl Send for LockType {}
+unsafe impl Sync for LockType {}
 
 impl fmt::Display for LockType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FlatCombining => write!(f, "Flat Combining"),
-            Self::Mutex => write!(f, "Mutex"),
+            Self::FlatCombining(_) => write!(f, "Flat Combining"),
+            Self::Mutex(_) => write!(f, "Mutex"),
         }
     }
 }
@@ -58,13 +58,11 @@ pub fn benchmark() {
         }
     }
 
-    inner_benchmark(LockType::FlatCombining, output_path);
-    inner_benchmark(LockType::Mutex, output_path);
+    inner_benchmark(Arc::new(LockType::FlatCombining(FcLock::new(0u64))), output_path);
+    inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
 }
 
-fn inner_benchmark(lock_type: LockType, output_path: &Path) {
-    initialize_lock(lock_type);
-
+fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
     let num_cpus = num_cpus::get();
     static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -100,27 +98,14 @@ fn inner_benchmark(lock_type: LockType, output_path: &Path) {
     }
 }
 
-fn initialize_lock(lock_type: LockType) {
-    match lock_type {
-        LockType::FlatCombining => {
-            FC_LOCK.lock(&mut |guard| {
-                **guard = 0;
-            });
-        }
-        LockType::Mutex => {
-            if let Ok(mut lock) = MUTEX_LOCK.lock() {
-                *lock = 0;
-            }
-        }
-    }
-}
-
 fn benchmark_num_threads(
-    lock_type_ref: &LockType,
+    lock_type_ref: &Arc<LockType>,
     id: usize,
     stop: &'static AtomicBool,
 ) -> JoinHandle<u64> {
-    let lock_type = *lock_type_ref;
+
+    let lock_type = lock_type_ref.clone();
+
     thread::Builder::new()
         .name(id.to_string())
         .spawn(move || {
@@ -134,12 +119,12 @@ fn benchmark_num_threads(
                 }
             });
 
-            match lock_type {
-                LockType::FlatCombining => {
+            match *lock_type {
+                LockType::FlatCombining(ref fc_lock) => {
                     let mut loop_result = 0u64;
 
                     while !stop.load(Ordering::Acquire) {
-                        FC_LOCK.lock(&mut |guard: &mut FcGuard<u64>| {
+                        fc_lock.lock(&mut |guard: &mut FcGuard<u64>| {
                             let timer = Clock::new();
                             let begin = timer.now();
 
@@ -151,13 +136,12 @@ fn benchmark_num_threads(
                     }
                     return loop_result;
                 }
-                LockType::Mutex => {
+                LockType::Mutex(ref mutex) => {
                     let mut result = 0u64;
-                    println!("stop: {}", stop.load(Ordering::Relaxed));
                     while !stop.load(Ordering::Acquire) {
                         let timer = Clock::new();
                         let begin = timer.now();
-                        let guard = MUTEX_LOCK.lock();
+                        let guard = mutex.lock();
                         if let Ok(mut guard) = guard {
                             while timer.now().duration_since(begin) < single_iter_duration {
                                 *guard += 1;
@@ -166,7 +150,6 @@ fn benchmark_num_threads(
                         }
                         thread::sleep(Duration::from_nanos(1));
                     }
-                    println!("Thread {} finished with {}", id, result);
                     return result;
                 }
             }
