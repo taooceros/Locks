@@ -1,18 +1,22 @@
 use std::{
+    borrow::BorrowMut,
     cell::{SyncUnsafeCell, UnsafeCell},
     ops::{Deref, DerefMut},
-    ptr::{null, null_mut},
+    process::exit,
+    ptr::null_mut,
     sync::{
         atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
         Arc,
     },
     thread::yield_now,
+    time::Duration, mem::transmute,
 };
 
 use std::hint::spin_loop;
 
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::LinkedListAtomicLink;
+use linux_futex::{Futex, Private};
 use thread_local::ThreadLocal;
 
 pub struct FcLock<T> {
@@ -25,13 +29,20 @@ pub struct FcLock<T> {
 
 unsafe impl<T> Sync for FcLock<T> {}
 
-pub struct FcGuard<'a, T: Sized + 'a> {
+pub struct FcGuard<'a, T: Sized> {
     lock: &'a FcLock<T>,
 }
 
 struct NodePtr<T> {
     ptr: *mut Node<T>,
 }
+
+impl<T> Clone for NodePtr<T> {
+    fn clone(&self) -> Self {
+        NodePtr { ptr: self.ptr }
+    }
+}
+impl<T> Copy for NodePtr<T> {}
 
 unsafe impl<T> Sync for NodePtr<T> {}
 unsafe impl<T> Send for NodePtr<T> {}
@@ -42,18 +53,16 @@ impl<T> NodePtr<T> {
     }
 }
 
-#[derive(Clone, Copy)]
 struct NodeData<T> {
     age: i32,
     active: bool,
-    f: Option<fn(FcGuard<T>)>,
-    id: i32,
+    f: Option<*mut (dyn FnMut(&mut FcGuard<T>))>,
+    waiter: Futex<Private>, // id: i32,
 }
 
 unsafe impl<T> Sync for NodeData<T> {}
 
 unsafe impl<T> Send for NodeData<T> {}
-
 
 struct Node<T> {
     value: SyncUnsafeCell<NodeData<T>>,
@@ -74,8 +83,6 @@ impl<T: Sized> DerefMut for FcGuard<'_, T> {
     }
 }
 
-intrusive_adapter!(NodeAdapter<T> = Arc<Node<T>> : Node<T> {next : LinkedListAtomicLink});
-
 impl<T: Send + Sync> FcLock<T> {
     pub fn new(t: T) -> FcLock<T> {
         FcLock {
@@ -87,9 +94,8 @@ impl<T: Send + Sync> FcLock<T> {
         }
     }
 
-    pub fn lock(&self, f: fn(FcGuard<T>)) {
-        static mut ID: AtomicI32 = AtomicI32::new(0);
-
+    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut FcGuard<T>) + 'b)) {
+        // static mut ID: AtomicI32 = AtomicI32::new(0);
         unsafe {
             let node = self
                 .local_node
@@ -99,16 +105,20 @@ impl<T: Send + Sync> FcLock<T> {
                             age: 0,
                             active: false,
                             f: None,
-                            id: ID.fetch_add(1, Ordering::Relaxed),
+                            waiter: Futex::new(0),
+                            // id: ID.fetch_add(1, Ordering::Relaxed),
                         }),
                         next: NodePtr { ptr: null_mut() },
                     })
                 })
                 .get();
 
-            let node_data = (*node).value.get();
+            let node_data = &mut *(*node).value.get();
 
-            (*node_data).f = Some(f);
+            node_data.waiter.value.store(0, Ordering::Relaxed);
+
+            // it is supposed to consume the function before return, so it should be safe to erase the lifetime
+            node_data.f = Some(transmute(f));
 
             loop {
                 if !((*node_data).active) {
@@ -126,10 +136,10 @@ impl<T: Send + Sync> FcLock<T> {
                             Err(x) => current = x,
                         }
                     }
-                    (*node_data).active = true;
+                    node_data.active = true;
                 }
 
-                if (*node_data).f.is_none() {
+                if node_data.f.is_none() {
                     return;
                 }
 
@@ -138,18 +148,19 @@ impl<T: Send + Sync> FcLock<T> {
                 if self.flag.load(Ordering::Acquire) {
                     for _ in 1..100 {
                         spin_loop();
-                        if (*node_data).f.is_none() {
+                        if node_data.f.is_none() {
                             return;
                         }
                     }
-                    if (*node_data).f.is_none() {
+                    _ = node_data.waiter.wait_for(0, Duration::from_millis(100));
+                    if node_data.f.is_none() {
                         return;
                     }
-                    yield_now();
                 } else if !self.flag.swap(true, Ordering::AcqRel) {
                     // become the combiner
                     let current_pass = self.pass.fetch_add(1, Ordering::Relaxed);
-                    self.scan_and_combining(&(self).head, current_pass + 1);
+                    self.scan_and_combining(&self.head, current_pass + 1);
+                    self.clean_unactive_node(&self.head, current_pass + 1);
 
                     self.flag.swap(false, Ordering::Release);
 
@@ -165,20 +176,41 @@ impl<T: Send + Sync> FcLock<T> {
         let mut current = head.load(Ordering::Relaxed);
         while !current.is_null() {
             unsafe {
-                let mut node_data = (*current).value.get();
+                let mut node_data = &mut *(*current).value.get();
 
-                if let Some(fnc) = (*node_data).f {
-                    (*node_data).age = pass;
-                    fnc(FcGuard { lock: self });
-                    (*node_data).f = None;
-                } else if (*node_data).age < pass - 50 {
-                    
-                    // (*node_data).active = false;
-                    // continue;
+                if let Some(fnc) = node_data.f {
+                    node_data.age = pass;
+                    (*fnc)(&mut FcGuard { lock: self });
+                    node_data.f = None;
+                    node_data.waiter.wake(1);
                 }
 
                 current = ((*current).next).ptr;
             }
+        }
+    }
+
+    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T>>, pass: i32) {
+        let mut previous_ptr = head.load(Ordering::Relaxed);
+        assert!(!previous_ptr.is_null());
+
+        let mut current_ptr = (*previous_ptr).next.ptr;
+
+        while !current_ptr.is_null() {
+            let previous = &mut *(previous_ptr);
+            let current = &mut *(current_ptr);
+
+            let node_data = &mut *(*current).value.get();
+
+            if node_data.age < pass - 50 {
+                previous.next = current.next;
+                current.next.ptr = null_mut();
+                node_data.active = false;
+                current_ptr = previous.next.ptr;
+                continue;
+            }
+            previous_ptr = current_ptr;
+            current_ptr = current.next.ptr;
         }
     }
 }
