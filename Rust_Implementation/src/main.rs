@@ -2,15 +2,17 @@
 #![feature(fn_traits)]
 #![feature(associated_type_bounds)]
 
-use std::sync::{Arc, Mutex};
-use std::thread;
 
-use flatcombining::FcLock;
 
-use crate::flatcombining::FcGuard;
+
+
+
+
 
 pub mod flatcombining;
-pub mod benchmark;
+mod benchmark;
+mod unit_test;
+pub mod ccsynch;
 
 // I have some magic semantics for some synchronization primitive!
 #[derive(Debug, Clone, Copy)]
@@ -20,5 +22,6 @@ unsafe impl Send for I32Unsafe {}
 unsafe impl Sync for I32Unsafe {}
 
 fn main() {
-    benchmark::benchmark();
+    // benchmark::benchmark();
+    unit_test::test_lock();
 }

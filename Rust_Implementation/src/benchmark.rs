@@ -5,19 +5,23 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex, Arc,
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
 };
 
 use once_cell::sync::Lazy;
-use quanta::{Clock, Instant, Upkeep};
+use quanta::{Clock};
 
-use crate::flatcombining::{FcGuard, FcLock};
+use crate::{
+    ccsynch::{CCSynch},
+    flatcombining::{FCGuard, FcLock},
+};
 
 enum LockType {
     FlatCombining(FcLock<u64>),
+    CCSynch(CCSynch<u64>),
     Mutex(Mutex<u64>),
 }
 
@@ -29,6 +33,7 @@ impl fmt::Display for LockType {
         match self {
             Self::FlatCombining(_) => write!(f, "Flat Combining"),
             Self::Mutex(_) => write!(f, "Mutex"),
+            Self::CCSynch(_) => write!(f, "CCSynch"),
         }
     }
 }
@@ -58,8 +63,12 @@ pub fn benchmark() {
         }
     }
 
-    inner_benchmark(Arc::new(LockType::FlatCombining(FcLock::new(0u64))), output_path);
+    inner_benchmark(
+        Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
+        output_path,
+    );
     inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
+    inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
 }
 
 fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
@@ -103,7 +112,6 @@ fn benchmark_num_threads(
     id: usize,
     stop: &'static AtomicBool,
 ) -> JoinHandle<u64> {
-
     let lock_type = lock_type_ref.clone();
 
     thread::Builder::new()
@@ -124,7 +132,7 @@ fn benchmark_num_threads(
                     let mut loop_result = 0u64;
 
                     while !stop.load(Ordering::Acquire) {
-                        fc_lock.lock(&mut |guard: &mut FcGuard<u64>| {
+                        fc_lock.lock(&mut |guard: &mut FCGuard<u64>| {
                             let timer = Clock::new();
                             let begin = timer.now();
 
@@ -151,6 +159,22 @@ fn benchmark_num_threads(
                         thread::sleep(Duration::from_nanos(1));
                     }
                     return result;
+                }
+                LockType::CCSynch(ref ccsynch) => {
+                    let mut loop_result = 0u64;
+
+                    while !stop.load(Ordering::Acquire) {
+                        ccsynch.lock(&mut |guard| {
+                            let timer = Clock::new();
+                            let begin = timer.now();
+
+                            while timer.now().duration_since(begin) < single_iter_duration {
+                                (**guard) += 1;
+                                loop_result += 1;
+                            }
+                        });
+                    }
+                    return loop_result;
                 }
             }
         })

@@ -1,21 +1,17 @@
 use std::{
-    borrow::BorrowMut,
     cell::{SyncUnsafeCell, UnsafeCell},
     ops::{Deref, DerefMut},
-    process::exit,
     ptr::null_mut,
     sync::{
         atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
-        Arc,
     },
-    thread::yield_now,
     time::Duration, mem::transmute,
 };
 
 use std::hint::spin_loop;
 
-use intrusive_collections::intrusive_adapter;
-use intrusive_collections::LinkedListAtomicLink;
+
+
 use linux_futex::{Futex, Private};
 use thread_local::ThreadLocal;
 
@@ -29,8 +25,22 @@ pub struct FcLock<T> {
 
 unsafe impl<T> Sync for FcLock<T> {}
 
-pub struct FcGuard<'a, T: Sized> {
+pub struct FCGuard<'a, T: Sized> {
     lock: &'a FcLock<T>,
+}
+
+impl<T: Sized> Deref for FCGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &*self.lock.data.get() }
+    }
+}
+
+impl<T: Sized> DerefMut for FCGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.lock.data.get() }
+    }
 }
 
 struct NodePtr<T> {
@@ -56,7 +66,7 @@ impl<T> NodePtr<T> {
 struct NodeData<T> {
     age: i32,
     active: bool,
-    f: Option<*mut (dyn FnMut(&mut FcGuard<T>))>,
+    f: Option<*mut (dyn FnMut(&mut FCGuard<T>))>,
     waiter: Futex<Private>, // id: i32,
 }
 
@@ -69,19 +79,6 @@ struct Node<T> {
     next: NodePtr<T>,
 }
 
-impl<T: Sized> Deref for FcGuard<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        unsafe { &*self.lock.data.get() }
-    }
-}
-
-impl<T: Sized> DerefMut for FcGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.lock.data.get() }
-    }
-}
 
 impl<T: Send + Sync> FcLock<T> {
     pub fn new(t: T) -> FcLock<T> {
@@ -94,7 +91,7 @@ impl<T: Send + Sync> FcLock<T> {
         }
     }
 
-    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut FcGuard<T>) + 'b)) {
+    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut FCGuard<T>) + 'b)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);
         unsafe {
             let node = self
@@ -180,7 +177,7 @@ impl<T: Send + Sync> FcLock<T> {
 
                 if let Some(fnc) = node_data.f {
                     node_data.age = pass;
-                    (*fnc)(&mut FcGuard { lock: self });
+                    (*fnc)(&mut FCGuard { lock: self });
                     node_data.f = None;
                     node_data.waiter.wake(1);
                 }

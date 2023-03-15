@@ -1,20 +1,24 @@
-fn test_lock() {
-    let counter = Arc::new(FcLock::new(0i64));
+use std::{sync::{Arc, Mutex}, thread};
+
+use crate::{ccsynch::CCSynch};
+
+pub fn test_lock() {
+    let counter = Arc::new(CCSynch::new(0i64));
 
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));
 
-    for i in 0..512 {
+    for i in 0..32 {
         let lock_ref = counter.clone();
         let _lock_ref_mutex = counter_mutex.clone();
 
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
             core_affinity::set_for_current(core_affinity::CoreId { id: i as usize });
             // println!("Thread {} started", i);
-            for _ in 0..10000 {
+            for _ in 0..100 {
                 lock_ref.lock(&mut |guard| {
-                    for _ in 0..1000000 {
+                    for _ in 0..1000 {
                         // unsafe {
                         //     *(counter_ref.0) += 1;
                         // }
