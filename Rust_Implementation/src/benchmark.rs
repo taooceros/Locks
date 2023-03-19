@@ -12,17 +12,19 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
-use quanta::{Clock};
+use quanta::Clock;
 
 use crate::{
-    ccsynch::{CCSynch},
+    ccsynch::CCSynch,
     flatcombining::{FCGuard, FcLock},
+    rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
 enum LockType {
     FlatCombining(FcLock<u64>),
     CCSynch(CCSynch<u64>),
     Mutex(Mutex<u64>),
+    RCL(RclLock<u64>),
 }
 
 unsafe impl Send for LockType {}
@@ -34,6 +36,7 @@ impl fmt::Display for LockType {
             Self::FlatCombining(_) => write!(f, "Flat Combining"),
             Self::Mutex(_) => write!(f, "Mutex"),
             Self::CCSynch(_) => write!(f, "CCSynch"),
+            Self::RCL(_) => write!(f, "RCL"),
         }
     }
 }
@@ -63,12 +66,18 @@ pub fn benchmark() {
         }
     }
 
+    // inner_benchmark(
+    //     Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
+    //     output_path,
+    // );
+    // inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
+    // inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
+    let mut server = RclServer::new(32);
+
     inner_benchmark(
-        Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
+        Arc::new(LockType::RCL(RclLock::new(&mut server, 0u64))),
         output_path,
     );
-    inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
-    inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
 }
 
 fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
@@ -87,7 +96,7 @@ fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
 
     let mut results = vec![];
 
-    thread::sleep(Duration::from_secs(5));
+    thread::sleep(Duration::from_secs(1));
 
     STOP.store(true, Ordering::Release);
 
@@ -95,6 +104,7 @@ fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
         let l = thread.join();
         if let Ok(l) = l {
             results.push(l);
+            // println!("{}", l);
         }
     }
 
@@ -127,9 +137,10 @@ fn benchmark_num_threads(
                 }
             });
 
+            let mut loop_result = 0u64;
+
             match *lock_type {
                 LockType::FlatCombining(ref fc_lock) => {
-                    let mut loop_result = 0u64;
 
                     while !stop.load(Ordering::Acquire) {
                         fc_lock.lock(&mut |guard: &mut FCGuard<u64>| {
@@ -142,10 +153,8 @@ fn benchmark_num_threads(
                             }
                         });
                     }
-                    return loop_result;
                 }
                 LockType::Mutex(ref mutex) => {
-                    let mut result = 0u64;
                     while !stop.load(Ordering::Acquire) {
                         let timer = Clock::new();
                         let begin = timer.now();
@@ -153,15 +162,13 @@ fn benchmark_num_threads(
                         if let Ok(mut guard) = guard {
                             while timer.now().duration_since(begin) < single_iter_duration {
                                 *guard += 1;
-                                result += 1;
+                                loop_result += 1;
                             }
                         }
                         thread::sleep(Duration::from_nanos(1));
                     }
-                    return result;
                 }
                 LockType::CCSynch(ref ccsynch) => {
-                    let mut loop_result = 0u64;
 
                     while !stop.load(Ordering::Acquire) {
                         ccsynch.lock(&mut |guard| {
@@ -174,9 +181,25 @@ fn benchmark_num_threads(
                             }
                         });
                     }
-                    return loop_result;
+                }
+                LockType::RCL(ref rcl) => {
+                    while !stop.load(Ordering::Acquire) {
+                        rcl.lock(&mut |guard| {
+                            let timer = Clock::new();
+                            let begin = timer.now();
+
+                            while timer.now().duration_since(begin) < single_iter_duration {
+                                (**guard) += 1;
+                                loop_result += 1;
+                            }
+                        });
+                    }
                 }
             }
+            
+            println!("Thread {} finished with result {}", id, loop_result);
+
+            return loop_result;
         })
         .unwrap()
 }

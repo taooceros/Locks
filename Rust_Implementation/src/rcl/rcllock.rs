@@ -5,26 +5,26 @@ use std::{
     ops::{Deref, DerefMut},
     ptr::Unique,
     sync::{
-        atomic::{AtomicI32, Ordering::*},
+        atomic::{AtomicI32, Ordering::*, AtomicUsize},
         Arc,
-    }, thread::yield_now,
+    },
+    thread::yield_now,
 };
 
 use super::{rclrequest::*, rclserver::*};
 
-pub struct RclLock<'a, T: Sized + 'a> {
+pub struct RclLock<T: Sized> {
     server: Unique<RclServer>,
-    pub(super) holder: AtomicI32,
+    pub(super) holder: AtomicUsize,
     data: SyncUnsafeCell<T>,
-    _lifetime: PhantomData<&'a T>,
 }
 
 pub struct RclGuard<'a, T: Sized> {
-    lock: &'a RclLock<'a, T>,
+    lock: &'a RclLock<T>,
 }
 
 impl<'a, T: Sized> RclGuard<'a, T> {
-    pub fn new(lock: &'a RclLock<'a, T>) -> RclGuard<'a, T> {
+    pub fn new(lock: &'a RclLock<T>) -> RclGuard<'a, T> {
         RclGuard { lock }
     }
 }
@@ -43,13 +43,12 @@ impl<T: Sized> DerefMut for RclGuard<'_, T> {
     }
 }
 
-impl<T> RclLock<'_, T> {
-    pub fn new<'a>(server: *mut RclServer, t: T) -> RclLock<'a, T> {
+impl<T> RclLock<T> {
+    pub fn new<'a>(server: *mut RclServer, t: T) -> RclLock<T> {
         RclLock {
             server: Unique::new(server).unwrap(),
-            holder: AtomicI32::new(0),
+            holder: AtomicUsize::new(0),
             data: SyncUnsafeCell::new(t),
-            _lifetime: PhantomData,
         }
     }
 
@@ -64,7 +63,9 @@ impl<T> RclLock<'_, T> {
         unsafe {
             let mut request: &mut RclRequest<T> = transmute(&mut (server.requests[*client_id]));
 
+            request.lock = self;
             let real_me = client_id;
+            request.real_me = *real_me;
 
             request.f = Some(f);
 

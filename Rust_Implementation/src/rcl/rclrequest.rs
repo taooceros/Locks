@@ -1,14 +1,23 @@
+use std::fmt::Debug;
+
 use super::rcllock::*;
 
 #[repr(C)]
 pub struct RclRequest<'a, T: 'a> {
-    pub(super) real_me: i32,
-    pub(super) lock: *const RclLock<'a, T>,
+    pub(super) real_me: usize,
+    pub(super) lock: *const RclLock<T>,
     pub(super) f: Option<&'a mut (dyn FnMut(&mut RclGuard<T>))>,
 }
 
+impl<'a, T> Debug for RclRequest<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RclRequest").field("real_me", &self.real_me).field("lock", &self.lock).field("f", &self.f.is_some()).finish()
+    }
+}
+
+
 impl<T> RclRequest<'_, T> {
-    pub fn empty<'a>(lock: &'a RclLock<'a, T>) -> RclRequest<'a, T> {
+    pub fn empty<'a>(lock: &'a RclLock<T>) -> RclRequest<'a, T> {
         RclRequest {
             real_me: 0,
             lock,

@@ -27,6 +27,18 @@ pub struct RclServer {
     pub(super) requests: Vec<RclRequestSized>,
 }
 
+impl Drop for RclServer {
+    fn drop(&mut self) {
+        self.is_alive = false;
+        for thread in self.threads.iter_mut() {
+            thread.waiting_to_serve.wake(1);
+        }
+        for thread in self.threads.iter_mut() {
+            thread.thread_handle.take().unwrap().join().unwrap();
+        }
+    }
+}
+
 impl RclServer {
     pub fn new(cpuid: usize) -> RclServer {
         let mut server = RclServer {
@@ -55,7 +67,7 @@ impl RclServer {
         let thread = RclThread::new(Unique::new(&mut server).unwrap());
 
         server.threads.push_back(thread);
-
+        server.num_free_threads.fetch_add(1, SeqCst);
         return server;
     }
 

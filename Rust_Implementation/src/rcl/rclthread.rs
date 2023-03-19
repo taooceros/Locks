@@ -17,8 +17,8 @@ use super::{
 pub struct RclThread {
     server: Unique<RclServer>,
     timestamp: i32,
-    waiting_to_serve: Futex<Private>,
-    thread_handle: Option<JoinHandle<()>>,
+    pub(super) waiting_to_serve: Futex<Private>,
+    pub thread_handle: Option<JoinHandle<()>>,
 }
 
 impl RclThread {
@@ -35,7 +35,12 @@ impl RclThread {
         thread.thread_handle = Some(thread::spawn(move || unsafe {
             let server = server.as_mut();
             loop {
-                server.is_alive = true;
+
+                // Should change in the future
+                if server.is_alive == false {
+                    break;
+                }
+
                 let thread = &mut *threadptr.as_ptr();
                 thread.timestamp = server.timestmap;
                 server.num_free_threads.fetch_add(-1, SeqCst);
@@ -43,14 +48,25 @@ impl RclThread {
                 let serving_client = server.num_clients.load(Relaxed);
 
                 let length = server.requests.len();
+
+                println!("{} {}", serving_client, length);
+
                 for req in server.requests.iter_mut().take(min(length, serving_client)) {
                     let req: &mut RclRequest<u8> = transmute(req);
-                    match (*req.lock).holder.compare_exchange(
-                        0,
-                        req.real_me + 1,
-                        Relaxed,
-                        Relaxed,
-                    ) {
+
+                    println!("{:?}", req);
+
+                    if req.f.is_none() {
+                        continue;
+                    }
+
+                    if req.lock.is_null() {
+                        continue;
+                    }
+                    match (*req.lock)
+                        .holder
+                        .compare_exchange(0, req.real_me + 1, Relaxed, Relaxed)
+                    {
                         Ok(_) => {
                             req.call();
                             (*req.lock).holder.store(0, Relaxed);
