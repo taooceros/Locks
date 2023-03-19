@@ -1,18 +1,15 @@
 #![feature(sync_unsafe_cell)]
 #![feature(fn_traits)]
 #![feature(associated_type_bounds)]
+#![feature(ptr_internals)]
 
 
-
-
-
-
-
-
-pub mod flatcombining;
 mod benchmark;
 mod unit_test;
+pub mod flatcombining;
 pub mod ccsynch;
+pub mod rcl;
+
 
 // I have some magic semantics for some synchronization primitive!
 #[derive(Debug, Clone, Copy)]

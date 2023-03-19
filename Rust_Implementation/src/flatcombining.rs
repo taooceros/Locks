@@ -90,6 +90,7 @@ impl<T: Send + Sync> FcLock<T> {
             local_node: ThreadLocal::new(),
         }
     }
+    
 
     pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut FCGuard<T>) + 'b)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);

@@ -128,7 +128,6 @@ impl<T> CCSynch<T> {
             *node_cell.get() = NodePtr::from(current_node);
 
             // wait for completion
-
             while current_node.wait.load(Acquire) {
                 // can use futex in the future
                 std::hint::spin_loop();
