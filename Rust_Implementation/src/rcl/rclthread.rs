@@ -2,7 +2,6 @@ use std::{
     cell::SyncUnsafeCell,
     cmp::min,
     mem::transmute,
-    ptr::Unique,
     sync::atomic::{AtomicBool, Ordering::*},
     thread::{self, yield_now, JoinHandle},
 };
@@ -12,17 +11,18 @@ use linux_futex::{Futex, Private};
 use super::{
     rclrequest::{RclRequest, RequestCallable},
     rclserver::*,
+    syncptr::{SyncMutPtr, SyncPtr},
 };
 
 pub struct RclThread {
-    server: Unique<RclServer>,
+    server: SyncMutPtr<RclServer>,
     timestamp: i32,
     pub(super) waiting_to_serve: Futex<Private>,
     pub thread_handle: Option<JoinHandle<()>>,
 }
 
 impl RclThread {
-    pub fn new(mut server: Unique<RclServer>) -> RclThread {
+    pub fn new(server: SyncMutPtr<RclServer>, cpuid: usize) -> RclThread {
         let mut thread = RclThread {
             server,
             timestamp: 0,
@@ -30,18 +30,33 @@ impl RclThread {
             thread_handle: None,
         };
 
-        let threadptr = Unique::new(&mut thread).unwrap();
+        let threadptr = SyncMutPtr::from(&mut thread);
 
-        thread.thread_handle = Some(thread::spawn(move || unsafe {
-            let server = server.as_mut();
+        return thread;
+    }
+
+    pub fn run(&mut self, cpuid: usize) {
+        let server = self.server;
+        let threadptr = {
+            let ptr: *mut RclThread = self;
+            SyncMutPtr::from(ptr)
+        };
+
+        self.thread_handle = Some(thread::spawn(move || {
+            core_affinity::set_for_current(core_affinity::CoreId { id: cpuid });
+
+            let server = server;
+            let threadptr = threadptr;
+
+            let server = unsafe { &mut *server.ptr };
+
             loop {
-
                 // Should change in the future
                 if server.is_alive == false {
                     break;
                 }
+                let thread = unsafe { &mut *threadptr.ptr };
 
-                let thread = &mut *threadptr.as_ptr();
                 thread.timestamp = server.timestmap;
                 server.num_free_threads.fetch_add(-1, SeqCst);
 
@@ -49,32 +64,33 @@ impl RclThread {
 
                 let length = server.requests.len();
 
-                println!("{} {}", serving_client, length);
+                // println!("{} {}", serving_client, length);
 
                 for req in server.requests.iter_mut().take(min(length, serving_client)) {
-                    let req: &mut RclRequest<u8> = transmute(req);
+                    let req: &mut RclRequest<u8> = unsafe { transmute(req) };
 
-                    println!("{:?}", req);
+                    // println!("{:?}", req);
 
                     if req.f.is_none() {
                         continue;
                     }
 
-                    if req.lock.is_null() {
+                    if req.lock.lock.is_null() {
                         continue;
                     }
                     match (*req.lock)
                         .holder
-                        .compare_exchange(0, req.real_me + 1, Relaxed, Relaxed)
+                        .compare_exchange(!0, req.real_me, Relaxed, Relaxed)
                     {
                         Ok(_) => {
                             req.call();
-                            (*req.lock).holder.store(0, Relaxed);
+                            (*req.lock).holder.store(!0, Relaxed);
                         }
-                        Err(_) => {}
+                        Err(_) => {
+                            eprintln!("should not happen");
+                        }
                     }
                 }
-
                 let free_thread = server.num_free_threads.fetch_add(1, SeqCst);
 
                 if server.num_serving_threads.load(Relaxed) > 1 {
@@ -84,15 +100,11 @@ impl RclThread {
                     } else {
                         // stop current thread
                         server.num_serving_threads.fetch_add(-1, SeqCst);
-                        server.prepared_threads.push(transmute(&thread));
+                        server.prepared_threads.push(thread);
                         _ = thread.waiting_to_serve.wait(0);
                     }
                 }
             }
         }));
-
-        return thread;
     }
-
-    pub fn run() {}
 }

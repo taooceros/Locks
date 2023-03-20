@@ -1,26 +1,32 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ptr::Unique};
 
 use super::rcllock::*;
 
 #[repr(C)]
-pub struct RclRequest<'a, T: 'a> {
+pub struct RclRequest<T> {
     pub(super) real_me: usize,
-    pub(super) lock: *const RclLock<T>,
-    pub(super) f: Option<&'a mut (dyn FnMut(&mut RclGuard<T>))>,
+    pub(super) lock: RclLockPtr<T>,
+    pub(super) f: Option<*mut (dyn FnMut(&mut RclGuard<T>))>,
 }
 
-impl<'a, T> Debug for RclRequest<'a, T> {
+unsafe impl<T> Send for RclRequest<T> {}
+unsafe impl<T> Sync for RclRequest<T> {}
+
+impl<T> Debug for RclRequest<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RclRequest").field("real_me", &self.real_me).field("lock", &self.lock).field("f", &self.f.is_some()).finish()
+        f.debug_struct("RclRequest")
+            .field("real_me", &self.real_me)
+            .field("lock", &(self.lock.lock as usize))
+            .field("f", &self.f.is_some())
+            .finish()
     }
 }
 
-
-impl<T> RclRequest<'_, T> {
-    pub fn empty<'a>(lock: &'a RclLock<T>) -> RclRequest<'a, T> {
+impl<T> RclRequest<T> {
+    pub fn with_lock<'a>(lock: *const RclLock<T>) -> RclRequest<T> {
         RclRequest {
             real_me: 0,
-            lock,
+            lock: lock.into(),
             f: None,
         }
     }
@@ -50,12 +56,17 @@ pub trait RequestCallable: Sized {
     fn call(&mut self);
 }
 
-impl<T> RequestCallable for RclRequest<'_, T> {
+impl<T> RequestCallable for RclRequest<T> {
     fn call(&mut self) {
-        if let Some(ref mut f) = self.f {
-            let lock = unsafe { &*self.lock };
-            let mut guard = RclGuard::new(lock);
-            f(&mut guard);
+        if let Some(f) = self.f {
+            if self.lock.lock.is_null() {
+                panic!("lock is null");
+            }
+
+            let mut guard = RclGuard::new(&*self.lock);
+            unsafe {
+                (*f)(&mut guard);
+            }
             self.f = None;
         }
     }

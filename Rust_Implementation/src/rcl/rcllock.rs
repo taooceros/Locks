@@ -5,16 +5,18 @@ use std::{
     ops::{Deref, DerefMut},
     ptr::Unique,
     sync::{
-        atomic::{AtomicI32, Ordering::*, AtomicUsize},
+        atomic::{AtomicI32, AtomicUsize, Ordering::*},
         Arc,
     },
     thread::yield_now,
 };
 
-use super::{rclrequest::*, rclserver::*};
+pub mod rcllockptr;
+use super::{rclrequest::*, rclserver::*, syncptr::SyncMutPtr};
+pub(crate) use rcllockptr::*;
 
 pub struct RclLock<T: Sized> {
-    server: Unique<RclServer>,
+    server: SyncMutPtr<RclServer>,
     pub(super) holder: AtomicUsize,
     data: SyncUnsafeCell<T>,
 }
@@ -46,32 +48,33 @@ impl<T: Sized> DerefMut for RclGuard<'_, T> {
 impl<T> RclLock<T> {
     pub fn new<'a>(server: *mut RclServer, t: T) -> RclLock<T> {
         RclLock {
-            server: Unique::new(server).unwrap(),
-            holder: AtomicUsize::new(0),
+            server: server.into(),
+            holder: AtomicUsize::new(!0),
             data: SyncUnsafeCell::new(t),
         }
     }
 
     pub fn lock<'b>(&self, f: &'b mut (dyn FnMut(&mut RclGuard<T>) + 'b)) {
-        let server = unsafe { &mut *self.server.as_ptr() };
+        let serverptr: *mut RclServer = self.server.into();
+
+        let server = unsafe { &mut *serverptr };
 
         let client_id = server.client_id.with_init(|| {
             let id = server.num_clients.fetch_add(1, Relaxed);
             id
         });
 
-        unsafe {
-            let mut request: &mut RclRequest<T> = transmute(&mut (server.requests[*client_id]));
+        let mut request: &mut RclRequest<T> =
+            unsafe { transmute(&mut (server.requests[*client_id])) };
 
-            request.lock = self;
-            let real_me = client_id;
-            request.real_me = *real_me;
+        request.lock = self.into();
+        let real_me = client_id;
+        request.real_me = *real_me;
 
-            request.f = Some(f);
+        request.f = Some(unsafe { transmute(f) });
 
-            while let Some(ref f) = request.f {
-                yield_now();
-            }
+        while let Some(ref _f) = request.f {
+            yield_now();
         }
     }
 }
