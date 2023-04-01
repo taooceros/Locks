@@ -1,5 +1,4 @@
 use std::{
-    fmt,
     fs::{self, create_dir, remove_dir_all},
     io::Write,
     path::Path,

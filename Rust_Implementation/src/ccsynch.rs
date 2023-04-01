@@ -114,7 +114,7 @@ impl<T> CCSynch<T> {
                 tmp_node.completed.store(true, Relaxed);
                 tmp_node.wait.store(false, Relaxed)
             } else {
-                panic!("No function found");
+                // panic!("No function found");
             }
 
             tmp_node = unsafe { &mut *(next.ptr) };

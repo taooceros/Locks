@@ -1,8 +1,7 @@
 use std::{
-    cell::SyncUnsafeCell,
     cmp::min,
     mem::transmute,
-    sync::atomic::{AtomicBool, Ordering::*},
+    sync::atomic::{Ordering::*},
     thread::{self, yield_now, JoinHandle},
 };
 
@@ -23,7 +22,7 @@ pub struct RclThread {
 }
 
 impl RclThread {
-    pub fn new(server: SyncMutPtr<RclServer>, cpuid: usize) -> RclThread {
+    pub fn new(server: SyncMutPtr<RclServer>, _cpuid: usize) -> RclThread {
         let mut thread = RclThread {
             server,
             timestamp: 0,
@@ -31,7 +30,7 @@ impl RclThread {
             thread_handle: None,
         };
 
-        let threadptr = SyncMutPtr::from(&mut thread);
+        let _threadptr = SyncMutPtr::from(&mut thread);
 
         return thread;
     }

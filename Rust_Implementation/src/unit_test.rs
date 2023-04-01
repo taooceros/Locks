@@ -22,9 +22,9 @@ pub fn test_lock() {
     inner_test(rcl_lock);
 }
 
-const THREAD_NUM: usize = 64;
-const ITERATION: usize = 1000;
-const INNER_ITERATION: usize = 1000;
+const THREAD_NUM: usize = 12;
+const ITERATION: usize = 100000;
+const INNER_ITERATION: usize = 100000;
 
 pub fn inner_test(lock: Arc<LockType<usize>>) {
     let mut handles = vec![];

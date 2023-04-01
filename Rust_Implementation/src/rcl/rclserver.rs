@@ -1,12 +1,9 @@
 use std::{
-    alloc::{alloc_zeroed, Layout},
-    array,
     collections::LinkedList,
-    mem::{size_of, transmute},
-    ptr::{null, Unique},
+    mem::{size_of},
+    ptr::{null},
     sync::{
         atomic::{Ordering::*, *},
-        *,
     },
 };
 
