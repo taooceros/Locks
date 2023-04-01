@@ -1,6 +1,7 @@
 use std::{
     fs::{self, create_dir, remove_dir_all},
     io::Write,
+    num::NonZeroUsize,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -10,18 +11,35 @@ use std::{
     time::Duration,
 };
 
+use csv::Writer;
 use quanta::Clock;
 
 use crate::{
     ccsynch::CCSynch,
-    flatcombining::{FcLock},
-    rcl::{rcllock::RclLock, rclserver::RclServer}, dlock::{DLock, LockType},
+    dlock::{DLock, LockType},
+    flatcombining::FcLock,
+    rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
+use serde::Serialize;
+use serde_with::serde_as;
+use serde_with::DurationMilliSeconds;
 
+const DURATION: u64 = 3;
 
+#[serde_as]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct Record {
+    id: usize,
+    cpu_id: usize,
+    loop_count: u64,
+    num_acquire: u64,
+    #[serde_as(as = "DurationMilliSeconds<u64>")]
+    hold_time: Duration,
+}
 
-pub fn benchmark() {
+pub fn benchmark(num_cpu: NonZeroUsize, num_thread: NonZeroUsize) {
     let output_path = Path::new("output");
 
     if output_path.is_dir() {
@@ -42,42 +60,56 @@ pub fn benchmark() {
             return;
         }
     }
-
-
     inner_benchmark(
         Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
+        num_cpu,
+        num_thread,
         output_path,
     );
-    inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
-    inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
-
+    inner_benchmark(
+        Arc::new(LockType::Mutex(Mutex::new(0u64))),
+        num_cpu,
+        num_thread,
+        output_path,
+    );
+    inner_benchmark(
+        Arc::new(LockType::CCSynch(CCSynch::new(0u64))),
+        num_cpu,
+        num_thread,
+        output_path,
+    );
 
     let mut server = RclServer::new(15);
     let lock = RclLock::new(&mut server, 0u64);
-    inner_benchmark(Arc::new(LockType::RCL(lock)), output_path);
+    inner_benchmark(
+        Arc::new(LockType::RCL(lock)),
+        NonZeroUsize::new(num_cpu.get() - 1).unwrap(),
+        num_thread,
+        output_path,
+    );
 
     println!("Benchmark finished");
 }
 
-fn inner_benchmark(lock_type: Arc<LockType<u64>>, output_path: &Path) {
-    let num_cpus = num_cpus::get();
-    println!("Number of cpus: {}", num_cpus);
-
+fn inner_benchmark(
+    lock_type: Arc<LockType<u64>>,
+    num_cpu: NonZeroUsize,
+    num_thread: NonZeroUsize,
+    output_path: &Path,
+) {
     static STOP: AtomicBool = AtomicBool::new(false);
 
     STOP.store(false, Ordering::Release);
 
-    let threads = (0..num_cpus)
-        .map(|id| {
-            return benchmark_num_threads(&lock_type, id, &STOP);
-        })
+    let threads = (0..num_thread.get())
+        .map(|id| benchmark_num_threads(&lock_type, id, num_cpu, &STOP))
         .collect::<Vec<_>>();
 
     println!("Starting benchmark for {}", lock_type);
 
     let mut results = Vec::new();
 
-    thread::sleep(Duration::from_secs(3));
+    thread::sleep(Duration::from_secs(DURATION));
 
     STOP.store(true, Ordering::Release);
 
@@ -95,27 +127,25 @@ fn inner_benchmark(lock_type: Arc<LockType<u64>>, output_path: &Path) {
         i += 1;
     }
 
-    let mut file = fs::File::create(output_path.join(format!("{}.csv", lock_type)))
-        .ok()
-        .unwrap();
+    let mut writer = Writer::from_path(output_path.join(format!("{}.csv", lock_type))).unwrap();
 
     for result in results {
-        file.write_fmt(format_args!("{}\n", result)).ok().unwrap();
+        writer.serialize(result).unwrap();
     }
 }
 
 fn benchmark_num_threads(
     lock_type_ref: &Arc<LockType<u64>>,
     id: usize,
+    num_cpu: NonZeroUsize,
     stop: &'static AtomicBool,
-) -> JoinHandle<u64> {
+) -> JoinHandle<Record> {
     let lock_type = lock_type_ref.clone();
 
     thread::Builder::new()
         .name(id.to_string())
         .spawn(move || {
-            core_affinity::set_for_current(core_affinity::CoreId { id: id as usize });
-
+            core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
             let single_iter_duration: Duration = Duration::from_micros({
                 if id % 2 == 0 {
                     100
@@ -125,70 +155,31 @@ fn benchmark_num_threads(
             });
 
             let mut loop_result = 0u64;
+            let mut num_acquire = 0u64;
+            let mut hold_time = Duration::ZERO;
 
-            match *lock_type {
-                LockType::FlatCombining(ref fc_lock) => {
-                    while !stop.load(Ordering::Acquire) {
-                        fc_lock.lock(&mut |guard| {
-                            let timer = Clock::new();
-                            let begin = timer.now();
+            while !stop.load(Ordering::Acquire) {
+                lock_type.lock(&mut |guard| {
+                    num_acquire += 1;
+                    let timer = Clock::new();
+                    let begin = timer.now();
 
-                            while timer.now().duration_since(begin) < single_iter_duration {
-                                (**guard) += 1;
-                                loop_result += 1;
-                            }
-                        });
+                    while timer.now().duration_since(begin) < single_iter_duration {
+                        (**guard) += 1;
+                        loop_result += 1;
                     }
-                }
-                LockType::Mutex(ref mutex) => {
-                    while !stop.load(Ordering::Acquire) {
-                        let timer = Clock::new();
-                        let begin = timer.now();
-                        let guard = mutex.lock();
-                        if let Ok(mut guard) = guard {
-                            while timer.now().duration_since(begin) < single_iter_duration {
-                                *guard += 1;
-                                loop_result += 1;
-                            }
-                        }
-                        thread::sleep(Duration::from_nanos(1));
-                    }
-                }
-                LockType::CCSynch(ref ccsynch) => {
-                    while !stop.load(Ordering::Acquire) {
-                        ccsynch.lock(&mut |guard| {
-                            let timer = Clock::new();
-                            let begin = timer.now();
 
-                            while timer.now().duration_since(begin) < single_iter_duration {
-                                (**guard) += 1;
-                                loop_result += 1;
-                            }
-                        });
-                    }
-                }
-                LockType::RCL(ref rcl) => {
-                    while !stop.load(Ordering::Acquire) {
-                        // println!("job begin");
-
-                        rcl.lock(&mut |guard| {
-                            let timer = Clock::new();
-                            let begin = timer.now();
-
-                            while timer.now().duration_since(begin) < single_iter_duration {
-                                (**guard) += 1;
-                                loop_result += 1;
-                            }
-                        });
-
-                        // println!("job end");
-                    }
-                }
+                    hold_time += timer.now().duration_since(begin);
+                });
             }
-
             println!("Thread {} finished with result {}", id, loop_result);
-
-            return loop_result;
+            return Record {
+                id,
+                cpu_id: id % num_cpu,
+                loop_count: loop_result,
+                num_acquire,
+                hold_time,
+            };
         })
         .unwrap()
 }
