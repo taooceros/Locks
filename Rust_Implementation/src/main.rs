@@ -5,6 +5,7 @@
 
 
 mod benchmark;
+#[cfg(test)]
 mod unit_test;
 pub mod flatcombining;
 pub mod ccsynch;
@@ -18,5 +19,5 @@ pub(crate) mod syncptr;
 
 fn main() {
     // benchmark::benchmark();
-    unit_test::test_lock();
+    
 }

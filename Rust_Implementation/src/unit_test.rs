@@ -1,41 +1,48 @@
-use std::{sync::{Arc, Mutex}, thread};
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+};
 
-use crate::{ccsynch::CCSynch, flatcombining::FcLock};
+use crate::{
+    ccsynch::CCSynch,
+    dlock::{DLock, LockType},
+    flatcombining::FcLock,
+    rcl::{rcllock::RclLock, rclserver::RclServer},
+};
 
+#[test]
 pub fn test_lock() {
-    let counter = Arc::new(CCSynch::new(0i64));
+    let fc_lock = Arc::new(LockType::FlatCombining(FcLock::new(0usize)));
+    let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
+    let mut server = RclServer::new(15);
+    let server_ptr: *mut RclServer = &mut server;
+    let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
+    inner_test(fc_lock);
+    inner_test(cc_lock);
+    inner_test(rcl_lock);
+}
 
+const THREAD_NUM: usize = 64;
+const ITERATION: usize = 1000;
+const INNER_ITERATION: usize = 1000;
+
+pub fn inner_test(lock: Arc<LockType<usize>>) {
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));
 
-    for i in 0..128 {
-        let lock_ref = counter.clone();
+    for i in 0..THREAD_NUM {
+        let lock_ref = lock.clone();
         let _lock_ref_mutex = counter_mutex.clone();
 
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
             core_affinity::set_for_current(core_affinity::CoreId { id: i as usize });
-            // println!("Thread {} started", i);
-            for _ in 0..100 {
+            for _ in 0..ITERATION {
                 lock_ref.lock(&mut |guard| {
-                    for _ in 0..1000 {
-                        // unsafe {
-                        //     *(counter_ref.0) += 1;
-                        // }
+                    for _ in 0..INNER_ITERATION {
                         **guard += 1;
-
-                        // let mut l = lock_ref_mutex.lock().unwrap();
-                        // (*l) += 1;
                     }
                 });
-
-                // let mut counter = _lock_ref_mutex.lock().unwrap();
-                // let mut l = || {
-                //     for _ in 0..1000000 {
-                //         (*counter) += 1;
-                //     }
-                // };
-                // l();
             }
         });
         handles.push(handle);
@@ -45,9 +52,7 @@ pub fn test_lock() {
         handle.unwrap().join().unwrap();
     }
 
-    counter.lock(&mut |guard| {
-        println!("Counter: {}", **guard);
-    });
+    lock.lock(&mut |guard| assert!(**guard == (THREAD_NUM * ITERATION * INNER_ITERATION)));
 
-    println!("{}", counter_mutex.lock().unwrap());
+    println!("finish testing {}", lock);
 }

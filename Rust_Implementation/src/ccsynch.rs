@@ -50,7 +50,7 @@ impl<T> CCSynch<T> {
             local_node: ThreadLocal::new(),
         }
     }
-    
+
     pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'a)) {
         let node_cell = self.local_node.with_init(|| {
             SyncUnsafeCell::new(SyncMutPtr::from(Box::into_raw(Box::new(Node::new()))))
@@ -77,7 +77,9 @@ impl<T> CCSynch<T> {
         let current_node_ptr = current_node as *mut Node<T>;
 
         // put current
-        *next_node = SyncMutPtr::from(current_node_ptr);
+        unsafe {
+            *(node_cell.get()) = SyncMutPtr::from(current_node_ptr);
+        }
 
         // wait for completion
         while current_node.wait.load(Acquire) {

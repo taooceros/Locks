@@ -16,29 +16,11 @@ use quanta::Clock;
 use crate::{
     ccsynch::CCSynch,
     flatcombining::{FcLock},
-    rcl::{rcllock::RclLock, rclserver::RclServer}, dlock::DLock,
+    rcl::{rcllock::RclLock, rclserver::RclServer}, dlock::{DLock, LockType},
 };
 
-enum LockType {
-    FlatCombining(FcLock<u64>),
-    CCSynch(CCSynch<u64>),
-    Mutex(Mutex<u64>),
-    RCL(RclLock<u64>),
-}
 
-unsafe impl Send for LockType {}
-unsafe impl Sync for LockType {}
 
-impl fmt::Display for LockType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::FlatCombining(_) => write!(f, "Flat Combining"),
-            Self::Mutex(_) => write!(f, "Mutex"),
-            Self::CCSynch(_) => write!(f, "CCSynch"),
-            Self::RCL(_) => write!(f, "RCL"),
-        }
-    }
-}
 
 pub fn benchmark() {
     let output_path = Path::new("output");
@@ -78,7 +60,7 @@ pub fn benchmark() {
     println!("Benchmark finished");
 }
 
-fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
+fn inner_benchmark(lock_type: Arc<LockType<u64>>, output_path: &Path) {
     let num_cpus = num_cpus::get();
     println!("Number of cpus: {}", num_cpus);
 
@@ -124,7 +106,7 @@ fn inner_benchmark(lock_type: Arc<LockType>, output_path: &Path) {
 }
 
 fn benchmark_num_threads(
-    lock_type_ref: &Arc<LockType>,
+    lock_type_ref: &Arc<LockType<u64>>,
     id: usize,
     stop: &'static AtomicBool,
 ) -> JoinHandle<u64> {
