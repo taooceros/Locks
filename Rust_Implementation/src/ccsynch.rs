@@ -3,8 +3,8 @@ use std::{
     mem::transmute,
     sync::atomic::{
         AtomicBool, AtomicPtr,
-        Ordering::{Acquire, Relaxed, Release, SeqCst},
-    },
+        Ordering::{Acquire, Relaxed, Release, SeqCst}, compiler_fence,
+    }, ptr::null_mut,
 };
 
 use lockfree::tls::ThreadLocal;
@@ -21,7 +21,7 @@ struct Node<T> {
     f: Option<Operation<T>>,
     wait: AtomicBool,
     completed: AtomicBool,
-    next: Option<SyncMutPtr<Node<T>>>,
+    next: SyncMutPtr<Node<T>>
 }
 
 impl<T> Node<T> {
@@ -30,7 +30,7 @@ impl<T> Node<T> {
             f: None,
             wait: AtomicBool::new(false),
             completed: AtomicBool::new(false),
-            next: None,
+            next: SyncMutPtr::from(null_mut()),
         }
     }
 }
@@ -60,7 +60,7 @@ impl<T> CCSynch<T> {
         let next_node = unsafe { &mut *node_cell.get() };
 
         unsafe {
-            (*next_node.ptr).next = None;
+            (*next_node.ptr).next = SyncMutPtr::from(null_mut());
             (*next_node.ptr).wait.store(true, Relaxed);
             (*next_node.ptr).completed.store(false, Relaxed);
         }
@@ -72,7 +72,10 @@ impl<T> CCSynch<T> {
         current_node.f = Some(Operation {
             f: (unsafe { transmute(f) }),
         });
-        current_node.next = Some(*next_node);
+        // Compiler fence seems to be enough for synchronization given the argument in the orignal paper
+        // TODO: might requires more test in the future
+        // compiler_fence(Release);
+        current_node.next = (next_node.ptr).into();
 
         let current_node_ptr = current_node as *mut Node<T>;
 
@@ -97,8 +100,10 @@ impl<T> CCSynch<T> {
         const H: i32 = 16;
 
         let mut counter: i32 = 0;
-
-        while let Some(next) = tmp_node.next {
+        
+        let mut next_ptr = tmp_node.next;
+        
+        while !next_ptr.ptr.is_null() {
             if counter >= H {
                 break;
             }
@@ -112,12 +117,13 @@ impl<T> CCSynch<T> {
                 }
                 tmp_node.f = None;
                 tmp_node.completed.store(true, Relaxed);
-                tmp_node.wait.store(false, Relaxed)
+                tmp_node.wait.store(false, Release);
             } else {
-                // panic!("No function found");
+                panic!("No function found");
             }
 
-            tmp_node = unsafe { &mut *(next.ptr) };
+            tmp_node = unsafe { &mut *(next_ptr.ptr) };
+            next_ptr = tmp_node.next;
         }
 
         tmp_node.wait.store(false, Release);
