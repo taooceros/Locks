@@ -14,17 +14,19 @@ use crate::{
 pub fn test_lock() {
     let fc_lock = Arc::new(LockType::FlatCombining(FcLock::new(0usize)));
     let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
-    let mut server = RclServer::new(15);
-    let server_ptr: *mut RclServer = &mut server;
-    let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
-    // inner_test(fc_lock);
+    inner_test(fc_lock);
     inner_test(cc_lock);
-    // inner_test(rcl_lock);
+    {
+        let mut server = RclServer::new(15);
+        let server_ptr: *mut RclServer = &mut server;
+        let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
+        inner_test(rcl_lock);
+    }
 }
 
 const THREAD_NUM: usize = 24;
-const ITERATION: usize = 100000;
-const INNER_ITERATION: usize = 100000;
+const ITERATION: usize = 10000;
+const INNER_ITERATION: usize = 10000;
 
 pub fn inner_test(lock: Arc<LockType<usize>>) {
     let mut handles = vec![];

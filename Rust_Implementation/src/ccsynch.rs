@@ -74,7 +74,7 @@ impl<T> CCSynch<T> {
         });
         // Compiler fence seems to be enough for synchronization given the argument in the orignal paper
         // TODO: might requires more test in the future
-        // compiler_fence(Release);
+        compiler_fence(Release);
         current_node.next = (next_node.ptr).into();
 
         let current_node_ptr = current_node as *mut Node<T>;
@@ -117,7 +117,9 @@ impl<T> CCSynch<T> {
                 }
                 tmp_node.f = None;
                 tmp_node.completed.store(true, Relaxed);
-                tmp_node.wait.store(false, Release);
+                // note for x86 there's no need for another fence
+                compiler_fence(Release);                
+                tmp_node.wait.store(false, Relaxed);
             } else {
                 panic!("No function found");
             }
