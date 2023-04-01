@@ -65,7 +65,11 @@ impl<T: Send + Sync> FcLock<T> {
                     // println!("insert {}", COUNTER.fetch_add(1, Ordering::AcqRel));
                     let mut current = self.head.load(Ordering::Acquire);
                     loop {
-                        (*node).next = Some(current.into());
+                        (*node).next = if current.is_null() {
+                            None
+                        } else {
+                            Some(current.into())
+                        };
                         match self.head.compare_exchange_weak(
                             current,
                             node,

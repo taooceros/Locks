@@ -21,6 +21,6 @@ unsafe impl Send for I32Unsafe {}
 unsafe impl Sync for I32Unsafe {}
 
 fn main() {
-    benchmark::benchmark();
-    // unit_test::test_lock();
+    // benchmark::benchmark();
+    unit_test::test_lock();
 }
