@@ -9,6 +9,7 @@ mod unit_test;
 pub mod flatcombining;
 pub mod ccsynch;
 pub mod rcl;
+pub mod guard;
 
 
 // I have some magic semantics for some synchronization primitive!

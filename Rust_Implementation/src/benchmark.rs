@@ -11,12 +11,11 @@ use std::{
     time::Duration,
 };
 
-use once_cell::sync::Lazy;
 use quanta::Clock;
 
 use crate::{
     ccsynch::CCSynch,
-    flatcombining::{FCGuard, FcLock},
+    flatcombining::{FcLock},
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
@@ -64,18 +63,17 @@ pub fn benchmark() {
     }
 
 
-    // let mut server = RclServer::new(15);
-    // let lock = RclLock::new(&mut server, 0u64);
-
     inner_benchmark(
         Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
         output_path,
     );
-    // inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
-    // inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
+    inner_benchmark(Arc::new(LockType::Mutex(Mutex::new(0u64))), output_path);
+    inner_benchmark(Arc::new(LockType::CCSynch(CCSynch::new(0u64))), output_path);
 
 
-    // inner_benchmark(Arc::new(LockType::RCL(lock)), output_path);
+    let mut server = RclServer::new(15);
+    let lock = RclLock::new(&mut server, 0u64);
+    inner_benchmark(Arc::new(LockType::RCL(lock)), output_path);
 
     println!("Benchmark finished");
 }
@@ -150,7 +148,7 @@ fn benchmark_num_threads(
             match *lock_type {
                 LockType::FlatCombining(ref fc_lock) => {
                     while !stop.load(Ordering::Acquire) {
-                        fc_lock.lock(&mut |guard: &mut FCGuard<u64>| {
+                        fc_lock.lock(&mut |guard| {
                             let timer = Clock::new();
                             let begin = timer.now();
 

@@ -1,15 +1,15 @@
 use std::{sync::{Arc, Mutex}, thread};
 
-use crate::{ccsynch::CCSynch};
+use crate::{ccsynch::CCSynch, flatcombining::FcLock};
 
 pub fn test_lock() {
-    let counter = Arc::new(CCSynch::new(0i64));
+    let counter = Arc::new(FcLock::new(0i64));
 
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));
 
-    for i in 0..32 {
+    for i in 0..128 {
         let lock_ref = counter.clone();
         let _lock_ref_mutex = counter_mutex.clone();
 

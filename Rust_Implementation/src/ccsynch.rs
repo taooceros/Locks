@@ -4,11 +4,13 @@ use std::{
     ops::{Deref, DerefMut},
     sync::atomic::{
         AtomicBool, AtomicPtr,
-        Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst},
+        Ordering::{Acquire, Relaxed, Release, SeqCst},
     },
 };
 
 use thread_local::ThreadLocal;
+
+use crate::guard::Guard;
 
 pub struct CCSynch<T> {
     data: SyncUnsafeCell<T>,
@@ -16,26 +18,8 @@ pub struct CCSynch<T> {
     local_node: ThreadLocal<SyncUnsafeCell<NodePtr<T>>>,
 }
 
-pub struct CCGuard<'a, T: Sized> {
-    lock: &'a CCSynch<T>,
-}
-
-impl<'a, T: Sized> Deref for CCGuard<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        unsafe { &*self.lock.data.get() }
-    }
-}
-
-impl<'a, T: Sized> DerefMut for CCGuard<'a, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.lock.data.get() }
-    }
-}
-
 struct Operation<T> {
-    f: *mut (dyn FnMut(&mut CCGuard<T>)),
+    f: *mut (dyn FnMut(&mut Guard<T>)),
 }
 
 unsafe impl<T> Sync for Operation<T> {}
@@ -104,7 +88,7 @@ impl<T> CCSynch<T> {
         }
     }
 
-    pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut CCGuard<'a, T>) + 'a)) {
+    pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut Guard<'a, T>) + 'a)) {
         let node_cell = self
             .local_node
             .get_or(|| SyncUnsafeCell::new(NodePtr::from(Box::into_raw(Box::new(Node::new())))));
@@ -152,7 +136,7 @@ impl<T> CCSynch<T> {
                 counter += 1;
 
                 if let Some(ref f) = tmp_node.f {
-                    let mut guard = CCGuard { lock: self };
+                    let mut guard = Guard::new(&self.data);
                     (*(f.f))(&mut guard);
                     tmp_node.f = None;
                     tmp_node.completed.store(true, Relaxed);
