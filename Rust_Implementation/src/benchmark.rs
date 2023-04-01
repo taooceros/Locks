@@ -16,7 +16,7 @@ use quanta::Clock;
 use crate::{
     ccsynch::CCSynch,
     flatcombining::{FcLock},
-    rcl::{rcllock::RclLock, rclserver::RclServer},
+    rcl::{rcllock::RclLock, rclserver::RclServer}, dlock::DLock,
 };
 
 enum LockType {

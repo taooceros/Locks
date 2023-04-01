@@ -1,13 +1,13 @@
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
-    ops::{Deref, DerefMut},
+    ops::Deref,
     sync::atomic::{AtomicUsize, Ordering::*},
     thread::yield_now,
 };
 
 pub mod rcllockptr;
-use crate::{guard::Guard, syncptr::SyncMutPtr};
+use crate::{dlock::DLock, guard::Guard, syncptr::SyncMutPtr};
 
 use super::{rclrequest::*, rclserver::*};
 pub(crate) use rcllockptr::*;
@@ -18,6 +18,11 @@ pub struct RclLock<T: Sized> {
     pub(super) data: SyncUnsafeCell<T>,
 }
 
+impl<T> DLock<T> for RclLock<T> {
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+        self.lock(f);
+    }
+}
 
 impl<T> RclLock<T> {
     pub fn new<'a>(server: *mut RclServer, t: T) -> RclLock<T> {

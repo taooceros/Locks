@@ -3,7 +3,7 @@ use std::{sync::{Arc, Mutex}, thread};
 use crate::{ccsynch::CCSynch, flatcombining::FcLock};
 
 pub fn test_lock() {
-    let counter = Arc::new(FcLock::new(0i64));
+    let counter = Arc::new(CCSynch::new(0i64));
 
     let mut handles = vec![];
 

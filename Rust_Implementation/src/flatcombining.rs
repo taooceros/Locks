@@ -1,15 +1,14 @@
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
-    ptr::null_mut,
     sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
     time::Duration,
 };
 
-use crate::{guard::*, syncptr::SyncMutPtr};
+use crate::{guard::*, syncptr::SyncMutPtr, dlock::DLock};
 use std::hint::spin_loop;
 
-use linux_futex::{Futex, Private};
+use linux_futex::Futex;
 use lockfree::tls::ThreadLocal;
 
 pub struct FcLock<T> {
@@ -23,7 +22,13 @@ pub struct FcLock<T> {
 mod node;
 use self::node::*;
 
-impl<T: Send + Sync> FcLock<T> {
+impl<T> DLock<T> for FcLock<T>{
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+        self.lock(f);
+    }
+}
+
+impl<T> FcLock<T> {
     pub fn new(t: T) -> FcLock<T> {
         FcLock {
             pass: AtomicI32::new(0),
@@ -33,7 +38,7 @@ impl<T: Send + Sync> FcLock<T> {
             local_node: ThreadLocal::new(),
         }
     }
-
+    
     pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);
         unsafe {
@@ -116,6 +121,7 @@ impl<T: Send + Sync> FcLock<T> {
         }
     }
 
+
     fn scan_and_combining(&self, head: &AtomicPtr<Node<T>>, pass: i32) {
         let head_ptr = head.load(Ordering::Relaxed);
         let mut current_opt = if head_ptr.is_null() {
@@ -124,8 +130,8 @@ impl<T: Send + Sync> FcLock<T> {
             Some(SyncMutPtr::from(head_ptr))
         };
 
-        while let Some(current_ptr) = current_opt {
-            let current = unsafe { &mut *current_ptr.ptr };
+        while let Some(current) = current_opt {
+            let current = unsafe { &mut *current.ptr };
             unsafe {
                 let mut node_data = &mut *current.value.get();
 
