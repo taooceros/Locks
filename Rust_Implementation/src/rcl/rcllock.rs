@@ -7,9 +7,9 @@ use std::{
 };
 
 pub mod rcllockptr;
-use crate::guard::Guard;
+use crate::{guard::Guard, syncptr::SyncMutPtr};
 
-use super::{rclrequest::*, rclserver::*, syncptr::SyncMutPtr};
+use super::{rclrequest::*, rclserver::*};
 pub(crate) use rcllockptr::*;
 
 pub struct RclLock<T: Sized> {

@@ -11,8 +11,9 @@ use linux_futex::{Futex, Private};
 use super::{
     rclrequest::{RclRequest, RequestCallable},
     rclserver::*,
-    syncptr::{SyncMutPtr, SyncPtr},
 };
+
+use crate::syncptr::*;
 
 pub struct RclThread {
     server: SyncMutPtr<RclServer>,

@@ -10,7 +10,8 @@ pub mod flatcombining;
 pub mod ccsynch;
 pub mod rcl;
 pub mod guard;
-
+pub(crate) mod operation;
+pub(crate) mod syncptr;
 
 // I have some magic semantics for some synchronization primitive!
 #[derive(Debug, Clone, Copy)]

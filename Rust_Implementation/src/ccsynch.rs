@@ -10,20 +10,13 @@ use std::{
 
 use thread_local::ThreadLocal;
 
-use crate::guard::Guard;
+use crate::{guard::Guard, operation::Operation};
 
 pub struct CCSynch<T> {
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<T>>,
     local_node: ThreadLocal<SyncUnsafeCell<NodePtr<T>>>,
 }
-
-struct Operation<T> {
-    f: *mut (dyn FnMut(&mut Guard<T>)),
-}
-
-unsafe impl<T> Sync for Operation<T> {}
-unsafe impl<T> Send for Operation<T> {}
 
 struct Node<T> {
     f: Option<Operation<T>>,
@@ -146,7 +139,7 @@ impl<T> CCSynch<T> {
                 }
 
                 tmp_node = &mut *(next.ptr);
-            } 
+            }
 
             tmp_node.wait.store(false, Release);
         }

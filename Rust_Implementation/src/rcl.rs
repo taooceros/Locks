@@ -3,5 +3,3 @@ pub mod rclserver;
 pub mod rcllock;
 pub mod rclrequest;
 
-mod syncptr;
-
