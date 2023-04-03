@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{guard::*, syncptr::SyncMutPtr, dlock::DLock};
+use crate::{dlock::DLock, guard::*, syncptr::SyncMutPtr};
 use std::hint::spin_loop;
 
 use linux_futex::Futex;
@@ -22,7 +22,7 @@ pub struct FcLock<T> {
 mod node;
 use self::node::*;
 
-impl<T> DLock<T> for FcLock<T>{
+impl<T> DLock<T> for FcLock<T> {
     fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
         self.lock(f);
     }
@@ -38,7 +38,7 @@ impl<T> FcLock<T> {
             local_node: ThreadLocal::new(),
         }
     }
-    
+
     pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);
         unsafe {
@@ -121,7 +121,6 @@ impl<T> FcLock<T> {
         }
     }
 
-
     fn scan_and_combining(&self, head: &AtomicPtr<Node<T>>, pass: i32) {
         let head_ptr = head.load(Ordering::Relaxed);
         let mut current_opt = if head_ptr.is_null() {
@@ -139,6 +138,7 @@ impl<T> FcLock<T> {
                     node_data.age = pass;
                     (*fnc)(&mut Guard::new(&self.data));
                     node_data.f = None;
+                    node_data.waiter.value.store(1, Ordering::Relaxed);
                     node_data.waiter.wake(1);
                 }
 

@@ -1,12 +1,14 @@
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
+    ptr::null_mut,
     sync::atomic::{
-        AtomicBool, AtomicPtr,
-        Ordering::{Acquire, Relaxed, Release, SeqCst}, compiler_fence,
-    }, ptr::null_mut,
+        compiler_fence, AtomicBool, AtomicPtr,
+        Ordering::{Acquire, Relaxed, Release, SeqCst},
+    },
 };
 
+use linux_futex::{Futex, Private};
 use lockfree::tls::ThreadLocal;
 
 use crate::{dlock::DLock, guard::Guard, operation::Operation, syncptr::SyncMutPtr};
@@ -19,16 +21,16 @@ pub struct CCSynch<T> {
 
 struct Node<T> {
     f: Option<Operation<T>>,
-    wait: AtomicBool,
+    wait: Futex<Private>,
     completed: AtomicBool,
-    next: SyncMutPtr<Node<T>>
+    next: SyncMutPtr<Node<T>>,
 }
 
 impl<T> Node<T> {
     pub fn new() -> Node<T> {
         Node {
             f: None,
-            wait: AtomicBool::new(false),
+            wait: Futex::new(1),
             completed: AtomicBool::new(false),
             next: SyncMutPtr::from(null_mut()),
         }
@@ -61,7 +63,7 @@ impl<T> CCSynch<T> {
 
         unsafe {
             (*next_node.ptr).next = SyncMutPtr::from(null_mut());
-            (*next_node.ptr).wait.store(true, Relaxed);
+            (*next_node.ptr).wait.value.store(0, Relaxed);
             (*next_node.ptr).completed.store(false, Relaxed);
         }
 
@@ -84,11 +86,14 @@ impl<T> CCSynch<T> {
             *(node_cell.get()) = SyncMutPtr::from(current_node_ptr);
         }
 
+        current_node.wait.wait(0);
+
         // wait for completion
-        while current_node.wait.load(Acquire) {
-            // can use futex in the future
-            std::hint::spin_loop();
-        }
+        // spinning
+        // while current_node.wait.load(Acquire) {
+        //     // can use futex in the future
+        //     std::hint::spin_loop();
+        // }
 
         // check for completion, if not become the combiner
 
@@ -100,9 +105,9 @@ impl<T> CCSynch<T> {
         const H: i32 = 16;
 
         let mut counter: i32 = 0;
-        
+
         let mut next_ptr = tmp_node.next;
-        
+
         while !next_ptr.ptr.is_null() {
             if counter >= H {
                 break;
@@ -118,8 +123,9 @@ impl<T> CCSynch<T> {
                 tmp_node.f = None;
                 tmp_node.completed.store(true, Relaxed);
                 // note for x86 there's no need for another fence
-                compiler_fence(Release);                
-                tmp_node.wait.store(false, Relaxed);
+                compiler_fence(Release);
+                tmp_node.wait.value.store(1, Relaxed);
+                tmp_node.wait.wake(1);
             } else {
                 panic!("No function found");
             }
@@ -128,6 +134,7 @@ impl<T> CCSynch<T> {
             next_ptr = tmp_node.next;
         }
 
-        tmp_node.wait.store(false, Release);
+        tmp_node.wait.value.store(1, Relaxed);
+        tmp_node.wait.wake(1);
     }
 }
