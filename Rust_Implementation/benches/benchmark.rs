@@ -1,5 +1,9 @@
 use core_affinity::*;
+use criterion::measurement::WallTime;
+use criterion::BenchmarkGroup;
+use criterion::BenchmarkId;
 use quanta::Clock;
+use std::fmt;
 use std::{sync::Arc, thread::*, time::Duration};
 use tester::rcl::rcllock::*;
 use tester::rcl::rclserver::*;
@@ -15,43 +19,63 @@ use tester::rcl::*;
 const ITERATION: u64 = 100000;
 const THREAD_CPU_RATIO: usize = 1;
 
-pub fn ccbench(bencher: &mut Criterion) {
-    let cpu_count = available_parallelism().unwrap();
-    let thread_count = cpu_count.get() * THREAD_CPU_RATIO;
+pub fn lock_bench(bencher: &mut Criterion) {
+    let cpu_count = available_parallelism().unwrap().get();
+    let thread_count = cpu_count * THREAD_CPU_RATIO;
 
-    bencher.bench_function("cc synch benchmark", |b| {
-        b.iter(|| {
-            let cc = Arc::new(LockType::CCSynch(CCSynch::new(0u64)));
-            cooperative_counter((cc), cpu_count.get(), thread_count, ITERATION);
-        });
-    });
+    let mut group = bencher.benchmark_group("Delegation Locks");
+
+    for i in [2, 4, 8, 16, 32, 64, 128].iter() {
+        let thread = i * THREAD_CPU_RATIO;
+        ccbench(&mut group, cpu_count, thread);
+        fcbench(&mut group, cpu_count, thread);
+        rclbench(&mut group, cpu_count, thread);
+    }
+
+    group.finish();
 }
 
-pub fn fcbench(bencher: &mut Criterion) {
-    let cpu_count = available_parallelism().unwrap();
-    let thread_count = cpu_count.get() * THREAD_CPU_RATIO;
-
-    bencher.bench_function("flatcombining benchmark", |b| {
-        b.iter(|| {
-            let cc = Arc::new(LockType::FlatCombining(FcLock::new(0u64)));
-            cooperative_counter((cc), cpu_count.get(), thread_count, ITERATION);
-        });
-    });
+pub fn ccbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
+    bencher.bench_with_input(
+        BenchmarkId::new("cc-synch", thread_count),
+        &cpu_count,
+        |b, i| {
+            b.iter(|| {
+                let cc = Arc::new(LockType::CCSynch(CCSynch::new(0u64)));
+                cooperative_counter(cc, cpu_count, thread_count, ITERATION);
+            });
+        },
+    );
 }
 
-pub fn rclbench(bencher: &mut Criterion) {
-    let cpu_count = available_parallelism().unwrap();
-    let thread_count = cpu_count.get() * THREAD_CPU_RATIO;
+pub fn fcbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
+    bencher.bench_with_input(
+        BenchmarkId::new("flatcombining", &thread_count),
+        &cpu_count,
+        |b, i| {
+            b.iter(|| {
+                let cc = Arc::new(LockType::FlatCombining(FcLock::new(0u64)));
+                cooperative_counter(cc, cpu_count, thread_count, ITERATION);
+            });
+        },
+    );
+}
 
-    let mut server = RclServer::new(cpu_count.get() - 1);
+pub fn rclbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
+    let mut server = RclServer::new(cpu_count - 1);
 
     let server_ptr = &mut server as *mut RclServer;
-    bencher.bench_function("remote core locking benchmark", |b| {
-        b.iter(|| {
-            let cc = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0u64)));
-            cooperative_counter((cc), cpu_count.get() - 1, thread_count, ITERATION);
-        });
-    });
+
+    bencher.bench_with_input(
+        BenchmarkId::new("remote-core-locking", thread_count),
+        &cpu_count,
+        |b, i| {
+            b.iter(|| {
+                let cc = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0u64)));
+                cooperative_counter(cc, cpu_count - 1, thread_count, ITERATION);
+            });
+        },
+    );
 }
 
 fn cooperative_counter(
@@ -103,6 +127,6 @@ fn cooperative_counter(
     return;
 }
 
-criterion_group!(benches, ccbench, fcbench, rclbench);
+criterion_group!(benches, lock_bench);
 
 criterion_main!(benches);

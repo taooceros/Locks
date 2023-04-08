@@ -1,7 +1,9 @@
 use std::{
     sync::{Arc, Mutex},
-    thread,
+    thread::{self, available_parallelism},
 };
+
+use serial_test::serial;
 
 use crate::{
     ccsynch::CCSynch,
@@ -10,25 +12,42 @@ use crate::{
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
+#[serial]
 #[test]
-pub fn test_lock() {
+pub fn fc_test() {
+    let cpu_count = available_parallelism().unwrap().get();
+
     let fc_lock = Arc::new(LockType::FlatCombining(FcLock::new(0usize)));
-    let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
-    inner_test(fc_lock);
-    inner_test(cc_lock);
-    {
-        let mut server = RclServer::new(15);
-        let server_ptr: *mut RclServer = &mut server;
-        let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
-        inner_test(rcl_lock);
-    }
+    inner_test(fc_lock, cpu_count);
+
+    // rcl need one cpu free
 }
 
-const THREAD_NUM: usize = 24;
+#[serial]
+#[test]
+pub fn cc_test() {
+    let cpu_count = available_parallelism().unwrap().get();
+
+    let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
+    inner_test(cc_lock, cpu_count);
+}
+
+#[serial]
+#[test]
+pub fn rcl_test() {
+    let cpu_count = available_parallelism().unwrap().get();
+
+    let mut server = RclServer::new(cpu_count - 1);
+    let server_ptr: *mut RclServer = &mut server;
+    let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
+    inner_test(rcl_lock, cpu_count - 1);
+}
+
+const THREAD_NUM: usize = 127;
 const ITERATION: usize = 10000;
 const INNER_ITERATION: usize = 10000;
 
-pub fn inner_test(lock: Arc<LockType<usize>>) {
+pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));
@@ -38,7 +57,7 @@ pub fn inner_test(lock: Arc<LockType<usize>>) {
         let _lock_ref_mutex = counter_mutex.clone();
 
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
-            core_affinity::set_for_current(core_affinity::CoreId { id: i as usize });
+            core_affinity::set_for_current(core_affinity::CoreId { id: i % cpu_count });
             for _ in 0..ITERATION {
                 lock_ref.lock(&mut |guard| {
                     for _ in 0..INNER_ITERATION {
