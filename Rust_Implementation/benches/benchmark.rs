@@ -80,11 +80,15 @@ fn bench_inner(
                 **guard = 0;
             });
             black_box(cooperative_counter(
-                lock,
+                lock.clone(),
                 cpu_count - 1,
                 thread_count,
                 ITERATION,
             ));
+
+            lock.lock(&mut |guard| {
+                assert_eq!(ITERATION, **guard);
+            });
         });
     });
 }
