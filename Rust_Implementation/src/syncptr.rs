@@ -1,5 +1,3 @@
-
-
 #[derive(Debug)]
 pub struct SyncMutPtr<T> {
     pub ptr: *mut T,
