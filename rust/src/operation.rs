@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::guard::Guard;
 
 pub(crate) struct Operation<T> {

@@ -61,30 +61,31 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         }
     }
     inner_benchmark(
-        Arc::new(LockType::FlatCombining(FcLock::new(0u64))),
+        Arc::new(LockType::from(FcLock::new(0u64))),
         num_cpu,
         num_thread,
         output_path,
     );
     inner_benchmark(
-        Arc::new(LockType::Mutex(Mutex::new(0u64))),
+        Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
         num_thread,
         output_path,
     );
     inner_benchmark(
-        Arc::new(LockType::CCSynch(CCSynch::new(0u64))),
+        Arc::new(LockType::from(CCSynch::new(0u64))),
         num_cpu,
         num_thread,
         output_path,
     );
 
-    let mut server = RclServer::new(num_cpu - 1);
+    let mut server = RclServer::new();
+    server.start(num_cpu - 1);
     let lock = RclLock::new(&mut server, 0u64);
     inner_benchmark(
         Arc::new(LockType::RCL(lock)),
         num_cpu - 1,
-        num_thread - 1,
+        num_thread,
         output_path,
     );
 

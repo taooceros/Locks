@@ -14,7 +14,7 @@ use dlock::flatcombining::*;
 use dlock::rcl::rcllock::*;
 use dlock::rcl::rclserver::*;
 
-const ITERATION: u64 = 1000000;
+const ITERATION: u64 = 1000;
 const THREAD_CPU_RATIO: usize = 1;
 
 pub fn lock_bench(bencher: &mut Criterion) {
@@ -22,7 +22,7 @@ pub fn lock_bench(bencher: &mut Criterion) {
 
     let mut group = bencher.benchmark_group("Delegation Locks");
 
-    for i in [2, 4, 8, 16, 32, 64].iter() {
+    for i in [2, 4, 8].iter() {
         let thread = i * THREAD_CPU_RATIO;
         ccbench(&mut group, cpu_count, thread);
         fcbench(&mut group, cpu_count, thread);
@@ -51,7 +51,9 @@ pub fn fcbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_
 }
 
 pub fn rclbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
-    let mut server = RclServer::new(cpu_count - 1);
+    let mut server = RclServer::new();
+
+    server.start(cpu_count - 1);
 
     let server_ptr = &mut server as *mut RclServer;
     let cc = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0u64)));
@@ -117,17 +119,12 @@ fn cooperative_counter(
                         // println!("{}", now_value);
                         lock.lock(&mut |guard| {
                             let begin = timer.now();
-                            loop {
-                                now_value = **guard;
-                                if now_value >= threshold {
-                                    break;
-                                }
-                                if timer.now().duration_since(begin) >= single_iter_duration {
-                                    break;
-                                }
-
-                                **guard += 1;
+                            now_value = **guard;
+                            if now_value >= threshold {
+                                return;
                             }
+
+                            **guard += 1;
                         })
                     }
                 })

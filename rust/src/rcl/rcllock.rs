@@ -38,22 +38,25 @@ impl<T> RclLock<T> {
 
         let server = unsafe { &mut *serverptr };
 
-        let client_id = server.client_id.with_init(|| {
+        let client_id = server.client_id.get_or(|| {
             let id = server.num_clients.fetch_add(1, Relaxed);
             id
         });
 
-        let mut request: &mut RclRequest<T> =
-            unsafe { transmute(&mut (server.requests[*client_id])) };
+        let request: &mut RclRequest<T> = unsafe { transmute(&mut (server.requests[*client_id])) };
 
         request.lock = self.into();
         let real_me = client_id;
         request.real_me = *real_me;
 
-        request.f = Some(unsafe { transmute(f) });
+        unsafe {
+            let f_request = &mut *(request.f.get());
 
-        while request.f.is_some() {
-            yield_now();
+            *f_request = Some(transmute(f));
+
+            while f_request.is_some() {
+                yield_now();
+            }
         }
     }
 }

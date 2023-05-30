@@ -12,40 +12,37 @@ use crate::{
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
-#[serial]
 #[test]
 pub fn fc_test() {
     let cpu_count = available_parallelism().unwrap().get();
 
-    let fc_lock = Arc::new(LockType::FlatCombining(FcLock::new(0usize)));
+    let fc_lock = Arc::new(LockType::from(FcLock::new(0usize)));
     inner_test(fc_lock, cpu_count);
 
     // rcl need one cpu free
 }
 
-#[serial]
 #[test]
 pub fn cc_test() {
     let cpu_count = available_parallelism().unwrap().get();
 
-    let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
+    let cc_lock = Arc::new(LockType::from(CCSynch::new(0usize)));
     inner_test(cc_lock, cpu_count);
 }
 
-#[serial]
 #[test]
 pub fn rcl_test() {
     let cpu_count = available_parallelism().unwrap().get();
-
-    let mut server = RclServer::new(cpu_count - 1);
+    let mut server = RclServer::new();
+    server.start(cpu_count - 1);
     let server_ptr: *mut RclServer = &mut server;
-    let rcl_lock = Arc::new(LockType::RCL(RclLock::new(server_ptr, 0)));
+    let rcl_lock = Arc::new(LockType::from(RclLock::new(server_ptr, 0)));
     inner_test(rcl_lock, cpu_count - 1);
 }
 
 const THREAD_NUM: usize = 127;
 const ITERATION: usize = 10000;
-const INNER_ITERATION: usize = 10000;
+const INNER_ITERATION: usize = 100000;
 
 pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
     let mut handles = vec![];
