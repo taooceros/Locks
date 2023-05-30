@@ -1,5 +1,3 @@
-
-
 use super::*;
 
 pub struct RclLockPtr<T: Sized> {
@@ -29,8 +27,6 @@ impl<T> From<&RclLock<T>> for RclLockPtr<T> {
     }
 }
 
-
-
 // implement Deref and DerefMut for RclLockPtr<T> to get the lock
 
 impl<T> Deref for RclLockPtr<T> {
@@ -40,4 +36,3 @@ impl<T> Deref for RclLockPtr<T> {
         unsafe { &*self.lock }
     }
 }
-

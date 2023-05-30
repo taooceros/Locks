@@ -1,5 +1,4 @@
-use std::fmt::Debug;
-
+use std::{cell::SyncUnsafeCell, fmt::Debug};
 
 use crate::guard::Guard;
 
@@ -9,7 +8,7 @@ use super::rcllock::*;
 pub struct RclRequest<T> {
     pub(super) real_me: usize,
     pub(super) lock: RclLockPtr<T>,
-    pub(super) f: Option<*mut (dyn FnMut(&mut Guard<T>))>,
+    pub(super) f: SyncUnsafeCell<Option<*mut (dyn FnMut(&mut Guard<T>))>>,
 }
 
 unsafe impl<T> Send for RclRequest<T> {}
@@ -20,7 +19,7 @@ impl<T> Debug for RclRequest<T> {
         f.debug_struct("RclRequest")
             .field("real_me", &self.real_me)
             .field("lock", &(self.lock.lock as usize))
-            .field("f", &self.f.is_some())
+            .field("f", &(unsafe { *self.f.get() }).is_some())
             .finish()
     }
 }
@@ -30,7 +29,7 @@ impl<T> RclRequest<T> {
         RclRequest {
             real_me: 0,
             lock: lock.into(),
-            f: None,
+            f: SyncUnsafeCell::new(None),
         }
     }
 }
@@ -61,7 +60,9 @@ pub trait RequestCallable: Sized {
 
 impl<T> RequestCallable for RclRequest<T> {
     fn call(&mut self) {
-        if let Some(f) = self.f {
+        let f_option = unsafe { &mut *self.f.get() };
+
+        if let Some(f) = *f_option {
             if self.lock.lock.is_null() {
                 panic!("lock is null");
             }
@@ -70,7 +71,7 @@ impl<T> RequestCallable for RclRequest<T> {
             unsafe {
                 (*f)(&mut guard);
             }
-            self.f = None;
+            *f_option = None;
         }
     }
 }

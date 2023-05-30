@@ -9,7 +9,6 @@ pub trait DLock<T> {
     fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b));
 }
 
-
 #[enum_dispatch(DLock<T>)]
 pub enum LockType<T> {
     FlatCombining(FcLock<T>),

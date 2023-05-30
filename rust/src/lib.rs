@@ -1,4 +1,6 @@
 #![feature(sync_unsafe_cell)]
+#![feature(pointer_is_aligned)]
+#![feature(type_alias_impl_trait)]
 
 pub mod ccsynch;
 pub mod dlock;

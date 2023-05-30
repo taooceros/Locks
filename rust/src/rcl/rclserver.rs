@@ -1,21 +1,22 @@
-use std::{
-    collections::LinkedList,
-    mem::{size_of},
-    ptr::{null},
-    sync::{
-        atomic::{Ordering::*, *},
-    },
-};
+use crossbeam::queue::ArrayQueue;
 
-use lockfree::{stack::Stack, tls::ThreadLocal};
+use std::{
+    cell::SyncUnsafeCell,
+    collections::LinkedList,
+    mem::size_of,
+    ptr::null,
+    sync::atomic::{Ordering::*, *},
+};
+use thread_local::ThreadLocal;
 
 use super::rcllock::RclLockPtr;
 
 use super::{rclrequest::*, rclthread::RclThread};
 
+#[derive(Debug)]
 pub struct RclServer {
     threads: LinkedList<RclThread>,
-    pub(super) prepared_threads: Stack<&'static RclThread>,
+    pub(super) prepared_threads: ArrayQueue<&'static RclThread>,
     pub(super) num_free_threads: AtomicI32,
     pub(super) num_serving_threads: AtomicI32,
     pub num_clients: AtomicUsize,
@@ -40,19 +41,19 @@ impl Drop for RclServer {
 }
 
 impl RclServer {
-    pub fn new(cpuid: usize) -> RclServer {
-        let mut server = RclServer {
+    pub fn new() -> RclServer {
+        RclServer {
             threads: LinkedList::new(),
-            prepared_threads: Stack::new(),
+            prepared_threads: ArrayQueue::new(128),
             num_free_threads: AtomicI32::new(0),
             num_serving_threads: AtomicI32::new(0),
             num_clients: AtomicUsize::new(0),
             timestmap: 0,
             is_alive: true,
-            _cpu: cpuid,
+            _cpu: 0,
             client_id: ThreadLocal::new(),
             requests: {
-                assert!(size_of::<RclRequestSized>() == size_of::<RclRequest<u8>>());
+                assert_eq!(size_of::<RclRequestSized>(), size_of::<RclRequest<u8>>());
 
                 // this is very unsafe (bypass even type check) and require careful check
                 // the RclRequest should only contains pointer/ref to the data, so size of RclRequest
@@ -61,25 +62,30 @@ impl RclServer {
                 v.resize_with(128, || RclRequest {
                     real_me: 0,
                     lock: RclLockPtr::from(null()),
-                    f: None,
+                    f: SyncUnsafeCell::new(None),
                 });
 
                 v
                 // panic if unable to allocate
             },
-        };
-
-        let thread = RclThread::new((&mut server).into(), cpuid);
-
-        server.threads.push_back(thread);
-
-        let thread = server.threads.back_mut().unwrap();
-        thread.run(cpuid);
-        server.num_free_threads.fetch_add(1, SeqCst);
-        return server;
+        }
     }
 
-    fn start_thread(thread : *mut RclThread) {
+    pub fn start(&mut self, cpuid: usize) {
+        self._cpu = cpuid;
+
+        let server_ptr = self as *mut RclServer;
+
+        let thread = RclThread::new(server_ptr.into(), cpuid);
+
+        self.threads.push_back(thread);
+
+        let thread = self.threads.back_mut().unwrap();
+        thread.run(cpuid);
+        self.num_free_threads.fetch_add(1, SeqCst);
+    }
+
+    fn start_thread(thread: *mut RclThread) {
         let thread = unsafe { &mut *thread };
         thread.waiting_to_serve.wake(1);
     }

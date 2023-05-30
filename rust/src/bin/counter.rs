@@ -79,7 +79,8 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         output_path,
     );
 
-    let mut server = RclServer::new(num_cpu - 1);
+    let mut server = RclServer::new();
+    server.start(num_cpu - 1);
     let lock = RclLock::new(&mut server, 0u64);
     inner_benchmark(
         Arc::new(LockType::RCL(lock)),

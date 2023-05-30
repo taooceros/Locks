@@ -4,12 +4,12 @@ use std::{
     sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
     time::Duration,
 };
+use thread_local::ThreadLocal;
 
 use crate::{dlock::DLock, guard::*, syncptr::SyncMutPtr};
 use std::hint::spin_loop;
 
 use linux_futex::Futex;
-use lockfree::tls::ThreadLocal;
 
 pub struct FcLock<T> {
     pass: AtomicI32,
@@ -44,7 +44,7 @@ impl<T> FcLock<T> {
         unsafe {
             let node = self
                 .local_node
-                .with_init(|| {
+                .get_or(|| {
                     SyncUnsafeCell::new(Node {
                         value: SyncUnsafeCell::new(NodeData {
                             age: 0,
