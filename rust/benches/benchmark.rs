@@ -14,7 +14,7 @@ use dlock::flatcombining::*;
 use dlock::rcl::rcllock::*;
 use dlock::rcl::rclserver::*;
 
-const ITERATION: u64 = 1000000;
+const ITERATION: u64 = 1000;
 const THREAD_CPU_RATIO: usize = 1;
 
 pub fn lock_bench(bencher: &mut Criterion) {
@@ -22,7 +22,7 @@ pub fn lock_bench(bencher: &mut Criterion) {
 
     let mut group = bencher.benchmark_group("Delegation Locks");
 
-    for i in [2, 4, 8, 16, 32, 64].iter() {
+    for i in [2, 4, 8].iter() {
         let thread = i * THREAD_CPU_RATIO;
         ccbench(&mut group, cpu_count, thread);
         fcbench(&mut group, cpu_count, thread);

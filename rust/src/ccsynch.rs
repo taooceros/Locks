@@ -114,7 +114,9 @@ impl<T> CCSynch<T> {
 
             if tmp_node.f.is_some() {
                 let mut guard = Guard::new(&self.data);
-                tmp_node.f.take().unwrap()(&mut guard);
+                unsafe {
+                    (*tmp_node.f.take().unwrap().f)(&mut guard);
+                }
 
                 tmp_node.completed.store(true, Relaxed);
                 // note for x86 there's no need for another fence
