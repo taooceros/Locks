@@ -5,6 +5,7 @@
 pub mod ccsynch;
 pub mod dlock;
 pub mod flatcombining;
+pub mod flatcombining2;
 pub mod guard;
 pub mod rcl;
 
@@ -13,3 +14,17 @@ mod operation;
 mod syncptr;
 #[cfg(test)]
 mod unit_test;
+pub mod raw_spin_lock;
+
+pub unsafe trait RawSimpleLock {
+    fn new() -> Self;
+
+    /// Non-blocking: Try locking. If succeeding, return true, or false.
+    fn try_lock(&self) -> bool;
+
+    /// Blocking: Get locking or wait until getting locking
+    fn lock(&self);
+
+    /// Release lock
+    fn unlock(&self);
+}
