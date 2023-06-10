@@ -1,5 +1,5 @@
 #[derive(Debug)]
-pub struct SyncMutPtr<T> {
+pub struct SyncMutPtr<T : ?Sized> {
     pub ptr: *mut T,
 }
 
@@ -39,8 +39,16 @@ impl<T> Into<*const T> for SyncMutPtr<T> {
     }
 }
 
+impl<T> SyncMutPtr<T>{
+    pub fn null() -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct SyncPtr<T> {
+pub struct SyncPtr<T : ?Sized> {
     ptr: *const T,
 }
 

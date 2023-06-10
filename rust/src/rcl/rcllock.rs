@@ -7,7 +7,7 @@ use std::{
 };
 
 pub mod rcllockptr;
-use crate::{dlock::DLock, guard::Guard, syncptr::SyncMutPtr};
+use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
 
 use super::{rclrequest::*, rclserver::*};
 pub(crate) use rcllockptr::*;
@@ -19,7 +19,7 @@ pub struct RclLock<T: Sized> {
 }
 
 impl<T> DLock<T> for RclLock<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
         self.lock(f);
     }
 }
@@ -33,7 +33,7 @@ impl<T> RclLock<T> {
         }
     }
 
-    pub fn lock<'b>(&self, f: &'b mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    pub fn lock<'b>(&self, f: &'b mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
         let serverptr: *mut RclServer = self.server.into();
 
         let server = unsafe { &mut *serverptr };

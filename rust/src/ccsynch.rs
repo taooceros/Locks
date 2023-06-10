@@ -8,7 +8,7 @@ use thread_local::ThreadLocal;
 
 use linux_futex::{Futex, Private};
 
-use crate::{dlock::DLock, guard::Guard, operation::Operation, syncptr::SyncMutPtr};
+use crate::{dlock::DLock, guard::DLockGuard, operation::Operation, syncptr::SyncMutPtr};
 
 pub struct CCSynch<T> {
     data: SyncUnsafeCell<T>,
@@ -35,7 +35,7 @@ impl<T> Node<T> {
 }
 
 impl<T> DLock<T> for CCSynch<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
         self.lock(f);
     }
 }
@@ -50,7 +50,7 @@ impl<T> CCSynch<T> {
         }
     }
 
-    pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'a)) {
+    pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'a)) {
         let node_cell = self
             .local_node
             .get_or(|| SyncUnsafeCell::new(SyncMutPtr::from(Box::into_raw(Box::new(Node::new())))));
@@ -113,7 +113,7 @@ impl<T> CCSynch<T> {
             counter += 1;
 
             if tmp_node.f.is_some() {
-                let mut guard = Guard::new(&self.data);
+                let mut guard = DLockGuard::new(&self.data);
                 unsafe {
                     (*tmp_node.f.take().unwrap().f)(&mut guard);
                 }

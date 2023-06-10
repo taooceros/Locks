@@ -2,11 +2,11 @@ use std::{fmt, sync::Mutex};
 
 use enum_dispatch::enum_dispatch;
 
-use crate::{ccsynch::CCSynch, flatcombining::FcLock, guard::Guard, rcl::rcllock::RclLock};
+use crate::{ccsynch::CCSynch, flatcombining::FcLock, guard::DLockGuard, rcl::rcllock::RclLock};
 
 #[enum_dispatch]
 pub trait DLock<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b));
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b));
 }
 
 #[enum_dispatch(DLock<T>)]

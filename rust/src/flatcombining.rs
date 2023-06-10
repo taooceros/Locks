@@ -23,7 +23,7 @@ mod node;
 use self::node::*;
 
 impl<T> DLock<T> for FcLock<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
         self.lock(f);
     }
 }
@@ -39,7 +39,7 @@ impl<T> FcLock<T> {
         }
     }
 
-    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);
         unsafe {
             let node = self
@@ -136,7 +136,7 @@ impl<T> FcLock<T> {
 
                 if let Some(fnc) = node_data.f {
                     node_data.age = pass;
-                    (*fnc)(&mut Guard::new(&self.data));
+                    (*fnc)(&mut DLockGuard::new(&self.data));
                     node_data.f = None;
                     node_data.waiter.value.store(1, Ordering::Relaxed);
                     node_data.waiter.wake(1);

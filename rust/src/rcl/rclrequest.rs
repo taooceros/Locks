@@ -1,6 +1,6 @@
 use std::{cell::SyncUnsafeCell, fmt::Debug};
 
-use crate::guard::Guard;
+use crate::guard::DLockGuard;
 
 use super::rcllock::*;
 
@@ -8,7 +8,7 @@ use super::rcllock::*;
 pub struct RclRequest<T> {
     pub(super) real_me: usize,
     pub(super) lock: RclLockPtr<T>,
-    pub(super) f: SyncUnsafeCell<Option<*mut (dyn FnMut(&mut Guard<T>))>>,
+    pub(super) f: SyncUnsafeCell<Option<*mut (dyn FnMut(&mut DLockGuard<T>))>>,
 }
 
 unsafe impl<T> Send for RclRequest<T> {}
@@ -67,7 +67,7 @@ impl<T> RequestCallable for RclRequest<T> {
                 panic!("lock is null");
             }
 
-            let mut guard = Guard::new(&(*self.lock).data);
+            let mut guard = DLockGuard::new(&(*self.lock).data);
             unsafe {
                 (*f)(&mut guard);
             }
