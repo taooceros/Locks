@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, create_dir, remove_dir_all},
-    io::Write,
-    num::NonZeroUsize,
+    fs::{create_dir, remove_dir_all},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
