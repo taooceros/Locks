@@ -9,6 +9,7 @@ use crate::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
     flatcombining::FcLock,
+    guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
@@ -56,9 +57,9 @@ pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
         let handle = thread::Builder::new().name(i.to_string()).spawn(move || {
             core_affinity::set_for_current(core_affinity::CoreId { id: i % cpu_count });
             for _ in 0..ITERATION {
-                lock_ref.lock(&mut |guard| {
+                lock_ref.lock(&mut |mut guard: DLockGuard<usize>| {
                     for _ in 0..INNER_ITERATION {
-                        **guard += 1;
+                        *guard += 1;
                     }
                 });
             }
@@ -70,7 +71,9 @@ pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
         handle.unwrap().join().unwrap();
     }
 
-    lock.lock(&mut |guard| assert!(**guard == (THREAD_NUM * ITERATION * INNER_ITERATION)));
+    lock.lock(&mut |guard: DLockGuard<usize>| {
+        assert!(*guard == (THREAD_NUM * ITERATION * INNER_ITERATION))
+    });
 
     println!("finish testing {}", lock);
 }

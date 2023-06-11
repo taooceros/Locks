@@ -1,5 +1,7 @@
 use std::{cell::SyncUnsafeCell, fmt::Debug};
 
+use crossbeam::utils::CachePadded;
+
 use crate::{dlock::DLockDelegate, guard::DLockGuard};
 
 use super::rcllock::*;
@@ -8,7 +10,7 @@ use super::rcllock::*;
 pub struct RclRequest<T> {
     pub(super) real_me: usize,
     pub(super) lock: RclLockPtr<T>,
-    pub(super) f: SyncUnsafeCell<Option<*mut (dyn DLockDelegate<T>)>>,
+    pub(super) f: CachePadded<SyncUnsafeCell<Option<*mut (dyn DLockDelegate<T>)>>>,
 }
 
 unsafe impl<T> Send for RclRequest<T> {}
@@ -29,7 +31,7 @@ impl<T> RclRequest<T> {
         RclRequest {
             real_me: 0,
             lock: lock.into(),
-            f: SyncUnsafeCell::new(None),
+            f: SyncUnsafeCell::new(None).into(),
         }
     }
 }

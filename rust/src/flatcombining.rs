@@ -49,7 +49,7 @@ impl<T> FcLock<T> {
                     value: SyncUnsafeCell::new(NodeData {
                         age: 0,
                         active: false,
-                        f: None,
+                        f: None.into(),
                         waiter: Futex::new(0),
                         // id: ID.fetch_add(1, Ordering::Relaxed),
                     }),
@@ -63,7 +63,7 @@ impl<T> FcLock<T> {
         node_data.waiter.value.store(0, Ordering::Relaxed);
 
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
-        node_data.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)) };
+        node_data.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
         loop {
             if !node_data.active {
@@ -137,10 +137,10 @@ impl<T> FcLock<T> {
             unsafe {
                 let node_data = &mut *current.value.get();
 
-                if let Some(fnc) = node_data.f {
+                if let Some(fnc) = node_data.f.into_inner() {
                     node_data.age = pass;
                     (*fnc).apply(DLockGuard::new(&self.data));
-                    node_data.f = None;
+                    node_data.f = None.into();
                     node_data.waiter.value.store(1, Ordering::Relaxed);
                     node_data.waiter.wake(1);
                 }

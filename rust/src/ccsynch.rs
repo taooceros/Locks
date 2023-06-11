@@ -1,3 +1,4 @@
+use crossbeam::utils::CachePadded;
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
@@ -18,7 +19,7 @@ pub struct CCSynch<T> {
 }
 
 struct Node<T> {
-    f: Option<*mut dyn DLockDelegate<T>>,
+    f: CachePadded<Option<*mut dyn DLockDelegate<T>>>,
     wait: Futex<Private>,
     completed: AtomicBool,
     next: SyncMutPtr<Node<T>>,
@@ -30,7 +31,7 @@ unsafe impl<T> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn new() -> Node<T> {
         Node {
-            f: None,
+            f: None.into(),
             wait: Futex::new(1),
             completed: AtomicBool::new(false),
             next: SyncMutPtr::from(null_mut()),
@@ -73,7 +74,7 @@ impl<T> CCSynch<T> {
 
         // assign task to current node
         unsafe {
-            current_node.f = Some(transmute(&mut f as *mut dyn DLockDelegate<T>));
+            current_node.f = Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into();
         }
 
         // Compiler fence seems to be enough for synchronization given the argument in the orignal paper
