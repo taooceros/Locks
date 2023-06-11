@@ -9,6 +9,7 @@ use thread_local::ThreadLocal;
 use crate::{dlock::DLock, guard::*, syncptr::SyncMutPtr};
 use std::hint::spin_loop;
 
+use crate::dlock::DLockDelegate;
 use linux_futex::Futex;
 
 pub struct FcLock<T> {
@@ -23,7 +24,7 @@ mod node;
 use self::node::*;
 
 impl<T> DLock<T> for FcLock<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
+    fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
 }
@@ -39,36 +40,36 @@ impl<T> FcLock<T> {
         }
     }
 
-    pub fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b)) {
+    pub fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         // static mut ID: AtomicI32 = AtomicI32::new(0);
-        unsafe {
-            let node = self
-                .local_node
-                .get_or(|| {
-                    SyncUnsafeCell::new(Node {
-                        value: SyncUnsafeCell::new(NodeData {
-                            age: 0,
-                            active: false,
-                            f: None,
-                            waiter: Futex::new(0),
-                            // id: ID.fetch_add(1, Ordering::Relaxed),
-                        }),
-                        next: None,
-                    })
+        let node = self
+            .local_node
+            .get_or(|| {
+                SyncUnsafeCell::new(Node {
+                    value: SyncUnsafeCell::new(NodeData {
+                        age: 0,
+                        active: false,
+                        f: None,
+                        waiter: Futex::new(0),
+                        // id: ID.fetch_add(1, Ordering::Relaxed),
+                    }),
+                    next: None,
                 })
-                .get();
+            })
+            .get();
 
-            let node_data = &mut *(*node).value.get();
+        let node_data = unsafe { &mut *(*node).value.get() };
 
-            node_data.waiter.value.store(0, Ordering::Relaxed);
+        node_data.waiter.value.store(0, Ordering::Relaxed);
 
-            // it is supposed to consume the function before return, so it should be safe to erase the lifetime
-            node_data.f = Some(transmute(f));
+        // it is supposed to consume the function before return, so it should be safe to erase the lifetime
+        node_data.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)) };
 
-            loop {
-                if !((*node_data).active) {
-                    // println!("insert {}", COUNTER.fetch_add(1, Ordering::AcqRel));
-                    let mut current = self.head.load(Ordering::Acquire);
+        loop {
+            if !node_data.active {
+                // println!("insert {}", COUNTER.fetch_add(1, Ordering::AcqRel));
+                let mut current = self.head.load(Ordering::Acquire);
+                unsafe {
                     loop {
                         (*node).next = if current.is_null() {
                             None
@@ -85,37 +86,39 @@ impl<T> FcLock<T> {
                             Err(x) => current = x,
                         }
                     }
-                    node_data.active = true;
                 }
+                node_data.active = true;
+            }
 
-                if node_data.f.is_none() {
-                    return;
-                }
+            if node_data.f.is_none() {
+                return;
+            }
 
-                // assert!((*node_data).active);
+            // assert!((*node_data).active);
 
-                if self.flag.load(Ordering::Acquire) {
-                    for _ in 1..100 {
-                        spin_loop();
-                        if node_data.f.is_none() {
-                            return;
-                        }
-                    }
-                    _ = node_data.waiter.wait_for(0, Duration::from_millis(100));
+            if self.flag.load(Ordering::Acquire) {
+                for _ in 1..100 {
+                    spin_loop();
                     if node_data.f.is_none() {
                         return;
                     }
-                } else if !self.flag.swap(true, Ordering::AcqRel) {
-                    // become the combiner
-                    let current_pass = self.pass.fetch_add(1, Ordering::Relaxed);
-                    self.scan_and_combining(&self.head, current_pass + 1);
+                }
+                _ = node_data.waiter.wait_for(0, Duration::from_millis(100));
+                if node_data.f.is_none() {
+                    return;
+                }
+            } else if !self.flag.swap(true, Ordering::AcqRel) {
+                // become the combiner
+                let current_pass = self.pass.fetch_add(1, Ordering::Relaxed);
+                self.scan_and_combining(&self.head, current_pass + 1);
+                unsafe {
                     self.clean_unactive_node(&self.head, current_pass + 1);
+                }
 
-                    self.flag.swap(false, Ordering::Release);
+                self.flag.swap(false, Ordering::Release);
 
-                    if (*node_data).f.is_none() {
-                        return;
-                    }
+                if (*node_data).f.is_none() {
+                    return;
                 }
             }
         }
@@ -132,11 +135,11 @@ impl<T> FcLock<T> {
         while let Some(current) = current_opt {
             let current = unsafe { &mut *current.ptr };
             unsafe {
-                let mut node_data = &mut *current.value.get();
+                let node_data = &mut *current.value.get();
 
                 if let Some(fnc) = node_data.f {
                     node_data.age = pass;
-                    (*fnc)(&mut DLockGuard::new(&self.data));
+                    (*fnc).apply(DLockGuard::new(&self.data));
                     node_data.f = None;
                     node_data.waiter.value.store(1, Ordering::Relaxed);
                     node_data.waiter.wake(1);

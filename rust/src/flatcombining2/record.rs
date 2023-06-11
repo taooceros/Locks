@@ -5,9 +5,9 @@ use std::{
 };
 
 use crossbeam::epoch::{Atomic, Guard, Owned};
-use volatile::Volatile;
 
-use crate::{guard::DLockGuard, syncptr::{SyncPtr, SyncMutPtr}};
+
+use crate::{guard::DLockGuard};
 
 #[derive(Debug)]
 pub struct Record<T> {

@@ -1,8 +1,6 @@
 use std::{
     cell::SyncUnsafeCell,
-    mem::transmute,
-    sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering, Ordering::*},
-    time::Duration, ptr::read_volatile,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering, Ordering::*}, ptr::read_volatile,
 };
 
 use crossbeam::{
@@ -10,17 +8,16 @@ use crossbeam::{
     utils::{Backoff, CachePadded},
 };
 use thread_local::ThreadLocal;
-use volatile::Volatile;
+
 
 use crate::{
     dlock::DLock,
-    guard::{self, *},
-    syncptr::SyncMutPtr,
+    guard::{*},
     RawSimpleLock,
 };
-use std::hint::spin_loop;
 
-use linux_futex::Futex;
+
+
 
 use self::record::*;
 
@@ -78,7 +75,7 @@ impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
         let record = record.load(Ordering::Acquire, &guard);
 
         unsafe {
-            if (!record.deref().state.load(Ordering::Acquire)) {
+            if !record.deref().state.load(Ordering::Acquire) {
                 self.push_record(record, guard);
             }
         }

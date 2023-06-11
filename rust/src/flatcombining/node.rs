@@ -2,12 +2,13 @@ use std::cell::SyncUnsafeCell;
 
 use linux_futex::*;
 
-use crate::{guard::DLockGuard, syncptr::SyncMutPtr};
+use crate::{syncptr::SyncMutPtr};
+use crate::dlock::DLockDelegate;
 
 pub(super) struct NodeData<T> {
     pub(super) age: i32,
     pub(super) active: bool,
-    pub(super) f: Option<*mut (dyn FnMut(&mut DLockGuard<T>))>,
+    pub(super) f: Option<*mut (dyn DLockDelegate<T>)>,
     pub(super) waiter: Futex<Private>, // id: i32,
 }
 

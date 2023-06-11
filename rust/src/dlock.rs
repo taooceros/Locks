@@ -4,9 +4,22 @@ use enum_dispatch::enum_dispatch;
 
 use crate::{ccsynch::CCSynch, flatcombining::FcLock, guard::DLockGuard, rcl::rcllock::RclLock};
 
+impl<T, F> DLockDelegate<T> for F
+where
+    F: FnMut(DLockGuard<T>),
+{
+    fn apply(&mut self, data: DLockGuard<T>) {
+        self(data);
+    }
+}
+
+pub trait DLockDelegate<T> {
+    fn apply(&mut self, data: DLockGuard<T>);
+}
+
 #[enum_dispatch]
 pub trait DLock<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut DLockGuard<T>) + 'b));
+    fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a);
 }
 
 #[enum_dispatch(DLock<T>)]

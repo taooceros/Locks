@@ -1,6 +1,5 @@
 use std::{
     cmp::min,
-    mem::transmute,
     sync::atomic::Ordering::*,
     thread::{self, yield_now, JoinHandle},
 };
@@ -8,7 +7,7 @@ use std::{
 use linux_futex::{Futex, Private};
 
 use super::{
-    rclrequest::{RclRequest, RequestCallable},
+    rclrequest::{RequestCallable},
     rclserver::*,
 };
 

@@ -18,6 +18,7 @@ use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
     flatcombining::FcLock,
+    guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
@@ -25,7 +26,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 10;
+const DURATION: u64 = 2;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -160,13 +161,13 @@ fn benchmark_num_threads(
             let mut hold_time = Duration::ZERO;
 
             while !stop.load(Ordering::Acquire) {
-                lock_type.lock(&mut |guard| {
+                lock_type.lock(|mut guard: DLockGuard<u64>| {
                     num_acquire += 1;
                     let timer = Clock::new();
                     let begin = timer.now();
 
                     while timer.now().duration_since(begin) < single_iter_duration {
-                        (**guard) += 1;
+                        (*guard) += 1;
                         loop_result += 1;
                     }
 
