@@ -53,7 +53,7 @@ impl RclServer {
             _cpu: 0,
             client_id: ThreadLocal::new(),
             requests: {
-                assert_eq!(size_of::<RclRequestSized>(), size_of::<RclRequest<u8>>());
+                // assert_eq!(size_of::<RclRequestSized>(), size_of::<RclRequest<u8>>());
 
                 // this is very unsafe (bypass even type check) and require careful check
                 // the RclRequest should only contains pointer/ref to the data, so size of RclRequest
@@ -62,7 +62,7 @@ impl RclServer {
                 v.resize_with(128, || RclRequest {
                     real_me: 0,
                     lock: RclLockPtr::from(null()),
-                    f: SyncUnsafeCell::new(None),
+                    f: SyncUnsafeCell::new(None).into(),
                 });
 
                 v

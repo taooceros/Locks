@@ -3,6 +3,7 @@ use criterion::measurement::WallTime;
 use criterion::BenchmarkGroup;
 use criterion::BenchmarkId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use dlock::guard::DLockGuard;
 use quanta::Clock;
 use std::{sync::Arc, thread::*, time::Duration};
 
@@ -10,7 +11,7 @@ extern crate dlock;
 
 use dlock::ccsynch::*;
 use dlock::dlock::*;
-use dlock::flatcombining::*;
+use dlock::flatcombining::fclock::*;
 use dlock::rcl::rcllock::*;
 use dlock::rcl::rclserver::*;
 
@@ -78,8 +79,8 @@ fn bench_inner(
     bencher.bench_with_input(BenchmarkId::new(name, thread_count), &cpu_count, |b, i| {
         b.iter(|| {
             let lock = lock.clone();
-            lock.lock(&mut |guard| {
-                **guard = 0;
+            lock.lock(&mut |mut guard: DLockGuard<u64>| {
+                *guard = 0;
             });
             black_box(cooperative_counter(
                 lock.clone(),
@@ -88,8 +89,8 @@ fn bench_inner(
                 ITERATION,
             ));
 
-            lock.lock(&mut |guard| {
-                assert_eq!(ITERATION, **guard);
+            lock.lock(&mut |guard: DLockGuard<u64>| {
+                assert_eq!(ITERATION, *guard);
             });
         });
     });
@@ -117,14 +118,14 @@ fn cooperative_counter(
                     let mut now_value = 0;
                     while now_value < threshold {
                         // println!("{}", now_value);
-                        lock.lock(&mut |guard| {
+                        lock.lock(&mut |mut guard: DLockGuard<u64>| {
                             let begin = timer.now();
-                            now_value = **guard;
+                            now_value = *guard;
                             if now_value >= threshold {
                                 return;
                             }
 
-                            **guard += 1;
+                            *guard += 1;
                         })
                     }
                 })

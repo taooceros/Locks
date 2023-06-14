@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, create_dir, remove_dir_all},
-    io::Write,
-    num::NonZeroUsize,
+    fs::{create_dir, remove_dir_all},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -17,15 +15,19 @@ use quanta::Clock;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
-    flatcombining::FcLock,
+    flatcombining::fclock::FcLock,
+    flatcombining2::FcLock2,
+    guard::DLockGuard,
+    raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
+    RawSimpleLock,
 };
 
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 10;
+const DURATION: u64 = 2;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -66,6 +68,12 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         num_thread,
         output_path,
     );
+    // inner_benchmark(
+    //     Arc::new(LockType::from(FcLock2::new(0u64, RawSpinLock::new()))),
+    //     num_cpu,
+    //     num_thread,
+    //     output_path,
+    // );
     inner_benchmark(
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
@@ -160,13 +168,13 @@ fn benchmark_num_threads(
             let mut hold_time = Duration::ZERO;
 
             while !stop.load(Ordering::Acquire) {
-                lock_type.lock(&mut |guard| {
+                lock_type.lock(|mut guard: DLockGuard<u64>| {
                     num_acquire += 1;
                     let timer = Clock::new();
                     let begin = timer.now();
 
                     while timer.now().duration_since(begin) < single_iter_duration {
-                        (**guard) += 1;
+                        (*guard) += 1;
                         loop_result += 1;
                     }
 

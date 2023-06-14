@@ -1,3 +1,4 @@
+use crossbeam::utils::CachePadded;
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
@@ -8,7 +9,8 @@ use thread_local::ThreadLocal;
 
 use linux_futex::{Futex, Private};
 
-use crate::{dlock::DLock, guard::Guard, operation::Operation, syncptr::SyncMutPtr};
+use crate::dlock::DLockDelegate;
+use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
 
 pub struct CCSynch<T> {
     data: SyncUnsafeCell<T>,
@@ -17,16 +19,19 @@ pub struct CCSynch<T> {
 }
 
 struct Node<T> {
-    f: Option<Operation<T>>,
+    f: CachePadded<Option<*mut dyn DLockDelegate<T>>>,
     wait: Futex<Private>,
     completed: AtomicBool,
     next: SyncMutPtr<Node<T>>,
 }
 
+unsafe impl<T> Send for Node<T> {}
+unsafe impl<T> Sync for Node<T> {}
+
 impl<T> Node<T> {
     pub fn new() -> Node<T> {
         Node {
-            f: None,
+            f: None.into(),
             wait: Futex::new(1),
             completed: AtomicBool::new(false),
             next: SyncMutPtr::from(null_mut()),
@@ -35,7 +40,7 @@ impl<T> Node<T> {
 }
 
 impl<T> DLock<T> for CCSynch<T> {
-    fn lock<'b>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'b)) {
+    fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
 }
@@ -50,7 +55,7 @@ impl<T> CCSynch<T> {
         }
     }
 
-    pub fn lock<'a>(&self, f: &mut (dyn FnMut(&mut Guard<T>) + 'a)) {
+    pub fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node_cell = self
             .local_node
             .get_or(|| SyncUnsafeCell::new(SyncMutPtr::from(Box::into_raw(Box::new(Node::new())))));
@@ -68,9 +73,10 @@ impl<T> CCSynch<T> {
         let current_node = unsafe { &mut *self.tail.swap(next_node.ptr, SeqCst) };
 
         // assign task to current node
-        current_node.f = Some(Operation {
-            f: (unsafe { transmute(f) }),
-        });
+        unsafe {
+            current_node.f = Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into();
+        }
+
         // Compiler fence seems to be enough for synchronization given the argument in the orignal paper
         // TODO: might requires more test in the future
         compiler_fence(Release);
@@ -113,9 +119,9 @@ impl<T> CCSynch<T> {
             counter += 1;
 
             if tmp_node.f.is_some() {
-                let mut guard = Guard::new(&self.data);
+                let guard = DLockGuard::new(&self.data);
                 unsafe {
-                    (*tmp_node.f.take().unwrap().f)(&mut guard);
+                    (*tmp_node.f.take().unwrap()).apply(guard);
                 }
 
                 tmp_node.completed.store(true, Relaxed);
