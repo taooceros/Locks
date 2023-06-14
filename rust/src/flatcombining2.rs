@@ -1,6 +1,8 @@
+use core::mem::transmute;
 use std::{
     cell::SyncUnsafeCell,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering, Ordering::*}, ptr::read_volatile,
+    ptr::read_volatile,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering, Ordering::*},
 };
 
 use crossbeam::{
@@ -9,21 +11,18 @@ use crossbeam::{
 };
 use thread_local::ThreadLocal;
 
-
 use crate::{
-    dlock::DLock,
-    guard::{*},
+    dlock::{DLock, DLockDelegate},
+    guard::*,
+    raw_spin_lock::RawSpinLock,
     RawSimpleLock,
 };
-
-
-
 
 use self::record::*;
 
 mod record;
 
-pub struct FcLock2<T: Send + Sync, L: RawSimpleLock> {
+pub struct FcLock2<T, L: RawSimpleLock> {
     pass: SyncUnsafeCell<usize>,
     lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
@@ -31,7 +30,23 @@ pub struct FcLock2<T: Send + Sync, L: RawSimpleLock> {
     thread_local: ThreadLocal<Atomic<Record<T>>>,
 }
 
-impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
+impl<T, L: RawSimpleLock> DLock<T> for FcLock2<T, L> {
+    fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
+        self.lock(f);
+    }
+}
+
+impl<T, L: RawSimpleLock> FcLock2<T, L> {
+    pub fn new(t: T, lock: L) -> FcLock2<T, L> {
+        FcLock2 {
+            pass: SyncUnsafeCell::new(0),
+            lock: CachePadded::new(lock),
+            data: SyncUnsafeCell::new(t),
+            publications: Atomic::null(),
+            thread_local: ThreadLocal::new(),
+        }
+    }
+
     fn push_record(&self, record: Shared<Record<T>>, guard: &Guard) {
         let mut head = self.publications.load(Ordering::Acquire, guard);
 
@@ -42,10 +57,10 @@ impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
 
             let result = self
                 .publications
-                .compare_exchange_weak(head, record, Release, Relaxed, guard);
+                .compare_exchange_weak(head, record, Release, Acquire, guard);
 
             match result {
-                Ok(_) => {}
+                Ok(_) => { return; }
                 Err(new_head) => head = new_head.current,
             }
         }
@@ -92,13 +107,9 @@ impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
             if node_ref.result.load(Acquire, guard).tag() == 1 {
                 let operation = unsafe { (*node_ref.operation.get()).take() };
 
-                let result = operation.unwrap().call(&mut DLockGuard::new(&self.data));
+                let _result = operation.unwrap().apply(DLockGuard::new(&self.data));
 
-                node_ref
-                    .result
-                    .store(Owned::new(result).with_tag(1), Release);
-
-                node_ref.state.store(true, Release);
+                node_ref.result.store(Shared::null().with_tag(0), Release);
             }
 
             node = node_ref.next.load(Acquire, guard);
@@ -129,15 +140,17 @@ impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
         }
     }
 
-    pub fn lock(&self, f: impl Callable<T> + 'static) {
+    pub fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         let guard = &pin();
 
         let record = self.load_record(guard);
 
         let record_ref = unsafe { record.deref() };
 
+        let closure: Box<dyn DLockDelegate<T>> = Box::new(f);
+
         unsafe {
-            *record_ref.operation.get() = Some(Box::new(f));
+            *record_ref.operation.get() = Some(transmute(closure));
         }
 
         record_ref.result.store(Shared::null().with_tag(1), Release);
@@ -147,12 +160,11 @@ impl<T: Send + Sync, L: RawSimpleLock> FcLock2<T, L> {
         if self.lock.try_lock() {
             self.combine(guard);
 
-            unsafe{
-                if read_volatile(self.pass.get()) % 50 == 0{
+            unsafe {
+                if read_volatile(self.pass.get()) % 50 == 0 {
                     self.clean_unactive_node(guard);
                 }
             }
-
         } else {
             while record_ref.result.load(Acquire, guard).tag() == 0 {
                 backoff.snooze();

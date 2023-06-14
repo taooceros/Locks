@@ -8,7 +8,7 @@ use serial_test::serial;
 use crate::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
-    flatcombining::FcLock,
+    flatcombining::fclock::FcLock,
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };

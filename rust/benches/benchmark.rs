@@ -11,7 +11,7 @@ extern crate dlock;
 
 use dlock::ccsynch::*;
 use dlock::dlock::*;
-use dlock::flatcombining::*;
+use dlock::flatcombining::fclock::*;
 use dlock::rcl::rcllock::*;
 use dlock::rcl::rclserver::*;
 

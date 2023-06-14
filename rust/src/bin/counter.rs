@@ -15,9 +15,12 @@ use quanta::Clock;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
-    flatcombining::FcLock,
+    flatcombining::fclock::FcLock,
+    flatcombining2::FcLock2,
     guard::DLockGuard,
+    raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
+    RawSimpleLock,
 };
 
 use serde::Serialize;
@@ -65,6 +68,12 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         num_thread,
         output_path,
     );
+    // inner_benchmark(
+    //     Arc::new(LockType::from(FcLock2::new(0u64, RawSpinLock::new()))),
+    //     num_cpu,
+    //     num_thread,
+    //     output_path,
+    // );
     inner_benchmark(
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
