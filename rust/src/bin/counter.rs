@@ -20,7 +20,7 @@ use dlock::{
     guard::DLockGuard,
     raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    RawSimpleLock,
+    RawSimpleLock, flatcombining_fair_ban::FcFairBanLock,
 };
 
 use serde::Serialize;
@@ -62,6 +62,12 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
             return;
         }
     }
+    inner_benchmark(
+        Arc::new(LockType::from(FcFairBanLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        output_path,
+    );
     inner_benchmark(
         Arc::new(LockType::from(FcLock::new(0u64))),
         num_cpu,

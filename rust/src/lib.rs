@@ -1,11 +1,13 @@
 #![feature(sync_unsafe_cell)]
 #![feature(pointer_is_aligned)]
 #![feature(type_alias_impl_trait)]
+#![feature(atomic_from_ptr)]
 
 pub mod ccsynch;
 pub mod dlock;
 pub mod flatcombining;
 pub mod flatcombining2;
+pub mod flatcombining_fair_ban;
 pub mod guard;
 pub mod rcl;
 
