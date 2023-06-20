@@ -22,7 +22,12 @@ jobs:
           toolchain: nightly
           override: true
           components: rustfmt, clippy
+    - name: Check Format
+      uses: mbrobbel/rustfmt-check@master
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
     - name: Build
       run: cargo build --release --verbose
     - name: Run tests
       run: cargo test --release --verbose
+    
