@@ -28,6 +28,7 @@ jobs:
       uses: mbrobbel/rustfmt-check@master
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: .rust
     - name: Build
       run: cargo build --release --verbose
     - name: Run tests
