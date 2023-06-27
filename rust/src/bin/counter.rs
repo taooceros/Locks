@@ -1,5 +1,5 @@
 use std::{
-    fs::{create_dir, remove_dir_all},
+    fs::{create_dir, remove_dir_all, File},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -17,10 +17,11 @@ use dlock::{
     dlock::{DLock, LockType},
     flatcombining::fclock::FcLock,
     flatcombining2::FcLock2,
+    flatcombining_fair_ban::FcFairBanLock,
     guard::DLockGuard,
     raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    RawSimpleLock, flatcombining_fair_ban::FcFairBanLock,
+    RawSimpleLock,
 };
 
 use serde::Serialize;
@@ -32,17 +33,18 @@ const DURATION: u64 = 2;
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record {
+struct Record<T> {
     id: usize,
     cpu_id: usize,
     loop_count: u64,
     num_acquire: u64,
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     hold_time: Duration,
+    locktype: Arc<LockType<T>>,
 }
 
 pub fn benchmark(num_cpu: usize, num_thread: usize) {
-    let output_path = Path::new("output");
+    let output_path = Path::new("../visualization/output");
 
     if output_path.is_dir() {
         // remove the dir
@@ -62,17 +64,20 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
             return;
         }
     }
+
+    let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
+
     inner_benchmark(
         Arc::new(LockType::from(FcFairBanLock::new(0u64))),
         num_cpu,
         num_thread,
-        output_path,
+        &mut writer,
     );
     inner_benchmark(
         Arc::new(LockType::from(FcLock::new(0u64))),
         num_cpu,
         num_thread,
-        output_path,
+        &mut writer,
     );
     // inner_benchmark(
     //     Arc::new(LockType::from(FcLock2::new(0u64, RawSpinLock::new()))),
@@ -84,13 +89,13 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
         num_thread,
-        output_path,
+        &mut writer,
     );
     inner_benchmark(
         Arc::new(LockType::from(CCSynch::new(0u64))),
         num_cpu,
         num_thread,
-        output_path,
+        &mut writer,
     );
 
     let mut server = RclServer::new();
@@ -100,7 +105,7 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         Arc::new(LockType::RCL(lock)),
         num_cpu - 1,
         num_thread,
-        output_path,
+        &mut writer,
     );
 
     println!("Benchmark finished");
@@ -110,7 +115,7 @@ fn inner_benchmark(
     lock_type: Arc<LockType<u64>>,
     num_cpu: usize,
     num_thread: usize,
-    output_path: &Path,
+    writer: &mut Writer<File>,
 ) {
     static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -142,11 +147,16 @@ fn inner_benchmark(
         i += 1;
     }
 
-    let mut writer = Writer::from_path(output_path.join(format!("{}.csv", lock_type))).unwrap();
-
-    for result in results {
+    for result in results.iter() {
         writer.serialize(result).unwrap();
     }
+
+    let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+
+    println!(
+        "Finish Benchmark for {}: Total Counter {}",
+        lock_type, total_count
+    );
 }
 
 fn benchmark_num_threads(
@@ -154,7 +164,7 @@ fn benchmark_num_threads(
     id: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
-) -> JoinHandle<Record> {
+) -> JoinHandle<Record<u64>> {
     let lock_type = lock_type_ref.clone();
 
     thread::Builder::new()
@@ -194,6 +204,7 @@ fn benchmark_num_threads(
                 loop_count: loop_result,
                 num_acquire,
                 hold_time,
+                locktype: lock_type.clone(),
             };
         })
         .unwrap()
