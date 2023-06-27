@@ -1,10 +1,14 @@
-use std::{fmt, sync::Mutex};
+use std::{
+    fmt::{self, Debug, Display},
+    sync::Mutex,
+};
 
 use enum_dispatch::enum_dispatch;
 
 use crate::{
-    ccsynch::CCSynch, flatcombining::fclock::FcLock, flatcombining2::FcLock2, guard::DLockGuard,
-    raw_spin_lock::RawSpinLock, rcl::rcllock::RclLock, flatcombining_fair_ban::FcFairBanLock,
+    ccsynch::CCSynch, flatcombining::fclock::FcLock, flatcombining2::FcLock2,
+    flatcombining_fair_ban::FcFairBanLock, guard::DLockGuard, raw_spin_lock::RawSpinLock,
+    rcl::rcllock::RclLock,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -33,6 +37,28 @@ pub enum LockType<T> {
     CCSynch(CCSynch<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),
+}
+
+impl<T> serde::Serialize for LockType<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<T> Debug for LockType<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FlatCombining(arg0) => f.debug_tuple("FlatCombining").finish(),
+            Self::FlatCombining2(arg0) => f.debug_tuple("FlatCombining2").finish(),
+            Self::FlatCombiningFair(arg0) => f.debug_tuple("FlatCombiningFair").finish(),
+            Self::CCSynch(arg0) => f.debug_tuple("CCSynch").finish(),
+            Self::Mutex(arg0) => f.debug_tuple("Mutex").finish(),
+            Self::RCL(arg0) => f.debug_tuple("RCL").finish(),
+        }
+    }
 }
 
 impl<T> fmt::Display for LockType<T> {
