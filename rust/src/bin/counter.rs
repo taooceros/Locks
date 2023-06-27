@@ -42,7 +42,7 @@ struct Record {
 }
 
 pub fn benchmark(num_cpu: usize, num_thread: usize) {
-    let output_path = Path::new("output");
+    let output_path = Path::new("../visualization/output");
 
     if output_path.is_dir() {
         // remove the dir
@@ -144,9 +144,13 @@ fn inner_benchmark(
 
     let mut writer = Writer::from_path(output_path.join(format!("{}.csv", lock_type))).unwrap();
 
-    for result in results {
+    for result in results.iter() {
         writer.serialize(result).unwrap();
     }
+
+    let total_count : u64 = results.iter().map(|r| r.loop_count).sum();
+
+    println!("Finish Benchmark for {}: Total Counter {}", lock_type, total_count);
 }
 
 fn benchmark_num_threads(
