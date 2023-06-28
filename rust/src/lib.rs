@@ -6,8 +6,8 @@
 pub mod ccsynch;
 pub mod dlock;
 pub mod flatcombining;
-pub mod flatcombining2;
-pub mod flatcombining_fair_ban;
+pub mod fc_fair_ban;
+pub mod fc_fair_ban_slice;
 pub mod guard;
 pub mod rcl;
 

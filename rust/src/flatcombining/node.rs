@@ -11,6 +11,8 @@ pub(super) struct NodeData<T> {
     pub(super) active: bool,
     pub(super) f: CachePadded<Option<*mut (dyn DLockDelegate<T>)>>,
     pub(super) waiter: Futex<Private>, // id: i32,
+    #[cfg(feature = "combiner_stat")]
+    pub(super) combiner_time_stat: i64,
 }
 
 unsafe impl<T> Sync for NodeData<T> {}

@@ -83,14 +83,19 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
         let mut current_ptr = self.head.load_consume();
 
         let pass = self.pass.fetch_add(1, Ordering::Relaxed);
+        let mut aux: u32 = 0;
+        let mut begin: u64;
+
+        #[cfg(feature = "combiner_stat")]
+        unsafe {
+            begin = __rdtscp(&mut aux);
+        }
 
         while !current_ptr.is_null() {
             let current = unsafe { &mut *(current_ptr) };
 
             if let Some(f) = current.f.into_inner() {
                 current.age = pass;
-
-                let mut aux: u32 = 0;
 
                 let begin = unsafe { __rdtscp(&mut aux) };
 
@@ -121,6 +126,13 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
             }
 
             current_ptr = current.next;
+        }
+
+        #[cfg(feature = "combiner_stat")]
+        unsafe {
+            let end = __rdtscp(&mut aux);
+
+            (*self.local_node.get().unwrap().get()).combiner_time_stat += (end - begin) as i64;
         }
     }
 
@@ -167,6 +179,8 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
 
         node.waiter.value.store(0, Ordering::Release);
 
+        let backoff = Backoff::new();
+        
         loop {
             if self.combiner_lock.try_lock() {
                 // combiner
@@ -187,13 +201,16 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
                 return;
             }
 
-            let backoff = Backoff::new();
-
             if node.f.into_inner().is_some() {
                 backoff.snooze();
             }
 
             self.push_if_unactive(node);
         }
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_current_thread_combining_time(&self) -> i64 {
+        return unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
     }
 }

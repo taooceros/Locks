@@ -15,20 +15,19 @@ use quanta::Clock;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
+    fc_fair_ban::FcFairBanLock,
+    fc_fair_ban_slice::FcFairBanSliceLock,
     flatcombining::fclock::FcLock,
-    flatcombining2::FcLock2,
-    flatcombining_fair_ban::FcFairBanLock,
     guard::DLockGuard,
-    raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    RawSimpleLock,
 };
+use dlock::RawSimpleLock;
 
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 2;
+const DURATION: u64 = 5;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -40,6 +39,8 @@ struct Record<T> {
     num_acquire: u64,
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     hold_time: Duration,
+    #[cfg(feature="combiner_stat")]
+    combine_time: i64,
     locktype: Arc<LockType<T>>,
 }
 
@@ -68,23 +69,26 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
     let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
 
     inner_benchmark(
-        Arc::new(LockType::from(FcFairBanLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        &mut writer,
-    );
-    inner_benchmark(
         Arc::new(LockType::from(FcLock::new(0u64))),
         num_cpu,
         num_thread,
         &mut writer,
     );
-    // inner_benchmark(
-    //     Arc::new(LockType::from(FcLock2::new(0u64, RawSpinLock::new()))),
-    //     num_cpu,
-    //     num_thread,
-    //     output_path,
-    // );
+
+    inner_benchmark(
+        Arc::new(LockType::from(FcFairBanLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        &mut writer,
+    );
+
+    inner_benchmark(
+        Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        &mut writer,
+    );
+
     inner_benchmark(
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
@@ -198,12 +202,14 @@ fn benchmark_num_threads(
                 });
             }
             println!("Thread {} finished with result {}", id, loop_result);
+
             return Record {
                 id,
                 cpu_id: id % num_cpu,
                 loop_count: loop_result,
                 num_acquire,
                 hold_time,
+                combine_time : lock_type.get_current_thread_combining_time(),
                 locktype: lock_type.clone(),
             };
         })

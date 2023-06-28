@@ -1,5 +1,6 @@
 use crossbeam::utils::CachePadded;
 use std::{
+    arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     mem::transmute,
     ptr::null_mut,
@@ -23,6 +24,8 @@ struct Node<T> {
     wait: Futex<Private>,
     completed: AtomicBool,
     next: SyncMutPtr<Node<T>>,
+    #[cfg(feature = "combiner_stat")]
+    pub(super) combiner_time_stat: i64,
 }
 
 unsafe impl<T> Send for Node<T> {}
@@ -35,6 +38,7 @@ impl<T> Node<T> {
             wait: Futex::new(1),
             completed: AtomicBool::new(false),
             next: SyncMutPtr::from(null_mut()),
+            combiner_time_stat: 0,
         }
     }
 }
@@ -42,6 +46,11 @@ impl<T> Node<T> {
 impl<T> DLock<T> for CCSynch<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_current_thread_combining_time(&self) -> i64 {
+        return unsafe { (*((*self.local_node.get().unwrap().get()).ptr)).combiner_time_stat };
     }
 }
 
@@ -104,6 +113,13 @@ impl<T> CCSynch<T> {
             return;
         }
 
+        // combiner
+
+        let mut aux = 0;
+
+        #[cfg(feature = "combiner_stat")]
+        let begin = unsafe { __rdtscp(&mut aux) };
+
         let mut tmp_node = current_node;
         const H: i32 = 16;
 
@@ -139,5 +155,13 @@ impl<T> CCSynch<T> {
 
         tmp_node.wait.value.store(1, Relaxed);
         tmp_node.wait.wake(1);
+
+        #[cfg(feature = "combiner_stat")]
+        let end = unsafe { __rdtscp(&mut aux) };
+
+        #[cfg(feature = "combiner_stat")]
+        unsafe {
+            (*(*node_cell.get()).ptr).combiner_time_stat += (end - begin) as i64;
+        }
     }
 }

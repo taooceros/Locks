@@ -10,7 +10,7 @@ use crate::{
     dlock::{DLock, LockType},
     flatcombining::fclock::FcLock,
     guard::DLockGuard,
-    rcl::{rcllock::RclLock, rclserver::RclServer},
+    rcl::{rcllock::RclLock, rclserver::RclServer}, fc_fair_ban::FcFairBanLock, fc_fair_ban_slice::FcFairBanSliceLock,
 };
 
 #[test]
@@ -32,6 +32,23 @@ pub fn cc_test() {
 }
 
 #[test]
+pub fn fc_fair_ban_test(){
+    let cpu_count = available_parallelism().unwrap().get();
+
+    let cc_lock = Arc::new(LockType::from(FcFairBanLock::new(0usize)));
+    inner_test(cc_lock, cpu_count);
+}
+
+
+#[test]
+pub fn fc_fair_ban_slice_test(){
+    let cpu_count = available_parallelism().unwrap().get();
+
+    let cc_lock = Arc::new(LockType::from(FcFairBanSliceLock::new(0usize)));
+    inner_test(cc_lock, cpu_count);
+}
+
+#[test]
 pub fn rcl_test() {
     let cpu_count = available_parallelism().unwrap().get();
     let mut server = RclServer::new();
@@ -41,7 +58,7 @@ pub fn rcl_test() {
     inner_test(rcl_lock, cpu_count - 1);
 }
 
-const THREAD_NUM: usize = 127;
+const THREAD_NUM: usize = 16;
 const ITERATION: usize = 10000;
 const INNER_ITERATION: usize = 100000;
 

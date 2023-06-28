@@ -1,5 +1,6 @@
 use super::node::Node;
 use super::node::NodeData;
+use std::arch::x86_64::__rdtscp;
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
@@ -26,6 +27,13 @@ impl<T> DLock<T> for FcLock<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_current_thread_combining_time(&self) -> i64 {
+        return unsafe{
+            (*(*self.local_node.get().unwrap().get()).value.get()).combiner_time_stat
+        }
+    }
 }
 
 impl<T> FcLock<T> {
@@ -50,6 +58,7 @@ impl<T> FcLock<T> {
                         active: false,
                         f: None.into(),
                         waiter: Futex::new(0),
+                        combiner_time_stat: 0,
                         // id: ID.fetch_add(1, Ordering::Relaxed),
                     }),
                     next: None,
@@ -124,6 +133,14 @@ impl<T> FcLock<T> {
     }
 
     fn scan_and_combining(&self, head: &AtomicPtr<Node<T>>, pass: i32) {
+        let mut aux = 0;
+        let mut begin;
+
+        #[cfg(feature = "combiner_stat")]
+        {
+            begin = unsafe { __rdtscp(&mut aux) };
+        }
+
         let head_ptr = head.load(Ordering::Relaxed);
         let mut current_opt = if head_ptr.is_null() {
             None
@@ -146,6 +163,12 @@ impl<T> FcLock<T> {
 
                 current_opt = current.next;
             }
+        }
+
+        #[cfg(feature = "combiner_stat")]
+        unsafe {
+            let end = __rdtscp(&mut aux);
+            (*(*self.local_node.get().unwrap().get()).value.get()).combiner_time_stat += (end - begin) as i64;
         }
     }
 

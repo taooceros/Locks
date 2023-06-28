@@ -25,6 +25,11 @@ impl<T> DLock<T> for RclLock<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_current_thread_combining_time(&self) -> i64 {
+        return 0;
+    }
 }
 
 impl<T> RclLock<T> {
