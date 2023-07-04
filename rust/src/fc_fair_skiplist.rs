@@ -9,7 +9,7 @@ use std::{
     ptr::null_mut,
     sync::atomic::Ordering::*,
     sync::atomic::*,
-    thread::current,
+    thread::{current, yield_now},
     time::Duration,
 };
 
@@ -85,7 +85,7 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
 
             match front_entry {
                 Some(entry) => {
-                    let (usage, node_ptr) = (entry.key(), entry.value());
+                    let node_ptr = entry.value();
 
                     let node = unsafe { &mut *node_ptr.load_consume() };
 
@@ -139,12 +139,12 @@ impl<T: 'static> DLock<T> for FcSL<T, RawSpinLock> {
                 // combiner
 
                 self.combine(guard);
-
+                
                 self.combiner_lock.unlock();
             }
 
             if node.f.into_inner().is_none() {
-                node.active.store(false, Relaxed);
+                node.active.store(false, Release);
                 return;
             }
 
