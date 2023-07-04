@@ -1,6 +1,6 @@
 use std::{
     arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, hint, mem::transmute, num::*,
-    ptr::null_mut, sync::atomic::*, thread::yield_now, time::Duration,
+    ptr::null_mut, sync::atomic::*, time::Duration,
 };
 
 use crossbeam::{
@@ -219,7 +219,7 @@ impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
 
             unsafe {
                 let avg_combiner_slice = *self.avg_combiner_slice.get();
-                let spin_factor = 1;
+                let _spin_factor = 1;
 
                 backoff.snooze();
 

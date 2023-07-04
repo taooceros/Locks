@@ -1,4 +1,4 @@
-use std::{ptr::null_mut, sync::atomic::AtomicBool};
+use std::{sync::atomic::AtomicBool};
 
 use crossbeam::utils::CachePadded;
 use linux_futex::{Futex, Private};

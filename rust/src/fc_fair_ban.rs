@@ -1,13 +1,11 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::{self, max},
-    env::current_dir,
+    cmp::{max},
     mem::transmute,
     num::*,
     ptr::null_mut,
     sync::atomic::*,
-    thread::current,
 };
 
 use crossbeam::{
@@ -15,7 +13,7 @@ use crossbeam::{
     utils::{Backoff, CachePadded},
 };
 use thread_local::ThreadLocal;
-use volatile::Volatile;
+
 
 use crate::{
     dlock::{DLock, DLockDelegate},
@@ -85,7 +83,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
 
         let pass = self.pass.fetch_add(1, Ordering::Relaxed);
         let mut aux: u32 = 0;
-        let mut begin: u64;
+        let begin: u64;
 
         #[cfg(feature = "combiner_stat")]
         unsafe {

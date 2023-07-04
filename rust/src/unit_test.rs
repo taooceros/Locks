@@ -3,7 +3,7 @@ use std::{
     thread::{self, available_parallelism},
 };
 
-use serial_test::serial;
+
 
 use crate::{
     ccsynch::CCSynch,

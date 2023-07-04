@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug},
     sync::Mutex,
 };
 
@@ -55,13 +55,13 @@ impl<T> serde::Serialize for LockType<T> {
 impl<T> Debug for LockType<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FlatCombining(arg0) => f.debug_tuple("FlatCombining").finish(),
-            Self::FlatCombiningFair(arg0) => f.debug_tuple("FlatCombiningFair").finish(),
-            Self::FlatCombiningFairSlice(arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
-            Self::FlatCombiningFairSL(arg0) => f.debug_tuple("Flat Combining (Skip List)").finish(),
-            Self::CCSynch(arg0) => f.debug_tuple("CCSynch").finish(),
-            Self::Mutex(arg0) => f.debug_tuple("Mutex").finish(),
-            Self::RCL(arg0) => f.debug_tuple("RCL").finish(),
+            Self::FlatCombining(_arg0) => f.debug_tuple("FlatCombining").finish(),
+            Self::FlatCombiningFair(_arg0) => f.debug_tuple("FlatCombiningFair").finish(),
+            Self::FlatCombiningFairSlice(_arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
+            Self::FlatCombiningFairSL(_arg0) => f.debug_tuple("Flat Combining (Skip List)").finish(),
+            Self::CCSynch(_arg0) => f.debug_tuple("CCSynch").finish(),
+            Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
+            Self::RCL(_arg0) => f.debug_tuple("RCL").finish(),
         }
     }
 }

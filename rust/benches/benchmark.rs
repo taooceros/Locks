@@ -76,7 +76,7 @@ fn bench_inner(
     cpu_count: usize,
     thread_count: usize,
 ) {
-    bencher.bench_with_input(BenchmarkId::new(name, thread_count), &cpu_count, |b, i| {
+    bencher.bench_with_input(BenchmarkId::new(name, thread_count), &cpu_count, |b, _i| {
         b.iter(|| {
             let lock = lock.clone();
             lock.lock(&mut |mut guard: DLockGuard<u64>| {
@@ -112,14 +112,14 @@ fn cooperative_counter(
                     set_for_current(CoreId {
                         id: (id % cpu_count),
                     });
-                    let single_iter_duration =
+                    let _single_iter_duration =
                         Duration::from_micros(if id % 2 == 0 { 1 } else { 3 });
                     let timer = Clock::new();
                     let mut now_value = 0;
                     while now_value < threshold {
                         // println!("{}", now_value);
                         lock.lock(&mut |mut guard: DLockGuard<u64>| {
-                            let begin = timer.now();
+                            let _begin = timer.now();
                             now_value = *guard;
                             if now_value >= threshold {
                                 return;

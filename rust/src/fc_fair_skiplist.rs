@@ -1,26 +1,22 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::{self, max},
-    env::current_dir,
-    iter::Skip,
     mem::transmute,
     num::*,
-    ptr::null_mut,
     sync::atomic::Ordering::*,
     sync::atomic::*,
-    thread::{current, yield_now},
+    thread::{current},
     time::Duration,
 };
 
 use crossbeam::{
     atomic::AtomicConsume,
-    epoch::{default_collector, pin, Collector, Guard},
+    epoch::{default_collector, pin, Guard},
     utils::{Backoff, CachePadded},
 };
 use crossbeam_skiplist::SkipList;
 use thread_local::ThreadLocal;
-use volatile::{access::Readable, Volatile};
+
 
 use crate::{
     dlock::{DLock, DLockDelegate},

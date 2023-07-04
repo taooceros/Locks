@@ -139,7 +139,7 @@ impl<T> FcLock<T> {
 
     fn scan_and_combining(&self, head: &AtomicPtr<Node<T>>, pass: i32) {
         let mut aux = 0;
-        let mut begin;
+        let begin;
 
         #[cfg(feature = "combiner_stat")]
         {
