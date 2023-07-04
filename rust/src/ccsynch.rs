@@ -3,6 +3,7 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     mem::transmute,
+    num::*,
     ptr::null_mut,
     sync::atomic::{compiler_fence, AtomicBool, AtomicPtr, Ordering::*},
 };
@@ -49,8 +50,9 @@ impl<T> DLock<T> for CCSynch<T> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> i64 {
-        return unsafe { (*((*self.local_node.get().unwrap().get()).ptr)).combiner_time_stat };
+    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
+        let count = unsafe { (*((*self.local_node.get().unwrap().get()).ptr)).combiner_time_stat };
+        NonZeroI64::new(count)
     }
 }
 

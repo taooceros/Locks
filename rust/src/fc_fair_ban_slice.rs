@@ -1,6 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, hint, mem::transmute, ptr::null_mut,
-    sync::atomic::*, thread::yield_now, time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, hint, mem::transmute, num::*,
+    ptr::null_mut, sync::atomic::*, thread::yield_now, time::Duration,
 };
 
 use crossbeam::{
@@ -235,7 +235,8 @@ impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> i64 {
-        return unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
+    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
+        let count = unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
+        NonZeroI64::new(count)
     }
 }

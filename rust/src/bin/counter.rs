@@ -1,5 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
+    num::NonZeroI64,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -12,6 +13,7 @@ use std::{
 use csv::Writer;
 use quanta::Clock;
 
+use dlock::{RawSimpleLock, fc_fair_skiplist::FcSL};
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
@@ -21,26 +23,25 @@ use dlock::{
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
-use dlock::RawSimpleLock;
 
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 5;
+const DURATION: u64 = 2;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record<T> {
+struct Record<T: 'static> {
     id: usize,
     cpu_id: usize,
     loop_count: u64,
     num_acquire: u64,
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     hold_time: Duration,
-    #[cfg(feature="combiner_stat")]
-    combine_time: i64,
+    #[cfg(feature = "combiner_stat")]
+    combine_time: Option<NonZeroI64>,
     locktype: Arc<LockType<T>>,
 }
 
@@ -67,6 +68,13 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
     }
 
     let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
+
+    inner_benchmark(
+        Arc::new(LockType::from(FcSL::new(0u64))),
+        num_cpu,
+        num_thread,
+        &mut writer,
+    );
 
     inner_benchmark(
         Arc::new(LockType::from(FcLock::new(0u64))),
@@ -209,7 +217,7 @@ fn benchmark_num_threads(
                 loop_count: loop_result,
                 num_acquire,
                 hold_time,
-                combine_time : lock_type.get_current_thread_combining_time(),
+                combine_time: lock_type.get_current_thread_combining_time(),
                 locktype: lock_type.clone(),
             };
         })

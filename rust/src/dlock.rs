@@ -6,9 +6,9 @@ use std::{
 use enum_dispatch::enum_dispatch;
 
 use crate::{
-    ccsynch::CCSynch, flatcombining::fclock::FcLock,
-    fc_fair_ban::FcFairBanLock, guard::DLockGuard, raw_spin_lock::RawSpinLock,
-    rcl::rcllock::RclLock, fc_fair_ban_slice::FcFairBanSliceLock,
+    ccsynch::CCSynch, fc_fair_ban::FcFairBanLock, fc_fair_ban_slice::FcFairBanSliceLock,
+    fc_fair_skiplist::FcSL, flatcombining::fclock::FcLock, guard::DLockGuard,
+    raw_spin_lock::RawSpinLock, rcl::rcllock::RclLock,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -28,15 +28,16 @@ pub trait DLockDelegate<T>: Send + Sync {
 pub trait DLock<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a);
 
-    #[cfg(feature="combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> i64;
+    #[cfg(feature = "combiner_stat")]
+    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64>;
 }
 
 #[enum_dispatch(DLock<T>)]
-pub enum LockType<T> {
+pub enum LockType<T: 'static> {
     FlatCombining(FcLock<T>),
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
+    FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynch(CCSynch<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),
@@ -57,6 +58,7 @@ impl<T> Debug for LockType<T> {
             Self::FlatCombining(arg0) => f.debug_tuple("FlatCombining").finish(),
             Self::FlatCombiningFair(arg0) => f.debug_tuple("FlatCombiningFair").finish(),
             Self::FlatCombiningFairSlice(arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
+            Self::FlatCombiningFairSL(arg0) => f.debug_tuple("Flat Combining (Skip List)").finish(),
             Self::CCSynch(arg0) => f.debug_tuple("CCSynch").finish(),
             Self::Mutex(arg0) => f.debug_tuple("Mutex").finish(),
             Self::RCL(arg0) => f.debug_tuple("RCL").finish(),
@@ -70,6 +72,7 @@ impl<T> fmt::Display for LockType<T> {
             Self::FlatCombining(_) => write!(f, "Flat Combining"),
             Self::FlatCombiningFair(_) => write!(f, "Flat Combining Fair"),
             Self::FlatCombiningFairSlice(_) => write!(f, "Flat Combining Fair With Combiner Slice"),
+            Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
             Self::Mutex(_) => write!(f, "Mutex"),
             Self::CCSynch(_) => write!(f, "CCSynch"),
             Self::RCL(_) => write!(f, "RCL"),

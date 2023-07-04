@@ -4,6 +4,7 @@ use std::arch::x86_64::__rdtscp;
 use std::{
     cell::SyncUnsafeCell,
     mem::transmute,
+    num::*,
     sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
     time::Duration,
 };
@@ -29,10 +30,14 @@ impl<T> DLock<T> for FcLock<T> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> i64 {
-        return unsafe{
-            (*(*self.local_node.get().unwrap().get()).value.get()).combiner_time_stat
-        }
+    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
+        let count = unsafe {
+            (*(*self.local_node.get().unwrap().get()).value.get())
+                .combiner_time_stat
+                .into()
+        };
+
+        NonZeroI64::new(count)
     }
 }
 
@@ -168,7 +173,8 @@ impl<T> FcLock<T> {
         #[cfg(feature = "combiner_stat")]
         unsafe {
             let end = __rdtscp(&mut aux);
-            (*(*self.local_node.get().unwrap().get()).value.get()).combiner_time_stat += (end - begin) as i64;
+            (*(*self.local_node.get().unwrap().get()).value.get()).combiner_time_stat +=
+                (end - begin) as i64;
         }
     }
 

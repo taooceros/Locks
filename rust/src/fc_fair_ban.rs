@@ -4,6 +4,7 @@ use std::{
     cmp::{self, max},
     env::current_dir,
     mem::transmute,
+    num::*,
     ptr::null_mut,
     sync::atomic::*,
     thread::current,
@@ -180,7 +181,7 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
         node.waiter.value.store(0, Ordering::Release);
 
         let backoff = Backoff::new();
-        
+
         loop {
             if self.combiner_lock.try_lock() {
                 // combiner
@@ -210,7 +211,8 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> i64 {
-        return unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
+    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
+        let count = unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
+        NonZeroI64::new(count)
     }
 }
