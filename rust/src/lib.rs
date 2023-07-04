@@ -14,7 +14,6 @@ pub mod guard;
 pub mod rcl;
 
 mod mutex_extension;
-mod operation;
 mod syncptr;
 #[cfg(test)]
 mod unit_test;

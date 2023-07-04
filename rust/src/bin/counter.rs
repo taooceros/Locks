@@ -13,7 +13,7 @@ use std::{
 use csv::Writer;
 use quanta::Clock;
 
-use dlock::{RawSimpleLock, fc_fair_skiplist::FcSL};
+use dlock::{fc_fair_skiplist::FcSL};
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
