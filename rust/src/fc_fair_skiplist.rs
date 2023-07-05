@@ -51,10 +51,16 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
 
     fn push_node(&self, node: *mut Node<T>, guard: &Guard) {
         unsafe {
+            let mut key = (*node).usage;
+
+            while self.jobs.contains_key(&key, guard){
+                key = key + fastrand::u64(1..10000);
+            }
+
             (*node).active.store(true, Release);
 
             self.jobs.insert(
-                (*node).usage + (current().id().as_u64().get()),
+                key,
                 AtomicPtr::new(node),
                 guard,
             );
