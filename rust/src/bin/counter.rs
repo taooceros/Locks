@@ -47,48 +47,46 @@ struct Record<T: 'static> {
     locktype: Arc<LockType<T>>,
 }
 
-pub fn benchmark(num_cpu: usize, num_thread: usize) {
-    let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
-
+pub fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
     inner_benchmark(
         Arc::new(LockType::from(FcSL::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     inner_benchmark(
         Arc::new(LockType::from(FcLock::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     inner_benchmark(
         Arc::new(LockType::from(FcFairBanLock::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     inner_benchmark(
         Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     inner_benchmark(
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
     inner_benchmark(
         Arc::new(LockType::from(CCSynch::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     let mut server = RclServer::new();
@@ -98,7 +96,7 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         Arc::new(LockType::RCL(lock)),
         num_cpu - 1,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     println!("Benchmark finished");
@@ -230,12 +228,14 @@ fn main() {
         }
     }
 
+    let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
+
     let num_cpu = available_parallelism().unwrap();
     let num_thread = num_cpu;
     let mut i = 2;
 
     while i <= num_thread.get() {
-        benchmark(num_cpu.get(), i);
+        benchmark(num_cpu.get(), i, &mut writer);
         i *= 2;
     }
 }
