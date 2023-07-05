@@ -1,12 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    mem::transmute,
-    num::*,
-    sync::atomic::Ordering::*,
-    sync::atomic::*,
-    thread::{current},
-    time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*,
+    sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
 };
 
 use crossbeam::{
@@ -16,7 +10,6 @@ use crossbeam::{
 };
 use crossbeam_skiplist::SkipList;
 use thread_local::ThreadLocal;
-
 
 use crate::{
     dlock::{DLock, DLockDelegate},
@@ -53,17 +46,17 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
         unsafe {
             let mut key = (*node).usage;
 
-            while self.jobs.contains_key(&key, guard){
-                key = key + fastrand::u64(1..10000);
-            }
-
             (*node).active.store(true, Release);
 
-            self.jobs.insert(
-                key,
-                AtomicPtr::new(node),
-                guard,
-            );
+            loop {
+                let entry = self.jobs.get_or_insert(key, AtomicPtr::new(node), guard);
+
+                if entry.value().load_consume() == node {
+                    return;
+                }
+
+                key = key + fastrand::u64(1..10000);
+            }
         }
     }
 
@@ -140,7 +133,7 @@ impl<T: 'static> DLock<T> for FcSL<T, RawSpinLock> {
                 // combiner
 
                 self.combine(guard);
-                
+
                 self.combiner_lock.unlock();
             }
 
