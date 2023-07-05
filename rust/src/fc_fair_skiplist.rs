@@ -1,6 +1,12 @@
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*,
-    sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
+    arch::x86_64::__rdtscp,
+    cell::SyncUnsafeCell,
+    mem::transmute,
+    num::*,
+    sync::atomic::Ordering::*,
+    sync::atomic::*,
+    thread::{current, ThreadId},
+    time::Duration,
 };
 
 use crossbeam::{
@@ -25,11 +31,19 @@ mod node;
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
 const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Usage {
+    usage: u64,
+    thread_id: NonZeroU64,
+}
+
+
+
 pub struct FcSL<T, L: RawSimpleLock> {
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
-    jobs: SkipList<u64, AtomicPtr<Node<T>>>,
+    jobs: SkipList<Usage, AtomicPtr<Node<T>>>,
 }
 
 impl<T: 'static> FcSL<T, RawSpinLock> {
@@ -44,19 +58,14 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
 
     fn push_node(&self, node: *mut Node<T>, guard: &Guard) {
         unsafe {
-            let mut key = (*node).usage;
+            let key = Usage{
+                usage: (*node).usage,
+                thread_id: current().id().as_u64()
+            };
 
             (*node).active.store(true, Release);
 
-            loop {
-                let entry = self.jobs.get_or_insert(key, AtomicPtr::new(node), guard);
-
-                if entry.value().load_consume() == node {
-                    return;
-                }
-
-                key = key + fastrand::u64(1..10000);
-            }
+            self.jobs.insert(key, AtomicPtr::new(node), guard);
         }
     }
 
