@@ -33,7 +33,6 @@ const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
 const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
 
 pub struct FcSL<T, L: RawSimpleLock> {
-    pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
@@ -43,7 +42,6 @@ pub struct FcSL<T, L: RawSimpleLock> {
 impl<T: 'static> FcSL<T, RawSpinLock> {
     pub fn new(data: T) -> Self {
         Self {
-            pass: AtomicU32::new(0),
             combiner_lock: CachePadded::new(RawSpinLock::new()),
             data: SyncUnsafeCell::new(data),
             local_node: ThreadLocal::new(),
@@ -53,12 +51,13 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
 
     fn push_node(&self, node: *mut Node<T>, guard: &Guard) {
         unsafe {
+            (*node).active.store(true, Release);
+
             self.jobs.insert(
                 (*node).usage + (current().id().as_u64().get()),
                 AtomicPtr::new(node),
                 guard,
             );
-            (*node).active.store(true, Release);
         }
     }
 
