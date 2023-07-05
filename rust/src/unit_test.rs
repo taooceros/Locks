@@ -68,7 +68,7 @@ pub fn rcl_test() {
 
 const THREAD_NUM: usize = 64;
 const ITERATION: usize = 10000;
-const INNER_ITERATION: usize = 1000000;
+const INNER_ITERATION: usize = 100000;
 
 pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
     let mut handles = vec![];
