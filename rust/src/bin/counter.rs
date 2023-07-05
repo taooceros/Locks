@@ -113,7 +113,7 @@ fn inner_benchmark(
     STOP.store(false, Ordering::Release);
 
     let threads = (0..num_thread)
-        .map(|id| benchmark_num_threads(&lock_type, id, num_cpu, num_thread, &STOP))
+        .map(|id| benchmark_num_threads(&lock_type, id, num_thread, num_cpu, &STOP))
         .collect::<Vec<_>>();
 
     println!("Starting benchmark for {}", lock_type);
