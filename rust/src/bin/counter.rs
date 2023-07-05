@@ -13,7 +13,7 @@ use std::{
 use csv::Writer;
 use quanta::Clock;
 
-use dlock::{fc_fair_skiplist::FcSL};
+use dlock::fc_fair_skiplist::FcSL;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
@@ -28,7 +28,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 2;
+const DURATION: u64 = 10;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -36,6 +36,8 @@ const DURATION: u64 = 2;
 struct Record<T: 'static> {
     id: usize,
     cpu_id: usize,
+    thread_num: usize,
+    cpu_num: usize,
     loop_count: u64,
     num_acquire: u64,
     #[serde_as(as = "DurationMilliSeconds<u64>")]
@@ -134,7 +136,7 @@ fn inner_benchmark(
     STOP.store(false, Ordering::Release);
 
     let threads = (0..num_thread)
-        .map(|id| benchmark_num_threads(&lock_type, id, num_cpu, &STOP))
+        .map(|id| benchmark_num_threads(&lock_type, id, num_cpu, num_thread, &STOP))
         .collect::<Vec<_>>();
 
     println!("Starting benchmark for {}", lock_type);
@@ -174,6 +176,7 @@ fn inner_benchmark(
 fn benchmark_num_threads(
     lock_type_ref: &Arc<LockType<u64>>,
     id: usize,
+    num_thread: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
 ) -> JoinHandle<Record<u64>> {
@@ -214,6 +217,8 @@ fn benchmark_num_threads(
             return Record {
                 id,
                 cpu_id: id % num_cpu,
+                thread_num: num_thread,
+                cpu_num: num_cpu,
                 loop_count: loop_result,
                 num_acquire,
                 hold_time,
@@ -227,5 +232,10 @@ fn benchmark_num_threads(
 fn main() {
     let num_cpu = available_parallelism().unwrap();
     let num_thread = num_cpu;
-    benchmark(num_cpu.get(), num_thread.get());
+    let mut i = 2;
+
+    while i <= num_thread.get() {
+        benchmark(num_cpu.get(), i);
+        i *= 2;
+    }
 }
