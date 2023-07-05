@@ -48,27 +48,6 @@ struct Record<T: 'static> {
 }
 
 pub fn benchmark(num_cpu: usize, num_thread: usize) {
-    let output_path = Path::new("../visualization/output");
-
-    if output_path.is_dir() {
-        // remove the dir
-        match remove_dir_all(output_path) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Error removing output dir: {}", e);
-                return;
-            }
-        }
-    }
-
-    match create_dir(output_path) {
-        Ok(_) => {}
-        Err(e) => {
-            println!("Error creating output dir: {}", e);
-            return;
-        }
-    }
-
     let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
 
     inner_benchmark(
@@ -230,6 +209,27 @@ fn benchmark_num_threads(
 }
 
 fn main() {
+    let output_path = Path::new("../visualization/output");
+
+    if output_path.is_dir() {
+        // remove the dir
+        match remove_dir_all(output_path) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Error removing output dir: {}", e);
+                return;
+            }
+        }
+    }
+
+    match create_dir(output_path) {
+        Ok(_) => {}
+        Err(e) => {
+            println!("Error creating output dir: {}", e);
+            return;
+        }
+    }
+
     let num_cpu = available_parallelism().unwrap();
     let num_thread = num_cpu;
     let mut i = 2;
