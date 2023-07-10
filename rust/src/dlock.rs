@@ -8,7 +8,7 @@ use enum_dispatch::enum_dispatch;
 use crate::{
     ccsynch::CCSynch, fc_fair_ban::FcFairBanLock, fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL, flatcombining::fclock::FcLock, guard::DLockGuard,
-    raw_spin_lock::RawSpinLock, rcl::rcllock::RclLock,
+    spin_lock::{RawSpinLock, SpinLock}, rcl::rcllock::RclLock,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -39,6 +39,7 @@ pub enum LockType<T: 'static> {
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynch(CCSynch<T>),
+    SpinLock(SpinLock<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),
 }
@@ -60,6 +61,7 @@ impl<T> Debug for LockType<T> {
             Self::FlatCombiningFairSlice(_arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
             Self::FlatCombiningFairSL(_arg0) => f.debug_tuple("Flat Combining (Skip List)").finish(),
             Self::CCSynch(_arg0) => f.debug_tuple("CCSynch").finish(),
+            Self::SpinLock(_arg0) => f.debug_tuple("SpinLock").finish(),
             Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
             Self::RCL(_arg0) => f.debug_tuple("RCL").finish(),
         }
@@ -73,6 +75,7 @@ impl<T> fmt::Display for LockType<T> {
             Self::FlatCombiningFair(_) => write!(f, "Flat Combining Fair"),
             Self::FlatCombiningFairSlice(_) => write!(f, "Flat Combining Fair With Combiner Slice"),
             Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
+            Self::SpinLock(_) => write!(f, "SpinLock"),
             Self::Mutex(_) => write!(f, "Mutex"),
             Self::CCSynch(_) => write!(f, "CCSynch"),
             Self::RCL(_) => write!(f, "RCL"),

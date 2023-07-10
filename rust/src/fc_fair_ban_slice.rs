@@ -12,7 +12,7 @@ use thread_local::ThreadLocal;
 use crate::{
     dlock::{DLock, DLockDelegate},
     guard::DLockGuard,
-    raw_spin_lock::RawSpinLock,
+    spin_lock::RawSpinLock,
     RawSimpleLock,
 };
 

@@ -13,7 +13,6 @@ use std::{
 use csv::Writer;
 use quanta::Clock;
 
-use dlock::fc_fair_skiplist::FcSL;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
@@ -23,6 +22,7 @@ use dlock::{
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
+use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
 use serde::Serialize;
 use serde_with::serde_as;
@@ -71,6 +71,13 @@ pub fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
 
     inner_benchmark(
         Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        writer,
+    );
+
+    inner_benchmark(
+        Arc::new(LockType::from(SpinLock::new(0u64))),
         num_cpu,
         num_thread,
         writer,
@@ -143,6 +150,10 @@ fn inner_benchmark(
     }
 
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+
+    lock_type.lock(|guard: DLockGuard<u64>| {
+        assert_eq!(*guard, total_count);
+    });
 
     println!(
         "Finish Benchmark for {}: Total Counter {}",

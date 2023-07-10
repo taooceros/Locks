@@ -17,7 +17,7 @@ mod mutex_extension;
 mod syncptr;
 #[cfg(test)]
 mod unit_test;
-pub mod raw_spin_lock;
+pub mod spin_lock;
 
 pub unsafe trait RawSimpleLock {
     fn new() -> Self;
