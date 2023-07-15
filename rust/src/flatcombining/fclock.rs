@@ -32,8 +32,6 @@ pub struct FcLock<T, L: RawSimpleLock> {
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<T>>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i32>,
     num_waiting_threads: SyncUnsafeCell<i32>,
 }
 
@@ -45,8 +43,6 @@ impl<T> FcLock<T, RawSpinLock> {
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: SyncUnsafeCell::new(0),
         }
     }
