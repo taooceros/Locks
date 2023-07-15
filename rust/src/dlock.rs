@@ -34,7 +34,7 @@ pub trait DLock<T> {
 
 #[enum_dispatch(DLock<T>)]
 pub enum LockType<T: 'static> {
-    FlatCombining(FcLock<T>),
+    FlatCombining(FcLock<T, RawSpinLock>),
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),

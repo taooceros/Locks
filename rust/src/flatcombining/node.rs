@@ -1,25 +1,33 @@
-use std::cell::SyncUnsafeCell;
+use std::{ptr::null_mut, sync::atomic::AtomicBool};
 
 use crossbeam::utils::CachePadded;
-use linux_futex::*;
+use linux_futex::{Futex, Private};
 
 use crate::dlock::DLockDelegate;
-use crate::syncptr::SyncMutPtr;
 
-pub(super) struct NodeData<T> {
-    pub(super) age: i32,
-    pub(super) active: bool,
+pub(super) struct Node<T> {
+    pub(super) age: u32,
+    pub(super) active: AtomicBool,
     pub(super) f: CachePadded<Option<*mut (dyn DLockDelegate<T>)>>,
+    pub(super) next: *mut Node<T>,
     pub(super) waiter: Futex<Private>, // id: i32,
     #[cfg(feature = "combiner_stat")]
     pub(super) combiner_time_stat: i64,
 }
 
-unsafe impl<T> Sync for NodeData<T> {}
+unsafe impl<T> Send for Node<T> {}
+unsafe impl<T> Sync for Node<T> {}
 
-unsafe impl<T> Send for NodeData<T> {}
-
-pub(super) struct Node<T> {
-    pub(super) value: SyncUnsafeCell<NodeData<T>>,
-    pub(super) next: Option<SyncMutPtr<Node<T>>>,
+impl<T> Node<T> {
+    pub(super) fn new() -> Self {
+        Self {
+            age: 0,
+            active: AtomicBool::new(false),
+            f: CachePadded::new(None),
+            waiter: Futex::new(0),
+            next: null_mut(),
+            #[cfg(feature = "combiner_stat")]
+            combiner_time_stat: 0,
+        }
+    }
 }
