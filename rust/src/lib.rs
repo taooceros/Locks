@@ -2,21 +2,22 @@
 #![feature(pointer_is_aligned)]
 #![feature(type_alias_impl_trait)]
 #![feature(atomic_from_ptr)]
+#![feature(thread_id_value)]
 
 pub mod ccsynch;
 pub mod dlock;
 pub mod flatcombining;
-pub mod flatcombining2;
-pub mod flatcombining_fair_ban;
+pub mod fc_fair_ban;
+pub mod fc_fair_ban_slice;
+pub mod fc_fair_skiplist;
 pub mod guard;
 pub mod rcl;
 
 mod mutex_extension;
-mod operation;
 mod syncptr;
 #[cfg(test)]
 mod unit_test;
-pub mod raw_spin_lock;
+pub mod spin_lock;
 
 pub unsafe trait RawSimpleLock {
     fn new() -> Self;

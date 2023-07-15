@@ -1,5 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
+    num::NonZeroI64,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,87 +16,84 @@ use quanta::Clock;
 use dlock::{
     ccsynch::CCSynch,
     dlock::{DLock, LockType},
+    fc_fair_ban::FcFairBanLock,
+    fc_fair_ban_slice::FcFairBanSliceLock,
     flatcombining::fclock::FcLock,
-    flatcombining2::FcLock2,
-    flatcombining_fair_ban::FcFairBanLock,
     guard::DLockGuard,
-    raw_spin_lock::RawSpinLock,
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    RawSimpleLock,
 };
+use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 2;
+const DURATION: u64 = 10;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record<T> {
+struct Record<T: 'static> {
     id: usize,
     cpu_id: usize,
+    thread_num: usize,
+    cpu_num: usize,
     loop_count: u64,
     num_acquire: u64,
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     hold_time: Duration,
+    #[cfg(feature = "combiner_stat")]
+    combine_time: Option<NonZeroI64>,
     locktype: Arc<LockType<T>>,
 }
 
-pub fn benchmark(num_cpu: usize, num_thread: usize) {
-    let output_path = Path::new("../visualization/output");
+pub fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
+    inner_benchmark(
+        Arc::new(LockType::from(FcSL::new(0u64))),
+        num_cpu,
+        num_thread,
+        writer,
+    );
 
-    if output_path.is_dir() {
-        // remove the dir
-        match remove_dir_all(output_path) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Error removing output dir: {}", e);
-                return;
-            }
-        }
-    }
-
-    match create_dir(output_path) {
-        Ok(_) => {}
-        Err(e) => {
-            println!("Error creating output dir: {}", e);
-            return;
-        }
-    }
-
-    let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
+    inner_benchmark(
+        Arc::new(LockType::from(FcLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        writer,
+    );
 
     inner_benchmark(
         Arc::new(LockType::from(FcFairBanLock::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
+
     inner_benchmark(
-        Arc::new(LockType::from(FcLock::new(0u64))),
+        Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
-    // inner_benchmark(
-    //     Arc::new(LockType::from(FcLock2::new(0u64, RawSpinLock::new()))),
-    //     num_cpu,
-    //     num_thread,
-    //     output_path,
-    // );
+
+    inner_benchmark(
+        Arc::new(LockType::from(SpinLock::new(0u64))),
+        num_cpu,
+        num_thread,
+        writer,
+    );
+
     inner_benchmark(
         Arc::new(LockType::from(Mutex::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
     inner_benchmark(
         Arc::new(LockType::from(CCSynch::new(0u64))),
         num_cpu,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     let mut server = RclServer::new();
@@ -105,7 +103,7 @@ pub fn benchmark(num_cpu: usize, num_thread: usize) {
         Arc::new(LockType::RCL(lock)),
         num_cpu - 1,
         num_thread,
-        &mut writer,
+        writer,
     );
 
     println!("Benchmark finished");
@@ -122,7 +120,7 @@ fn inner_benchmark(
     STOP.store(false, Ordering::Release);
 
     let threads = (0..num_thread)
-        .map(|id| benchmark_num_threads(&lock_type, id, num_cpu, &STOP))
+        .map(|id| benchmark_num_threads(&lock_type, id, num_thread, num_cpu, &STOP))
         .collect::<Vec<_>>();
 
     println!("Starting benchmark for {}", lock_type);
@@ -153,6 +151,10 @@ fn inner_benchmark(
 
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
+    lock_type.lock(|guard: DLockGuard<u64>| {
+        assert_eq!(*guard, total_count);
+    });
+
     println!(
         "Finish Benchmark for {}: Total Counter {}",
         lock_type, total_count
@@ -162,6 +164,7 @@ fn inner_benchmark(
 fn benchmark_num_threads(
     lock_type_ref: &Arc<LockType<u64>>,
     id: usize,
+    num_thread: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
 ) -> JoinHandle<Record<u64>> {
@@ -198,12 +201,16 @@ fn benchmark_num_threads(
                 });
             }
             println!("Thread {} finished with result {}", id, loop_result);
+
             return Record {
                 id,
                 cpu_id: id % num_cpu,
+                thread_num: num_thread,
+                cpu_num: num_cpu,
                 loop_count: loop_result,
                 num_acquire,
                 hold_time,
+                combine_time: lock_type.get_current_thread_combining_time(),
                 locktype: lock_type.clone(),
             };
         })
@@ -211,7 +218,35 @@ fn benchmark_num_threads(
 }
 
 fn main() {
+    let output_path = Path::new("../visualization/output");
+
+    if output_path.is_dir() {
+        // remove the dir
+        match remove_dir_all(output_path) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Error removing output dir: {}", e);
+                return;
+            }
+        }
+    }
+
+    match create_dir(output_path) {
+        Ok(_) => {}
+        Err(e) => {
+            println!("Error creating output dir: {}", e);
+            return;
+        }
+    }
+
+    let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
+
     let num_cpu = available_parallelism().unwrap();
     let num_thread = num_cpu;
-    benchmark(num_cpu.get(), num_thread.get());
+    let mut i = 2;
+
+    while i <= num_thread.get() {
+        benchmark(num_cpu.get(), i, &mut writer);
+        i *= 2;
+    }
 }

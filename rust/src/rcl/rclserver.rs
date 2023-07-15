@@ -3,7 +3,6 @@ use crossbeam::queue::ArrayQueue;
 use std::{
     cell::SyncUnsafeCell,
     collections::LinkedList,
-    mem::size_of,
     ptr::null,
     sync::atomic::{Ordering::*, *},
 };

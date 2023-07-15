@@ -5,7 +5,7 @@ use linux_futex::{Futex, Private};
 
 use crate::dlock::DLockDelegate;
 
-pub(super) struct Node<T> {
+pub struct Node<T> {
     pub(super) age: u32,
     pub(super) active: AtomicBool,
     pub(super) usage: isize,
@@ -13,6 +13,9 @@ pub(super) struct Node<T> {
     pub(super) next: *mut Node<T>,
     pub(super) waiter: Futex<Private>, // id: i32,
     pub(super) banned_until: u64,
+    pub(super) combiner_time: i64,
+    #[cfg(feature = "combiner_stat")]
+    pub(super) combiner_time_stat: i64,
 }
 
 unsafe impl<T> Send for Node<T> {}
@@ -27,7 +30,9 @@ impl<T> Node<T> {
             f: CachePadded::new(None),
             waiter: Futex::new(0),
             next: null_mut(),
-            banned_until : 0
+            banned_until: 0,
+            combiner_time: 0,
+            combiner_time_stat: 0,
         }
     }
 }
