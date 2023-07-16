@@ -7,12 +7,13 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, available_parallelism, JoinHandle},
-    time::Duration,
+    time::Duration, iter::once,
 };
 
 use clap::{Args, Parser, Subcommand};
 use csv::Writer;
 use quanta::Clock;
+use strum::{EnumIter, IntoEnumIterator}; // 0.17.1
 
 use dlock::{
     ccsynch::CCSynch,
@@ -48,33 +49,25 @@ struct Record<T: 'static> {
     locktype: Arc<LockType<T>>,
 }
 
-fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>, target: &LockTarget) {
-    let locks = match target {
-        LockTarget::FcSL => vec![LockType::from(FcSL::new(0u64))],
-        LockTarget::FcLock => vec![LockType::from(FcLock::new(0u64))],
-        LockTarget::FcFairBanLock => vec![LockType::from(FcFairBanLock::new(0u64))],
-        LockTarget::FcFairBanSliceLock => vec![LockType::from(FcFairBanSliceLock::new(0u64))],
-        LockTarget::SpinLock => vec![LockType::from(SpinLock::new(0u64))],
-        LockTarget::Mutex => vec![LockType::from(Mutex::new(0u64))],
-        LockTarget::CCSynch => vec![LockType::from(CCSynch::new(0u64))],
-        // need special case for RCL
-        LockTarget::RCL => vec![],
-        LockTarget::All => vec![
-            LockType::from(FcSL::new(0u64)),
-            LockType::from(FcLock::new(0u64)),
-            LockType::from(FcFairBanLock::new(0u64)),
-            LockType::from(FcFairBanSliceLock::new(0u64)),
-            LockType::from(SpinLock::new(0u64)),
-            LockType::from(Mutex::new(0u64)),
-            LockType::from(CCSynch::new(0u64)),
-        ],
+fn benchmark(
+    num_cpu: usize,
+    num_thread: usize,
+    writer: &mut Writer<File>,
+    target: &Option<LockTarget>,
+) {
+    let targets : Vec<Option<LockType<u64>>> = match target {
+        Some(target) => vec![target.to_locktype()],
+        None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
     };
+    
 
-    for lock in locks {
-        inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer);
+    for target in targets {
+        if let Some(lock) = target {
+            inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer);
+        }
     }
 
-    if matches!(target, LockTarget::RCL | LockTarget::All) {
+    if matches!(target, Some(LockTarget::RCL) | None) {
         let mut server = RclServer::new();
         server.start(num_cpu - 1);
         let lock = RclLock::new(&mut server, 0u64);
@@ -204,10 +197,10 @@ pub struct App {
     #[clap(flatten)]
     global_opts: GlobalOpts,
     #[clap(subcommand)]
-    lock_target: LockTarget,
+    lock_target: Option<LockTarget>,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, EnumIter)]
 enum LockTarget {
     /// Benchmark Flat-Combining Skiplist
     FcSL,
@@ -225,8 +218,25 @@ enum LockTarget {
     CCSynch,
     /// Benchmark Remote Core Locking
     RCL,
-    /// Benchmark All Lock
-    All,
+}
+
+impl LockTarget {
+    pub fn to_locktype(&self) -> Option<LockType<u64>> {
+        let locktype: LockType<u64> = match self {
+            LockTarget::FcSL => FcSL::new(0u64).into(),
+            LockTarget::FcLock => FcLock::new(0u64).into(),
+            LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
+            LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
+            LockTarget::SpinLock => SpinLock::new(0u64).into(),
+            LockTarget::Mutex => Mutex::new(0u64).into(),
+            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::RCL => {
+                return None;
+            }
+        };
+
+        Some(locktype)
+    }
 }
 
 #[derive(Debug, Args)]
