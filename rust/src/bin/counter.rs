@@ -13,7 +13,7 @@ use std::{
 use clap::{Args, Parser, Subcommand};
 use csv::Writer;
 use quanta::Clock;
-use strum::{EnumIter, IntoEnumIterator}; // 0.17.1
+use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
     ccsynch::CCSynch,
@@ -252,7 +252,9 @@ pub struct GlobalOpts {
 fn main() {
     let app = App::parse();
 
-    assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+    if app.global_opts.cpus.len() != 1{
+        assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+    }
 
     let output_path = Path::new(app.global_opts.output_path.as_str());
 
