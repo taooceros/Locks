@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use clap::{Args, Parser, Subcommand};
 use csv::Writer;
 use quanta::Clock;
 
@@ -47,64 +48,43 @@ struct Record<T: 'static> {
     locktype: Arc<LockType<T>>,
 }
 
-pub fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
-    inner_benchmark(
-        Arc::new(LockType::from(FcSL::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
+fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>, target: &LockTarget) {
+    let locks = match target {
+        LockTarget::FcSL => vec![LockType::from(FcSL::new(0u64))],
+        LockTarget::FcLock => vec![LockType::from(FcLock::new(0u64))],
+        LockTarget::FcFairBanLock => vec![LockType::from(FcFairBanLock::new(0u64))],
+        LockTarget::FcFairBanSliceLock => vec![LockType::from(FcFairBanSliceLock::new(0u64))],
+        LockTarget::SpinLock => vec![LockType::from(SpinLock::new(0u64))],
+        LockTarget::Mutex => vec![LockType::from(Mutex::new(0u64))],
+        LockTarget::CCSynch => vec![LockType::from(CCSynch::new(0u64))],
+        // need special case for RCL
+        LockTarget::RCL => vec![],
+        LockTarget::All => vec![
+            LockType::from(FcSL::new(0u64)),
+            LockType::from(FcLock::new(0u64)),
+            LockType::from(FcFairBanLock::new(0u64)),
+            LockType::from(FcFairBanSliceLock::new(0u64)),
+            LockType::from(SpinLock::new(0u64)),
+            LockType::from(Mutex::new(0u64)),
+            LockType::from(CCSynch::new(0u64)),
+        ],
+    };
 
-    inner_benchmark(
-        Arc::new(LockType::from(FcLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
+    for lock in locks {
+        inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer);
+    }
 
-    inner_benchmark(
-        Arc::new(LockType::from(FcFairBanLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(SpinLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(Mutex::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-    inner_benchmark(
-        Arc::new(LockType::from(CCSynch::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    let mut server = RclServer::new();
-    server.start(num_cpu - 1);
-    let lock = RclLock::new(&mut server, 0u64);
-    inner_benchmark(
-        Arc::new(LockType::RCL(lock)),
-        num_cpu - 1,
-        num_thread,
-        writer,
-    );
+    if matches!(target, LockTarget::RCL | LockTarget::All) {
+        let mut server = RclServer::new();
+        server.start(num_cpu - 1);
+        let lock = RclLock::new(&mut server, 0u64);
+        inner_benchmark(
+            Arc::new(LockType::RCL(lock)),
+            num_cpu - 1,
+            num_thread,
+            writer,
+        );
+    }
 
     println!("Benchmark finished");
 }
@@ -217,8 +197,54 @@ fn benchmark_num_threads(
         .unwrap()
 }
 
+#[derive(Debug, Parser)]
+#[clap(name = "lock counter benchmark", version)]
+/// Benchmark Utility
+pub struct App {
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
+    #[clap(subcommand)]
+    lock_target: LockTarget,
+}
+
+#[derive(Debug, Subcommand)]
+enum LockTarget {
+    /// Benchmark Flat-Combining Skiplist
+    FcSL,
+    /// Benchmark Flat-Combining Lock
+    FcLock,
+    /// Benchmark Flat-Combining Fair (Banning) Lock
+    FcFairBanLock,
+    /// Benchmark Flat-Combining Fair (Banning & Combiner Slice) Lock
+    FcFairBanSliceLock,
+    /// Benchmark Spinlock
+    SpinLock,
+    /// Benchmark Mutex
+    Mutex,
+    /// Benchmark CCSynch
+    CCSynch,
+    /// Benchmark Remote Core Locking
+    RCL,
+    /// Benchmark All Lock
+    All,
+}
+
+#[derive(Debug, Args)]
+pub struct GlobalOpts {
+    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    threads: Vec<usize>,
+    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    cpus: Vec<usize>,
+    #[clap(long, short, default_value = "../visualization/output")]
+    output_path: String,
+}
+
 fn main() {
-    let output_path = Path::new("../visualization/output");
+    let app = App::parse();
+
+    assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+
+    let output_path = Path::new(app.global_opts.output_path.as_str());
 
     if output_path.is_dir() {
         // remove the dir
@@ -241,12 +267,12 @@ fn main() {
 
     let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
 
-    let num_cpu = available_parallelism().unwrap();
-    let num_thread = num_cpu;
-    let mut i = 2;
-
-    while i <= num_thread.get() {
-        benchmark(num_cpu.get(), i, &mut writer);
-        i *= 2;
+    for (ncpu, nthread) in app
+        .global_opts
+        .threads
+        .into_iter()
+        .zip(app.global_opts.cpus)
+    {
+        benchmark(ncpu, nthread, &mut writer, &app.lock_target);
     }
 }
