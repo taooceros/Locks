@@ -1,5 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
+    iter::once,
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -7,12 +8,12 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, available_parallelism, JoinHandle},
-    time::Duration, iter::once,
+    time::Duration,
 };
 
 use clap::{Args, Parser, Subcommand};
 use csv::Writer;
-use quanta::Clock;
+use quanta::{Clock, Instant, Upkeep};
 use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
@@ -55,11 +56,10 @@ fn benchmark(
     writer: &mut Writer<File>,
     target: &Option<LockTarget>,
 ) {
-    let targets : Vec<Option<LockType<u64>>> = match target {
+    let targets: Vec<Option<LockType<u64>>> = match target {
         Some(target) => vec![target.to_locktype()],
         None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
     };
-    
 
     for target in targets {
         if let Some(lock) = target {
@@ -154,6 +154,7 @@ fn benchmark_num_threads(
                     30
                 }
             });
+            let timer = Clock::new();
 
             let mut loop_result = 0u64;
             let mut num_acquire = 0u64;
@@ -162,14 +163,12 @@ fn benchmark_num_threads(
             while !stop.load(Ordering::Acquire) {
                 lock_type.lock(|mut guard: DLockGuard<u64>| {
                     num_acquire += 1;
-                    let timer = Clock::new();
                     let begin = timer.now();
 
-                    while timer.now().duration_since(begin) < single_iter_duration {
+                    while timer.now() - begin < single_iter_duration {
                         (*guard) += 1;
                         loop_result += 1;
                     }
-
                     hold_time += timer.now().duration_since(begin);
                 });
             }
@@ -252,7 +251,7 @@ pub struct GlobalOpts {
 fn main() {
     let app = App::parse();
 
-    if app.global_opts.cpus.len() != 1{
+    if app.global_opts.cpus.len() != 1 {
         assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
     }
 
