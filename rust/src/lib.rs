@@ -5,6 +5,7 @@
 #![feature(thread_id_value)]
 
 pub mod ccsynch;
+pub mod ccsynch_fair_ban;
 pub mod dlock;
 pub mod flatcombining;
 pub mod fc_fair_ban;

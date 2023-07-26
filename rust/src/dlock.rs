@@ -6,9 +6,15 @@ use std::{
 use enum_dispatch::enum_dispatch;
 
 use crate::{
-    ccsynch::CCSynch, fc_fair_ban::FcFairBanLock, fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_fair_skiplist::FcSL, flatcombining::fclock::FcLock, guard::DLockGuard,
-    spin_lock::{RawSpinLock, SpinLock}, rcl::rcllock::RclLock,
+    ccsynch::CCSynch,
+    ccsynch_fair_ban::CCBan,
+    fc_fair_ban::FcFairBanLock,
+    fc_fair_ban_slice::FcFairBanSliceLock,
+    fc_fair_skiplist::FcSL,
+    flatcombining::fclock::FcLock,
+    guard::DLockGuard,
+    rcl::rcllock::RclLock,
+    spin_lock::{RawSpinLock, SpinLock},
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -39,6 +45,7 @@ pub enum LockType<T: 'static> {
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynch(CCSynch<T>),
+    CCBan(CCBan<T>),
     SpinLock(SpinLock<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),
@@ -59,8 +66,11 @@ impl<T> Debug for LockType<T> {
             Self::FlatCombining(_arg0) => f.debug_tuple("FlatCombining").finish(),
             Self::FlatCombiningFair(_arg0) => f.debug_tuple("FlatCombiningFair").finish(),
             Self::FlatCombiningFairSlice(_arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
-            Self::FlatCombiningFairSL(_arg0) => f.debug_tuple("Flat Combining (Skip List)").finish(),
+            Self::FlatCombiningFairSL(_arg0) => {
+                f.debug_tuple("Flat Combining (Skip List)").finish()
+            }
             Self::CCSynch(_arg0) => f.debug_tuple("CCSynch").finish(),
+            Self::CCBan(_arg0) => f.debug_tuple("CCSynch (Ban)").finish(),
             Self::SpinLock(_arg0) => f.debug_tuple("SpinLock").finish(),
             Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
             Self::RCL(_arg0) => f.debug_tuple("RCL").finish(),
@@ -78,6 +88,7 @@ impl<T> fmt::Display for LockType<T> {
             Self::SpinLock(_) => write!(f, "SpinLock"),
             Self::Mutex(_) => write!(f, "Mutex"),
             Self::CCSynch(_) => write!(f, "CCSynch"),
+            Self::CCBan(_) => write!(f, "CCSynch (Ban)"),
             Self::RCL(_) => write!(f, "RCL"),
         }
     }
