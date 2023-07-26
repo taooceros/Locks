@@ -242,11 +242,11 @@ impl LockTarget {
 
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
-    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     threads: Vec<usize>,
-    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     cpus: Vec<usize>,
-    #[clap(long, short, default_value = "../visualization/output")]
+    #[arg(long, short, default_value = "../visualization/output")]
     output_path: String,
 }
 
