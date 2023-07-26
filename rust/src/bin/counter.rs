@@ -1,5 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
+    iter::once,
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -10,8 +11,10 @@ use std::{
     time::Duration,
 };
 
+use clap::{Args, Parser, Subcommand};
 use csv::Writer;
-use quanta::Clock;
+use quanta::{Clock, Instant, Upkeep};
+use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
     ccsynch::CCSynch,
@@ -47,64 +50,34 @@ struct Record<T: 'static> {
     locktype: Arc<LockType<T>>,
 }
 
-pub fn benchmark(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
-    inner_benchmark(
-        Arc::new(LockType::from(FcSL::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
+fn benchmark(
+    num_cpu: usize,
+    num_thread: usize,
+    writer: &mut Writer<File>,
+    target: &Option<LockTarget>,
+) {
+    let targets: Vec<Option<LockType<u64>>> = match target {
+        Some(target) => vec![target.to_locktype()],
+        None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
+    };
 
-    inner_benchmark(
-        Arc::new(LockType::from(FcLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
+    for target in targets {
+        if let Some(lock) = target {
+            inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer);
+        }
+    }
 
-    inner_benchmark(
-        Arc::new(LockType::from(FcFairBanLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(FcFairBanSliceLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(SpinLock::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    inner_benchmark(
-        Arc::new(LockType::from(Mutex::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-    inner_benchmark(
-        Arc::new(LockType::from(CCSynch::new(0u64))),
-        num_cpu,
-        num_thread,
-        writer,
-    );
-
-    let mut server = RclServer::new();
-    server.start(num_cpu - 1);
-    let lock = RclLock::new(&mut server, 0u64);
-    inner_benchmark(
-        Arc::new(LockType::RCL(lock)),
-        num_cpu - 1,
-        num_thread,
-        writer,
-    );
+    if matches!(target, Some(LockTarget::RCL) | None) {
+        let mut server = RclServer::new();
+        server.start(num_cpu - 1);
+        let lock = RclLock::new(&mut server, 0u64);
+        inner_benchmark(
+            Arc::new(LockType::RCL(lock)),
+            num_cpu - 1,
+            num_thread,
+            writer,
+        );
+    }
 
     println!("Benchmark finished");
 }
@@ -181,6 +154,7 @@ fn benchmark_num_threads(
                     30
                 }
             });
+            let timer = Clock::new();
 
             let mut loop_result = 0u64;
             let mut num_acquire = 0u64;
@@ -189,14 +163,12 @@ fn benchmark_num_threads(
             while !stop.load(Ordering::Acquire) {
                 lock_type.lock(|mut guard: DLockGuard<u64>| {
                     num_acquire += 1;
-                    let timer = Clock::new();
                     let begin = timer.now();
 
-                    while timer.now().duration_since(begin) < single_iter_duration {
+                    while timer.now() - begin < single_iter_duration {
                         (*guard) += 1;
                         loop_result += 1;
                     }
-
                     hold_time += timer.now().duration_since(begin);
                 });
             }
@@ -217,8 +189,73 @@ fn benchmark_num_threads(
         .unwrap()
 }
 
+#[derive(Debug, Parser)]
+#[clap(name = "lock counter benchmark", version)]
+/// Benchmark Utility
+pub struct App {
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
+    #[clap(subcommand)]
+    lock_target: Option<LockTarget>,
+}
+
+#[derive(Debug, Subcommand, EnumIter)]
+enum LockTarget {
+    /// Benchmark Flat-Combining Skiplist
+    FcSL,
+    /// Benchmark Flat-Combining Lock
+    FcLock,
+    /// Benchmark Flat-Combining Fair (Banning) Lock
+    FcFairBanLock,
+    /// Benchmark Flat-Combining Fair (Banning & Combiner Slice) Lock
+    FcFairBanSliceLock,
+    /// Benchmark Spinlock
+    SpinLock,
+    /// Benchmark Mutex
+    Mutex,
+    /// Benchmark CCSynch
+    CCSynch,
+    /// Benchmark Remote Core Locking
+    RCL,
+}
+
+impl LockTarget {
+    pub fn to_locktype(&self) -> Option<LockType<u64>> {
+        let locktype: LockType<u64> = match self {
+            LockTarget::FcSL => FcSL::new(0u64).into(),
+            LockTarget::FcLock => FcLock::new(0u64).into(),
+            LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
+            LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
+            LockTarget::SpinLock => SpinLock::new(0u64).into(),
+            LockTarget::Mutex => Mutex::new(0u64).into(),
+            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::RCL => {
+                return None;
+            }
+        };
+
+        Some(locktype)
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct GlobalOpts {
+    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    threads: Vec<usize>,
+    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    cpus: Vec<usize>,
+    #[clap(long, short, default_value = "../visualization/output")]
+    output_path: String,
+}
+
 fn main() {
-    let output_path = Path::new("../visualization/output");
+    let app = App::parse();
+
+    if app.global_opts.cpus.len() != 1 {
+        assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+    }
+
+    let output_path = Path::new(app.global_opts.output_path.as_str());
 
     if output_path.is_dir() {
         // remove the dir
@@ -241,12 +278,12 @@ fn main() {
 
     let mut writer = Writer::from_path(output_path.join("output.csv")).unwrap();
 
-    let num_cpu = available_parallelism().unwrap();
-    let num_thread = num_cpu;
-    let mut i = 2;
-
-    while i <= num_thread.get() {
-        benchmark(num_cpu.get(), i, &mut writer);
-        i *= 2;
+    for (ncpu, nthread) in app
+        .global_opts
+        .threads
+        .into_iter()
+        .zip(app.global_opts.cpus)
+    {
+        benchmark(ncpu, nthread, &mut writer, &app.lock_target);
     }
 }

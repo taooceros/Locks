@@ -4,9 +4,12 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crossbeam::utils::Backoff;
+use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 
-use crate::{dlock::{DLock, DLockDelegate}, guard::DLockGuard};
+use crate::{
+    dlock::{DLock, DLockDelegate},
+    guard::DLockGuard,
+};
 
 use super::RawSimpleLock;
 
@@ -23,9 +26,13 @@ unsafe impl RawSimpleLock for RawSpinLock {
 
     #[inline]
     fn try_lock(&self) -> bool {
-        self.flag
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
+        if !self.flag.load_consume() {
+            self.flag
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+        } else {
+            false
+        }
     }
 
     #[inline]
