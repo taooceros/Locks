@@ -1,6 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
-    iter::once,
+    iter::{once, repeat},
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -251,10 +251,14 @@ pub struct GlobalOpts {
 }
 
 fn main() {
-    let app = App::parse();
+    let mut app = App::parse();
 
     if app.global_opts.cpus.len() != 1 {
         assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+    }
+
+    if app.global_opts.cpus.len() == 1 {
+        app.global_opts.cpus = repeat(app.global_opts.cpus[0]).take(app.global_opts.threads.len()).collect();
     }
 
     let output_path = Path::new(app.global_opts.output_path.as_str());
