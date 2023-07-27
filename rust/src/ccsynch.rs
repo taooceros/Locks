@@ -15,25 +15,25 @@ use thread_local::ThreadLocal;
 
 use linux_futex::{Futex, Private};
 
-use crate::dlock::DLockDelegate;
 use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
+use crate::{dlock::DLockDelegate, waiter::Parker};
 
 use self::node::Node;
 
 mod node;
 
-struct ThreadData<T> {
+struct ThreadData<T, W: Parker> {
     banned_until: i64,
-    node: AtomicPtr<Node<T>>,
+    node: AtomicPtr<Node<T, W>>,
 }
 
-pub struct CCSynch<T> {
+pub struct CCSynch<T, W: Parker> {
     data: SyncUnsafeCell<T>,
-    tail: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T>>>,
+    tail: AtomicPtr<Node<T, W>>,
+    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T, W>>>,
 }
 
-impl<T> DLock<T> for CCSynch<T> {
+impl<T, W: Parker> DLock<T> for CCSynch<T, W> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
@@ -47,27 +47,23 @@ impl<T> DLock<T> for CCSynch<T> {
     }
 }
 
-impl<T> CCSynch<T> {
-    pub fn new(t: T) -> CCSynch<T> {
-        let node = Box::into_raw(Box::new(Node::new()));
+impl<T, W: Parker> CCSynch<T, W> {
+    pub fn new(t: T) -> CCSynch<T, W> {
+        let node = Box::leak(Box::new(Node::<T, W>::new()));
+        node.wait.wake();
         CCSynch {
             data: SyncUnsafeCell::new(t),
-            tail: AtomicPtr::from(node),
+            tail: AtomicPtr::from(node as *mut Node<T,W>),
             local_node: ThreadLocal::new(),
         }
     }
 
-    fn execute_fn(&self, node: &mut Node<T>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
-        let mut aux = 0;
-        let cs_begin = unsafe { __rdtscp(&mut aux) };
-
+    fn execute_fn(&self, node: &mut Node<T, W>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
         let guard = DLockGuard::new(&self.data);
         f.apply(guard);
 
-        let cs_end = unsafe { __rdtscp(&mut aux) };
-
         node.completed.store(true, Release);
-        node.wait.store(false, Release);
+        node.wait.wake();
     }
 
     pub fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
@@ -82,7 +78,7 @@ impl<T> CCSynch<T> {
         let next_node = unsafe { &mut *(*thread_data.get()).node.load_consume() };
 
         next_node.next.store(null_mut(), Release);
-        next_node.wait.store(true, Release);
+        next_node.wait.reset();
         next_node.completed.store(false, Release);
 
         // assign task to next node
@@ -100,13 +96,7 @@ impl<T> CCSynch<T> {
             (*(thread_data.get())).node.store(current_node, Release);
         }
 
-        // wait for completion
-        // spinning
-        let backoff = Backoff::default();
-        while current_node.wait.load(Acquire) {
-            // can use futex in the future
-            backoff.snooze();
-        }
+        current_node.wait.wait();
 
         // check for completion, if not become the combiner
 
@@ -148,7 +138,7 @@ impl<T> CCSynch<T> {
             next_ptr = tmp_node.next.load_consume();
         }
 
-        tmp_node.wait.store(false, Relaxed);
+        tmp_node.wait.wake();
 
         #[cfg(feature = "combiner_stat")]
         unsafe {

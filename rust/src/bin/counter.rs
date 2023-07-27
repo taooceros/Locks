@@ -18,12 +18,14 @@ use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
     ccsynch::CCSynch,
+    ccsynch_fair_ban::CCBan,
     dlock::{DLock, LockType},
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
-    flatcombining::fclock::FcLock,
+    fc::fclock::FcLock,
     guard::DLockGuard,
-    rcl::{rcllock::RclLock, rclserver::RclServer}, ccsynch_fair_ban::CCBan,
+    rcl::{rcllock::RclLock, rclserver::RclServer},
+    waiter::{BlockParker, SpinParker},
 };
 use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
@@ -214,7 +216,8 @@ enum LockTarget {
     /// Benchmark Mutex
     Mutex,
     /// Benchmark CCSynch
-    CCSynch,
+    CCSynchSpin,
+    CCSynchBlock,
     CCBan,
     /// Benchmark Remote Core Locking
     RCL,
@@ -229,7 +232,8 @@ impl LockTarget {
             LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
             LockTarget::SpinLock => SpinLock::new(0u64).into(),
             LockTarget::Mutex => Mutex::new(0u64).into(),
-            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::CCSynchSpin => CCSynch::<_, SpinParker>::new(0u64).into(),
+            LockTarget::CCSynchBlock => LockType::CCSynchBlock(CCSynch::new(0u64)),
             LockTarget::CCBan => CCBan::new(0u64).into(),
             LockTarget::RCL => {
                 return None;
@@ -258,7 +262,9 @@ fn main() {
     }
 
     if app.global_opts.cpus.len() == 1 {
-        app.global_opts.cpus = repeat(app.global_opts.cpus[0]).take(app.global_opts.threads.len()).collect();
+        app.global_opts.cpus = repeat(app.global_opts.cpus[0])
+            .take(app.global_opts.threads.len())
+            .collect();
     }
 
     let output_path = Path::new(app.global_opts.output_path.as_str());

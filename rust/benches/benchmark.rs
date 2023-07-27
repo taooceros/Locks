@@ -11,7 +11,7 @@ extern crate dlock;
 
 use dlock::ccsynch::*;
 use dlock::dlock::*;
-use dlock::flatcombining::fclock::*;
+use dlock::fc::fclock::*;
 use dlock::rcl::rcllock::*;
 use dlock::rcl::rclserver::*;
 
@@ -34,7 +34,7 @@ pub fn lock_bench(bencher: &mut Criterion) {
 }
 
 pub fn ccbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
-    let lock = Arc::new(LockType::CCSynch(CCSynch::new(0u64)));
+    let lock = Arc::new(LockType::CCSynchSpin(CCSynch::new(0u64)));
 
     bench_inner(lock.clone(), "ccsynch", bencher, cpu_count, thread_count)
 }

@@ -11,10 +11,10 @@ use crate::{
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
-    flatcombining::fclock::FcLock,
+    fc::fclock::FcLock,
     guard::DLockGuard,
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock},
+    spin_lock::{RawSpinLock, SpinLock}, waiter::{SpinParker, BlockParker, SpinBlockParker},
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -44,7 +44,8 @@ pub enum LockType<T: 'static> {
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
-    CCSynch(CCSynch<T>),
+    CCSynchSpin(CCSynch<T, SpinParker>),
+    CCSynchBlock(CCSynch<T, BlockParker>),
     CCBan(CCBan<T>),
     SpinLock(SpinLock<T>),
     Mutex(Mutex<T>),
@@ -69,7 +70,8 @@ impl<T> Debug for LockType<T> {
             Self::FlatCombiningFairSL(_arg0) => {
                 f.debug_tuple("Flat Combining (Skip List)").finish()
             }
-            Self::CCSynch(_arg0) => f.debug_tuple("CCSynch").finish(),
+            Self::CCSynchSpin(_arg0) => f.debug_tuple("CCSynch (Spin Wait)").finish(),
+            Self::CCSynchBlock(_arg0) => f.debug_tuple("CCSynch (Block Wait)").finish(),
             Self::CCBan(_arg0) => f.debug_tuple("CCSynch (Ban)").finish(),
             Self::SpinLock(_arg0) => f.debug_tuple("SpinLock").finish(),
             Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
@@ -87,7 +89,8 @@ impl<T> fmt::Display for LockType<T> {
             Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
             Self::SpinLock(_) => write!(f, "SpinLock"),
             Self::Mutex(_) => write!(f, "Mutex"),
-            Self::CCSynch(_) => write!(f, "CCSynch"),
+            Self::CCSynchSpin(_) => write!(f, "CCSynch (Spin Wait)"),
+            Self::CCSynchBlock(_) => write!(f, "CCSynch (Block Wait)"),
             Self::CCBan(_) => write!(f, "CCSynch (Ban)"),
             Self::RCL(_) => write!(f, "RCL"),
         }
