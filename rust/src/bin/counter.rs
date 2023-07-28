@@ -20,9 +20,9 @@ use dlock::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
     dlock::{DLock, LockType},
+    fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
-    fc::fclock::FcLock,
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
     waiter::{BlockParker, SpinParker},
@@ -195,10 +195,10 @@ fn benchmark_num_threads(
 #[clap(name = "lock counter benchmark", version)]
 /// Benchmark Utility
 pub struct App {
-    #[clap(flatten)]
-    global_opts: GlobalOpts,
     #[clap(subcommand)]
     lock_target: Option<LockTarget>,
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
 }
 
 #[derive(Debug, Subcommand, EnumIter)]
@@ -246,9 +246,9 @@ impl LockTarget {
 
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
-    #[arg(num_args(0..), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     threads: Vec<usize>,
-    #[arg(num_args(0..), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     cpus: Vec<usize>,
     #[arg(long, short, default_value = "../visualization/output")]
     output_path: String,

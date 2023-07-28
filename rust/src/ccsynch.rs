@@ -53,7 +53,7 @@ impl<T, W: Parker> CCSynch<T, W> {
         node.wait.wake();
         CCSynch {
             data: SyncUnsafeCell::new(t),
-            tail: AtomicPtr::from(node as *mut Node<T,W>),
+            tail: AtomicPtr::from(node as *mut Node<T, W>),
             local_node: ThreadLocal::new(),
         }
     }
@@ -124,13 +124,17 @@ impl<T, W: Parker> CCSynch<T, W> {
 
             counter += 1;
 
+            unsafe {
+                (*next_ptr).wait.prewake();
+            }
+
             if tmp_node.f.is_some() {
                 unsafe {
                     let f = &mut *tmp_node.f.take().unwrap();
                     self.execute_fn(tmp_node, f);
                 }
             } else {
-                // panic!("No function found");
+                panic!("No function found");
             }
 
             tmp_node = unsafe { &mut *(next_ptr) };
