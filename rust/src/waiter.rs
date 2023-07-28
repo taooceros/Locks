@@ -2,7 +2,8 @@ use std::{
     cell::SyncUnsafeCell,
     hint::spin_loop,
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering::*},
-    thread::{current, park, Thread},
+    thread::{current, park, park_timeout, Thread},
+    time::Duration,
 };
 
 use crossbeam::{atomic::AtomicConsume, utils::Backoff};
@@ -32,7 +33,7 @@ impl Parker for BlockParker {
             let flag = self.flag.load_consume();
 
             if flag == 2 {
-                break
+                break;
             } else if flag == 1 {
                 backoff.snooze();
                 continue;
@@ -55,10 +56,11 @@ impl Parker for BlockParker {
 
     fn reset(&self) {
         self.flag.store(0, Release);
+        park_timeout(Duration::default());
     }
 
     fn prewake(&self) {
-        if self.flag.fetch_add(1, AcqRel) == 0 {
+        if self.flag.swap(1, AcqRel) == 0 {
             unsafe {
                 match (*self.handle.get()).as_ref() {
                     Some(thread) => thread.unpark(),
