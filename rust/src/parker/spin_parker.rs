@@ -1,6 +1,7 @@
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::Ordering::{Relaxed, Acquire};
 use std::hint::spin_loop;
 use std::sync::atomic::AtomicU32;
+use std::time::Duration;
 use crate::parker::Parker;
 use crossbeam::utils::Backoff;
 
@@ -13,7 +14,7 @@ impl Parker for SpinParker {
     fn wait(&self) {
         let backoff = Backoff::default();
         loop {
-            let flag = self.flag.load(Relaxed);
+            let flag = self.flag.load(Acquire);
 
             if flag < 1 {
                 backoff.snooze()
@@ -37,5 +38,9 @@ impl Parker for SpinParker {
 
     fn prewake(&self) {
         self.flag.fetch_add(1, Relaxed);
+    }
+
+    fn wait_timeout(&self, duration: Duration) {
+        todo!()
     }
 }

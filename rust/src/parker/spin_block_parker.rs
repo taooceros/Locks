@@ -4,6 +4,7 @@ use std::thread::park;
 use std::hint::spin_loop;
 
 use std::thread::current;
+use std::time::Duration;
 
 use super::Parker;
 
@@ -83,5 +84,9 @@ impl Parker for SpinBlockParker {
                 }
             }
         }
+    }
+
+    fn wait_timeout(&self, duration: Duration) {
+        todo!()
     }
 }
