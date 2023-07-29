@@ -14,7 +14,7 @@ use crate::{
     fc::fclock::FcLock,
     guard::DLockGuard,
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock}, waiter::{SpinParker, BlockParker, SpinBlockParker},
+    spin_lock::{RawSpinLock, SpinLock}, parker::{spin_parker::SpinParker, spin_block_parker::SpinBlockParker, block_parker::BlockParker},
 };
 
 impl<T, F> DLockDelegate<T> for F

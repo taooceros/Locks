@@ -13,7 +13,7 @@ pub mod fc_fair_ban_slice;
 pub mod fc_fair_skiplist;
 pub mod guard;
 pub mod rcl;
-pub mod waiter;
+pub mod parker;
 
 mod mutex_extension;
 mod syncptr;

@@ -2,7 +2,7 @@ use std::sync::atomic::*;
 
 use crossbeam::utils::CachePadded;
 
-use crate::{dlock::DLockDelegate, waiter::Parker};
+use crate::{dlock::DLockDelegate, parker::Parker};
 
 #[derive(Default)]
 pub(crate) struct Node<T, W : Parker> {

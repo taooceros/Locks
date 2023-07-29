@@ -16,7 +16,7 @@ use thread_local::ThreadLocal;
 use linux_futex::{Futex, Private};
 
 use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
-use crate::{dlock::DLockDelegate, waiter::Parker};
+use crate::{dlock::DLockDelegate, parker::Parker};
 
 use self::node::Node;
 

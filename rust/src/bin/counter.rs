@@ -13,7 +13,7 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 use csv::Writer;
-use quanta::{Clock, Instant, Upkeep};
+use quanta::Clock;
 use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
@@ -25,7 +25,7 @@ use dlock::{
     fc_fair_ban_slice::FcFairBanSliceLock,
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    waiter::{BlockParker, SpinParker},
+    parker::spin_parker::SpinParker,
 };
 use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
