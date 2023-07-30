@@ -5,11 +5,11 @@ use crossbeam::utils::CachePadded;
 use crate::{dlock::DLockDelegate, parker::Parker};
 
 #[derive(Default)]
-pub(crate) struct Node<T, W : Parker> {
+pub(crate) struct Node<T, P : Parker> {
     pub(super) f: CachePadded<Option<*mut dyn DLockDelegate<T>>>,
-    pub(super) wait: W,
+    pub(super) wait: P,
     pub(super) completed: AtomicBool,
-    pub(super) next: AtomicPtr<Node<T, W>>,
+    pub(super) next: AtomicPtr<Node<T, P>>,
     #[cfg(feature = "combiner_stat")]
     pub(super) combiner_time_stat: i64,
 }

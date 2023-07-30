@@ -14,7 +14,7 @@ use crate::{
     fc::fclock::FcLock,
     guard::DLockGuard,
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock}, parker::{spin_parker::SpinParker, spin_block_parker::SpinBlockParker, block_parker::BlockParker},
+    spin_lock::{RawSpinLock, SpinLock}, parker::{spin_parker::SpinParker, block_parker::BlockParker},
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -46,7 +46,7 @@ pub enum LockType<T: 'static> {
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynchSpin(CCSynch<T, SpinParker>),
     CCSynchBlock(CCSynch<T, BlockParker>),
-    CCBan(CCBan<T>),
+    CCBan(CCBan<T, SpinParker>),
     SpinLock(SpinLock<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),

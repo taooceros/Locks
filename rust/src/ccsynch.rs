@@ -9,7 +9,7 @@ use std::{
     mem::transmute,
     num::*,
     ptr::null_mut,
-    sync::atomic::{compiler_fence, AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering::*},
+    sync::atomic::{compiler_fence, AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering::*}, thread::current,
 };
 use thread_local::ThreadLocal;
 
@@ -22,15 +22,15 @@ use self::node::Node;
 
 mod node;
 
-struct ThreadData<T, W: Parker> {
+struct ThreadData<T, P: Parker> {
     banned_until: i64,
-    node: AtomicPtr<Node<T, W>>,
+    node: AtomicPtr<Node<T, P>>,
 }
 
-pub struct CCSynch<T, W: Parker> {
+pub struct CCSynch<T, P: Parker> {
     data: SyncUnsafeCell<T>,
-    tail: AtomicPtr<Node<T, W>>,
-    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T, W>>>,
+    tail: AtomicPtr<Node<T, P>>,
+    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T, P>>>,
 }
 
 impl<T, W: Parker> DLock<T> for CCSynch<T, W> {
@@ -78,6 +78,8 @@ impl<T, W: Parker> CCSynch<T, W> {
         let next_node = unsafe { &mut *(*thread_data.get()).node.load_consume() };
 
         next_node.next.store(null_mut(), Release);
+        // theoredically no need for reset as we didn't use wait_timeout
+        // not sure what's being bad here
         next_node.wait.reset();
         next_node.completed.store(false, Release);
 
@@ -96,6 +98,7 @@ impl<T, W: Parker> CCSynch<T, W> {
             (*(thread_data.get())).node.store(current_node, Release);
         }
 
+        // wait
         current_node.wait.wait();
 
         // check for completion, if not become the combiner
@@ -117,24 +120,16 @@ impl<T, W: Parker> CCSynch<T, W> {
 
         let mut next_ptr = tmp_node.next.load_consume();
 
-        while !next_ptr.is_null() {
-            if counter >= H {
-                break;
-            }
-
+        while !next_ptr.is_null() && counter < H {
             counter += 1;
 
             unsafe {
                 (*next_ptr).wait.prewake();
             }
 
-            if tmp_node.f.is_some() {
-                unsafe {
-                    let f = &mut *tmp_node.f.take().unwrap();
-                    self.execute_fn(tmp_node, f);
-                }
-            } else {
-                panic!("No function found");
+            unsafe {
+                let f = &mut *tmp_node.f.take().expect("No function found");
+                self.execute_fn(tmp_node, f);
             }
 
             tmp_node = unsafe { &mut *(next_ptr) };

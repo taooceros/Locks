@@ -15,28 +15,28 @@ use thread_local::ThreadLocal;
 
 use linux_futex::{Futex, Private};
 
-use crate::dlock::DLockDelegate;
 use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
+use crate::{dlock::DLockDelegate, parker::Parker};
 
 use self::node::Node;
 
 mod node;
 
-struct ThreadData<T> {
+struct ThreadData<T, P: Parker> {
     banned_until: i64,
-    node: AtomicPtr<Node<T>>,
+    node: AtomicPtr<Node<T, P>>,
 }
 
-pub struct CCBan<T> {
+pub struct CCBan<T, P: Parker> {
     data: SyncUnsafeCell<T>,
-    tail: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T>>>,
+    tail: AtomicPtr<Node<T, P>>,
+    local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T, P>>>,
     avg_cs: AtomicI64,
     num_exec: AtomicI64,
     num_waiting_thread: AtomicI32,
 }
 
-impl<T> DLock<T> for CCBan<T> {
+impl<T, P: Parker> DLock<T> for CCBan<T, P> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
@@ -50,8 +50,8 @@ impl<T> DLock<T> for CCBan<T> {
     }
 }
 
-impl<T> CCBan<T> {
-    pub fn new(t: T) -> CCBan<T> {
+impl<T, P: Parker> CCBan<T, P> {
+    pub fn new(t: T) -> CCBan<T, P> {
         let node = Box::into_raw(Box::new(Node::new()));
         CCBan {
             data: SyncUnsafeCell::new(t),
@@ -63,7 +63,7 @@ impl<T> CCBan<T> {
         }
     }
 
-    fn ban(&self, data: &mut ThreadData<T>, current_cs: u64) {
+    fn ban(&self, data: &mut ThreadData<T, P>, current_cs: u64) {
         let mut aux = 0;
         unsafe {
             let now = __rdtscp(&mut aux);
@@ -80,7 +80,7 @@ impl<T> CCBan<T> {
         }
     }
 
-    fn execute_fn(&self, node: &mut Node<T>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
+    fn execute_fn(&self, node: &mut Node<T, P>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
         let mut aux = 0;
         let cs_begin = unsafe { __rdtscp(&mut aux) };
 
@@ -90,7 +90,7 @@ impl<T> CCBan<T> {
         let cs_end = unsafe { __rdtscp(&mut aux) };
 
         node.completed.store(true, Release);
-        node.wait.store(false, Release);
+        node.wait.wake();
 
         let cs = cs_end - cs_begin;
         node.current_cs = cs;
@@ -128,7 +128,9 @@ impl<T> CCBan<T> {
         let next_node = unsafe { &mut *(*thread_data.get()).node.load_consume() };
 
         next_node.next.store(null_mut(), Release);
-        next_node.wait.store(true, Release);
+        
+        // no need for reset as we didn't use wait_timeout
+        // next_node.wait.reset();
         next_node.completed.store(false, Release);
 
         // assign task to next node
@@ -146,13 +148,7 @@ impl<T> CCBan<T> {
             (*(thread_data.get())).node.store(current_node, Release);
         }
 
-        // wait for completion
-        // spinning
-        let backoff = Backoff::default();
-        while current_node.wait.load(Acquire) {
-            // can use futex in the future
-            backoff.snooze();
-        }
+        current_node.wait.wait();
 
         // check for completion, if not become the combiner
 
@@ -203,7 +199,7 @@ impl<T> CCBan<T> {
             next_ptr = tmp_node.next.load_consume();
         }
 
-        tmp_node.wait.store(false, Relaxed);
+        tmp_node.wait.wake();
 
         #[cfg(feature = "combiner_stat")]
         unsafe {

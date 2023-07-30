@@ -2,27 +2,30 @@ use std::sync::atomic::*;
 
 use crossbeam::utils::CachePadded;
 
-use crate::dlock::DLockDelegate;
+use crate::{dlock::DLockDelegate, parker::Parker};
 
 #[derive(Default)]
-pub(crate) struct Node<T> {
+pub(crate) struct Node<T, P>
+where
+    P: Parker,
+{
     pub(super) f: CachePadded<Option<*mut dyn DLockDelegate<T>>>,
-    pub(super) wait: AtomicBool,
+    pub(super) wait: P,
     pub(super) completed: AtomicBool,
-    pub(super) next: AtomicPtr<Node<T>>,
+    pub(super) next: AtomicPtr<Node<T, P>>,
     pub(super) current_cs: u64,
     #[cfg(feature = "combiner_stat")]
     pub(super) combiner_time_stat: i64,
 }
 
-unsafe impl<T> Send for Node<T> {}
-unsafe impl<T> Sync for Node<T> {}
+unsafe impl<T, P: Parker> Send for Node<T, P> {}
+unsafe impl<T, P: Parker> Sync for Node<T, P> {}
 
-impl<T> Node<T> {
-    pub fn new() -> Node<T> {
+impl<T, P: Parker> Node<T, P> {
+    pub fn new() -> Node<T, P> {
         Node {
             f: CachePadded::default(),
-            wait: AtomicBool::default(),
+            wait: Default::default(),
             completed: AtomicBool::default(),
             next: AtomicPtr::default(),
             current_cs: 0,
