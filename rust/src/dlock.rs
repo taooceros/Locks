@@ -46,7 +46,8 @@ pub enum LockType<T: 'static> {
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynchSpin(CCSynch<T, SpinParker>),
     CCSynchBlock(CCSynch<T, BlockParker>),
-    CCBan(CCBan<T, SpinParker>),
+    CCBanSpin(CCBan<T, SpinParker>),
+    CCBanBlock(CCBan<T, BlockParker>),
     SpinLock(SpinLock<T>),
     Mutex(Mutex<T>),
     RCL(RclLock<T>),
@@ -70,9 +71,10 @@ impl<T> Debug for LockType<T> {
             Self::FlatCombiningFairSL(_arg0) => {
                 f.debug_tuple("Flat Combining (Skip List)").finish()
             }
-            Self::CCSynchSpin(_arg0) => f.debug_tuple("CCSynch (Spin Wait)").finish(),
-            Self::CCSynchBlock(_arg0) => f.debug_tuple("CCSynch (Block Wait)").finish(),
-            Self::CCBan(_arg0) => f.debug_tuple("CCSynch (Ban)").finish(),
+            Self::CCSynchSpin(_arg0) => f.debug_tuple("CCSynch/Spin").finish(),
+            Self::CCSynchBlock(_arg0) => f.debug_tuple("CCSynch/Block").finish(),
+            Self::CCBanSpin(_arg0) => f.debug_tuple("CCSynch (Ban)/Spin").finish(),
+            Self::CCBanBlock(_arg0) => f.debug_tuple("CCSynch (Ban)/Block").finish(),
             Self::SpinLock(_arg0) => f.debug_tuple("SpinLock").finish(),
             Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
             Self::RCL(_arg0) => f.debug_tuple("RCL").finish(),
@@ -89,9 +91,10 @@ impl<T> fmt::Display for LockType<T> {
             Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
             Self::SpinLock(_) => write!(f, "SpinLock"),
             Self::Mutex(_) => write!(f, "Mutex"),
-            Self::CCSynchSpin(_) => write!(f, "CCSynch (Spin Wait)"),
-            Self::CCSynchBlock(_) => write!(f, "CCSynch (Block Wait)"),
-            Self::CCBan(_) => write!(f, "CCSynch (Ban)"),
+            Self::CCSynchSpin(_) => write!(f, "CCSynch/Spin"),
+            Self::CCSynchBlock(_) => write!(f, "CCSynch/Block"),
+            Self::CCBanSpin(_) => write!(f, "CCSynch (Ban)/Spin"),
+            Self::CCBanBlock(_) => write!(f, "CCSynch (Ban)/Block"),
             Self::RCL(_) => write!(f, "RCL"),
         }
     }

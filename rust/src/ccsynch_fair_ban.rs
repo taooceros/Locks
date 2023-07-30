@@ -52,10 +52,11 @@ impl<T, P: Parker> DLock<T> for CCBan<T, P> {
 
 impl<T, P: Parker> CCBan<T, P> {
     pub fn new(t: T) -> CCBan<T, P> {
-        let node = Box::into_raw(Box::new(Node::new()));
+        let node = Box::leak(Box::new(Node::<T, P>::new()));
+        node.wait.wake();
         CCBan {
             data: SyncUnsafeCell::new(t),
-            tail: AtomicPtr::from(node),
+            tail: AtomicPtr::from(node as *mut Node<T, P>),
             local_node: ThreadLocal::new(),
             avg_cs: AtomicI64::default(),
             num_exec: AtomicI64::default(),
@@ -130,7 +131,7 @@ impl<T, P: Parker> CCBan<T, P> {
         next_node.next.store(null_mut(), Release);
         
         // no need for reset as we didn't use wait_timeout
-        // next_node.wait.reset();
+        next_node.wait.reset();
         next_node.completed.store(false, Release);
 
         // assign task to next node
@@ -187,7 +188,7 @@ impl<T, P: Parker> CCBan<T, P> {
 
             if tmp_node.f.is_some() {
                 unsafe {
-                    let f = &mut *tmp_node.f.take().unwrap();
+                    let f = &mut *tmp_node.f.take().expect("No function found");
                     self.execute_fn(tmp_node, f);
                 }
             } else {

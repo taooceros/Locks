@@ -218,8 +218,9 @@ enum LockTarget {
     /// Benchmark CCSynch
     CCSynchSpin,
     CCSynchBlock,
-    CCBan,
+    CCBanSpin,
     /// Benchmark Remote Core Locking
+    CCBanBlock,
     RCL,
 }
 
@@ -234,7 +235,8 @@ impl LockTarget {
             LockTarget::Mutex => Mutex::new(0u64).into(),
             LockTarget::CCSynchSpin => CCSynch::<_, SpinParker>::new(0u64).into(),
             LockTarget::CCSynchBlock => LockType::CCSynchBlock(CCSynch::new(0u64)),
-            LockTarget::CCBan => CCBan::new(0u64).into(),
+            LockTarget::CCBanSpin => LockType::CCBanSpin(CCBan::new(0u64)),
+            LockTarget::CCBanBlock => LockType::CCBanBlock(CCBan::new(0u64)),
             LockTarget::RCL => {
                 return None;
             }
