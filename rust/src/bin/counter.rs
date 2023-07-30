@@ -1,6 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
-    iter::once,
+    iter::{once, repeat},
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -13,17 +13,19 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 use csv::Writer;
-use quanta::{Clock, Instant, Upkeep};
+use quanta::Clock;
 use strum::{EnumIter, IntoEnumIterator};
 
 use dlock::{
     ccsynch::CCSynch,
+    ccsynch_fair_ban::CCBan,
     dlock::{DLock, LockType},
+    fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
-    flatcombining::fclock::FcLock,
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
+    parker::spin_parker::SpinParker,
 };
 use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
@@ -193,10 +195,10 @@ fn benchmark_num_threads(
 #[clap(name = "lock counter benchmark", version)]
 /// Benchmark Utility
 pub struct App {
-    #[clap(flatten)]
-    global_opts: GlobalOpts,
     #[clap(subcommand)]
     lock_target: Option<LockTarget>,
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
 }
 
 #[derive(Debug, Subcommand, EnumIter)]
@@ -214,8 +216,11 @@ enum LockTarget {
     /// Benchmark Mutex
     Mutex,
     /// Benchmark CCSynch
-    CCSynch,
+    CCSynchSpin,
+    CCSynchBlock,
+    CCBanSpin,
     /// Benchmark Remote Core Locking
+    CCBanBlock,
     RCL,
 }
 
@@ -228,7 +233,10 @@ impl LockTarget {
             LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
             LockTarget::SpinLock => SpinLock::new(0u64).into(),
             LockTarget::Mutex => Mutex::new(0u64).into(),
-            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::CCSynchSpin => CCSynch::<_, SpinParker>::new(0u64).into(),
+            LockTarget::CCSynchBlock => LockType::CCSynchBlock(CCSynch::new(0u64)),
+            LockTarget::CCBanSpin => LockType::CCBanSpin(CCBan::new(0u64)),
+            LockTarget::CCBanBlock => LockType::CCBanBlock(CCBan::new(0u64)),
             LockTarget::RCL => {
                 return None;
             }
@@ -240,19 +248,25 @@ impl LockTarget {
 
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
-    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     threads: Vec<usize>,
-    #[clap(long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     cpus: Vec<usize>,
-    #[clap(long, short, default_value = "../visualization/output")]
+    #[arg(long, short, default_value = "../visualization/output")]
     output_path: String,
 }
 
 fn main() {
-    let app = App::parse();
+    let mut app = App::parse();
 
     if app.global_opts.cpus.len() != 1 {
         assert_eq!(app.global_opts.cpus.len(), app.global_opts.threads.len());
+    }
+
+    if app.global_opts.cpus.len() == 1 {
+        app.global_opts.cpus = repeat(app.global_opts.cpus[0])
+            .take(app.global_opts.threads.len())
+            .collect();
     }
 
     let output_path = Path::new(app.global_opts.output_path.as_str());
@@ -280,9 +294,9 @@ fn main() {
 
     for (ncpu, nthread) in app
         .global_opts
-        .threads
+        .cpus
         .into_iter()
-        .zip(app.global_opts.cpus)
+        .zip(app.global_opts.threads)
     {
         benchmark(ncpu, nthread, &mut writer, &app.lock_target);
     }

@@ -9,7 +9,7 @@ use std::{
     mem::transmute,
     num::*,
     ptr::null_mut,
-    sync::atomic::{compiler_fence, AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering::*}, thread::current,
+    sync::atomic::{compiler_fence, AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering::*},
 };
 use thread_local::ThreadLocal;
 
@@ -27,13 +27,16 @@ struct ThreadData<T, P: Parker> {
     node: AtomicPtr<Node<T, P>>,
 }
 
-pub struct CCSynch<T, P: Parker> {
+pub struct CCBan<T, P: Parker> {
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<T, P>>,
     local_node: ThreadLocal<SyncUnsafeCell<ThreadData<T, P>>>,
+    avg_cs: AtomicI64,
+    num_exec: AtomicI64,
+    num_waiting_thread: AtomicI32,
 }
 
-impl<T, W: Parker> DLock<T> for CCSynch<T, W> {
+impl<T, P: Parker> DLock<T> for CCBan<T, P> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
@@ -47,39 +50,87 @@ impl<T, W: Parker> DLock<T> for CCSynch<T, W> {
     }
 }
 
-impl<T, W: Parker> CCSynch<T, W> {
-    pub fn new(t: T) -> CCSynch<T, W> {
-        let node = Box::leak(Box::new(Node::<T, W>::new()));
+impl<T, P: Parker> CCBan<T, P> {
+    pub fn new(t: T) -> CCBan<T, P> {
+        let node = Box::leak(Box::new(Node::<T, P>::new()));
         node.wait.wake();
-        CCSynch {
+        CCBan {
             data: SyncUnsafeCell::new(t),
-            tail: AtomicPtr::from(node as *mut Node<T, W>),
+            tail: AtomicPtr::from(node as *mut Node<T, P>),
             local_node: ThreadLocal::new(),
+            avg_cs: AtomicI64::default(),
+            num_exec: AtomicI64::default(),
+            num_waiting_thread: AtomicI32::default(),
         }
     }
 
-    fn execute_fn(&self, node: &mut Node<T, W>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
+    fn ban(&self, data: &mut ThreadData<T, P>, current_cs: u64) {
+        let mut aux = 0;
+        unsafe {
+            let now = __rdtscp(&mut aux);
+            let panelty = ((current_cs) as i64) * (*self.num_waiting_thread.as_ptr() as i64)
+                - self.avg_cs.load_consume() * 2;
+
+            // println!(
+            //     "current cs {}; avg cs {}",
+            //     current_cs,
+            //     self.avg_cs.load_consume()
+            // );
+
+            data.banned_until = (now as i64) + panelty;
+        }
+    }
+
+    fn execute_fn(&self, node: &mut Node<T, P>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
+        let mut aux = 0;
+        let cs_begin = unsafe { __rdtscp(&mut aux) };
+
         let guard = DLockGuard::new(&self.data);
         f.apply(guard);
 
+        let cs_end = unsafe { __rdtscp(&mut aux) };
+
         node.completed.store(true, Release);
         node.wait.wake();
+
+        let cs = cs_end - cs_begin;
+        node.current_cs = cs;
+        let num_exec = self.num_exec.fetch_add(1, Release) + 1;
+        let avg_cs = self.avg_cs.load_consume();
+        self.avg_cs
+            .store(avg_cs + (((cs as i64) - avg_cs) / (num_exec)), Release)
     }
 
     pub fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let thread_data = self.local_node.get_or(|| {
+            self.num_waiting_thread.fetch_add(1, Release);
             SyncUnsafeCell::new(ThreadData {
                 banned_until: 0,
                 node: AtomicPtr::new(Box::leak(Box::new(Node::new()))),
             })
         });
         let mut aux = 0;
+
+        unsafe {
+            let banned_until = (*thread_data.get()).banned_until;
+
+            let backoff = Backoff::default();
+            loop {
+                let current = __rdtscp(&mut aux) as i64;
+
+                if current >= banned_until {
+                    break;
+                }
+                backoff.snooze();
+            }
+        }
+
         // use thread local node as next node
         let next_node = unsafe { &mut *(*thread_data.get()).node.load_consume() };
 
         next_node.next.store(null_mut(), Release);
-        // theoredically no need for reset as we didn't use wait_timeout
-        // not sure what's being bad here
+        
+        // no need for reset as we didn't use wait_timeout
         next_node.wait.reset();
         next_node.completed.store(false, Release);
 
@@ -98,12 +149,14 @@ impl<T, W: Parker> CCSynch<T, W> {
             (*(thread_data.get())).node.store(current_node, Release);
         }
 
-        // wait
         current_node.wait.wait();
 
         // check for completion, if not become the combiner
 
         if current_node.completed.load(Acquire) {
+            unsafe {
+                self.ban(&mut *(thread_data.get()), current_node.current_cs);
+            }
             return;
         }
 
@@ -112,7 +165,13 @@ impl<T, W: Parker> CCSynch<T, W> {
         #[cfg(feature = "combiner_stat")]
         let begin = unsafe { __rdtscp(&mut aux) };
 
-        let mut tmp_node = current_node;
+        unsafe {
+            let f = &mut *current_node.f.take().unwrap();
+            self.execute_fn(current_node, f);
+            self.ban(&mut *(thread_data.get()), current_node.current_cs);
+        }
+
+        let mut tmp_node = unsafe { &mut *current_node.next.load_consume() };
 
         const H: i32 = 16;
 
@@ -120,16 +179,20 @@ impl<T, W: Parker> CCSynch<T, W> {
 
         let mut next_ptr = tmp_node.next.load_consume();
 
-        while !next_ptr.is_null() && counter < H {
-            counter += 1;
-
-            unsafe {
-                (*next_ptr).wait.prewake();
+        while !next_ptr.is_null() {
+            if counter >= H {
+                break;
             }
 
-            unsafe {
-                let f = &mut *tmp_node.f.take().expect("No function found");
-                self.execute_fn(tmp_node, f);
+            counter += 1;
+
+            if tmp_node.f.is_some() {
+                unsafe {
+                    let f = &mut *tmp_node.f.take().expect("No function found");
+                    self.execute_fn(tmp_node, f);
+                }
+            } else {
+                // panic!("No function found");
             }
 
             tmp_node = unsafe { &mut *(next_ptr) };

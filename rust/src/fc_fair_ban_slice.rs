@@ -169,11 +169,6 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
     }
 }
 
-fn spin(num: i64) {
-    for _ in 0..num {
-        hint::spin_loop();
-    }
-}
 
 impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {

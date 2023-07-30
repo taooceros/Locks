@@ -10,7 +10,7 @@ use crate::{
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
-    flatcombining::fclock::FcLock,
+    fc::fclock::FcLock,
     guard::DLockGuard,
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
@@ -31,7 +31,7 @@ pub fn cc_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::from(CCSynch::new(0usize)));
+        let cc_lock = Arc::new(LockType::CCSynchSpin(CCSynch::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
