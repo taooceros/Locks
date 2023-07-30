@@ -1,4 +1,4 @@
-use std::{time::Duration, thread::ThreadId};
+use std::{time::Duration};
 
 pub trait Parker: Default {
     fn wait(&self);

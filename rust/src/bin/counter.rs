@@ -1,6 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
-    iter::{once, repeat},
+    iter::{repeat},
     num::NonZeroI64,
     path::Path,
     sync::{

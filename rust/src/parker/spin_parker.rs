@@ -5,7 +5,7 @@ use std::cell::SyncUnsafeCell;
 use std::hint::spin_loop;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::thread::{current, yield_now, Thread, ThreadId};
+use std::thread::{current, yield_now, Thread};
 use std::time::Duration;
 
 #[derive(Default, Debug)]

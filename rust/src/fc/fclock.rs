@@ -91,7 +91,7 @@ impl<T> FcLock<T, RawSpinLock> {
             if let Some(f) = current.f.into_inner() {
                 current.age = pass;
 
-                let begin = unsafe { __rdtscp(&mut aux) };
+                let _begin = unsafe { __rdtscp(&mut aux) };
 
                 unsafe {
                     (*f).apply(DLockGuard::new(&self.data));

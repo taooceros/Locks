@@ -1,9 +1,7 @@
-use crossbeam::{atomic::AtomicConsume, utils::Backoff};
+use crossbeam::{utils::Backoff};
 use linux_futex::{Futex, Private, WaitError::Interrupted};
 use std::{
-    hint::spin_loop,
     sync::atomic::Ordering::*,
-    thread::{current, park_timeout},
     time::Duration,
 };
 

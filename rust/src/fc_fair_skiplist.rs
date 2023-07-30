@@ -5,7 +5,7 @@ use std::{
     num::*,
     sync::atomic::Ordering::*,
     sync::atomic::*,
-    thread::{current, ThreadId},
+    thread::{current},
     time::Duration,
 };
 

@@ -1,7 +1,6 @@
-use core::panic;
+
 use crossbeam::{
     atomic::AtomicConsume,
-    utils::{Backoff, CachePadded},
 };
 use std::{
     arch::x86_64::__rdtscp,
@@ -9,13 +8,13 @@ use std::{
     mem::transmute,
     num::*,
     ptr::null_mut,
-    sync::atomic::{compiler_fence, AtomicBool, AtomicI32, AtomicI64, AtomicPtr, Ordering::*}, thread::current,
+    sync::atomic::{AtomicPtr, Ordering::*},
 };
 use thread_local::ThreadLocal;
 
-use linux_futex::{Futex, Private};
 
-use crate::{dlock::DLock, guard::DLockGuard, syncptr::SyncMutPtr};
+
+use crate::{dlock::DLock, guard::DLockGuard};
 use crate::{dlock::DLockDelegate, parker::Parker};
 
 use self::node::Node;
