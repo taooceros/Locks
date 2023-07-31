@@ -1,9 +1,18 @@
-use std::{time::Duration};
+use std::time::Duration;
+
+#[derive(PartialEq, Eq)]
+pub enum State {
+    Empty,
+    Parked,
+    Prenotified,
+    Notified,
+}
 
 pub trait Parker: Default {
     fn wait(&self);
-    fn wait_timeout(&self, timeout: Duration);
+    fn wait_timeout(&self, timeout: Duration) -> Result<(), ()>;
     fn wake(&self);
+    fn state(&self) -> State;
     fn reset(&self);
     fn prewake(&self);
 }

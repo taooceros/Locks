@@ -8,13 +8,14 @@ use enum_dispatch::enum_dispatch;
 use crate::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
+    fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
-    fc::fclock::FcLock,
     guard::DLockGuard,
+    parker::{block_parker::BlockParker, spin_parker::SpinParker},
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock}, parker::{spin_parker::SpinParker, block_parker::BlockParker},
+    spin_lock::{RawSpinLock, SpinLock},
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -40,7 +41,7 @@ pub trait DLock<T> {
 
 #[enum_dispatch(DLock<T>)]
 pub enum LockType<T: 'static> {
-    FlatCombining(FcLock<T, RawSpinLock>),
+    FlatCombining(FcLock<T, RawSpinLock, BlockParker>),
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
