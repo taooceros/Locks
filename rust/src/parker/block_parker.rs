@@ -124,6 +124,7 @@ impl Parker for BlockParker {
                 Ok(EMPTY) => return,
                 Ok(PARKED) => {
                     self.state.wake(1);
+                    return;
                 }
                 Err(value) => old_value = value,
                 value => panic!("unexpected value: {:?}", value),
