@@ -1,11 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    cmp::{max},
-    mem::transmute,
-    num::*,
-    ptr::null_mut,
-    sync::atomic::*,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, num::*, ptr::null_mut,
+    sync::atomic::*, time::Duration,
 };
 
 use crossbeam::{
@@ -14,10 +9,10 @@ use crossbeam::{
 };
 use thread_local::ThreadLocal;
 
-
 use crate::{
     dlock::{DLock, DLockDelegate},
     guard::DLockGuard,
+    parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };
@@ -30,18 +25,22 @@ const CLEAN_UP_PERIOD: u32 = 50;
 const CLEAN_UP_AGE: u32 = 50;
 
 #[derive(Debug)]
-pub struct FcFairBanLock<T, L: RawSimpleLock> {
+pub struct FcFairBanLock<T, L, P>
+where
+    L: RawSimpleLock,
+    P: Parker,
+{
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
-    head: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
+    head: AtomicPtr<Node<T, P>>,
+    local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
     avg_cs: SyncUnsafeCell<i64>,
     num_exec: SyncUnsafeCell<i32>,
     num_waiting_threads: SyncUnsafeCell<i32>,
 }
 
-impl<T> FcFairBanLock<T, RawSpinLock> {
+impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
     pub fn new(data: T) -> Self {
         Self {
             pass: AtomicU32::new(0),
@@ -55,7 +54,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
         }
     }
 
-    fn push_node(&self, node: &mut Node<T>) {
+    fn push_node(&self, node: &mut Node<T, P>) {
         let mut head = self.head.load(Ordering::Acquire);
         loop {
             node.next = head;
@@ -72,7 +71,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
         }
     }
 
-    fn push_if_unactive(&self, node: &mut Node<T>) {
+    fn push_if_unactive(&self, node: &mut Node<T, P>) {
         if node.active.load_consume() {
             return;
         }
@@ -94,7 +93,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
         while !current_ptr.is_null() {
             let current = unsafe { &mut *(current_ptr) };
 
-            if let Some(f) = current.f.into_inner() {
+            if current.parker.state() == State::Parked {
                 current.age = pass;
 
                 let begin = unsafe { __rdtscp(&mut aux) };
@@ -105,8 +104,10 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
                 }
 
                 unsafe {
+                    current.parker.prewake();
+                    let f = current.f.unwrap();
                     (*f).apply(DLockGuard::new(&self.data));
-                    current.f = None.into();
+                    current.parker.wake();
                 }
 
                 let end = unsafe { __rdtscp(&mut aux) };
@@ -136,7 +137,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
         }
     }
 
-    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T>>, pass: u32) {
+    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T, P>>, pass: u32) {
         let mut previous_ptr = head.load(Ordering::Relaxed);
         debug_assert!(!previous_ptr.is_null());
 
@@ -160,7 +161,7 @@ impl<T> FcFairBanLock<T, RawSpinLock> {
     }
 }
 
-impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
+impl<T, P: Parker> DLock<T> for FcFairBanLock<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node = self.local_node.get_or(|| {
             unsafe {
@@ -172,16 +173,14 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
 
         let node = unsafe { &mut *(node).get() };
 
-        self.push_if_unactive(node);
-
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
         node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
-        node.waiter.value.store(0, Ordering::Release);
-
-        let backoff = Backoff::new();
+        node.parker.reset();
 
         loop {
+            self.push_if_unactive(node);
+
             if self.combiner_lock.try_lock() {
                 // combiner
 
@@ -196,16 +195,10 @@ impl<T> DLock<T> for FcFairBanLock<T, RawSpinLock> {
                 self.combiner_lock.unlock();
             }
 
-            if node.f.into_inner().is_none() {
-                // combiner
-                return;
-            }
-
-            if node.f.into_inner().is_some() {
-                backoff.snooze();
-            }
-
-            self.push_if_unactive(node);
+            match node.parker.wait_timeout(Duration::from_micros(1)) {
+                Ok(_) => return,
+                Err(_) => continue,
+            };
         }
     }
 

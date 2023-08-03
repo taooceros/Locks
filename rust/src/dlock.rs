@@ -5,7 +5,6 @@ use std::{
 
 use enum_dispatch::enum_dispatch;
 
-
 use crate::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
@@ -14,7 +13,7 @@ use crate::{
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
     guard::DLockGuard,
-    parker::{Parker},
+    parker::Parker,
     rcl::rcllock::RclLock,
     spin_lock::{RawSpinLock, SpinLock},
 };
@@ -47,7 +46,6 @@ pub enum ThirdPartyLock<T: 'static> {
     SpinLock(SpinLock<T>),
 }
 
-
 #[enum_dispatch(DLock<T>)]
 #[derive(Debug)]
 pub enum BenchmarkType<T: 'static, P: Parker> {
@@ -68,7 +66,6 @@ where
     }
 }
 
-
 #[enum_dispatch(DLock<T>)]
 #[derive(Debug)]
 pub enum DLockType<T, P>
@@ -77,14 +74,13 @@ where
     P: Parker,
 {
     FlatCombining(FcLock<T, RawSpinLock, P>),
-    FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
+    FlatCombiningFair(FcFairBanLock<T, RawSpinLock, P>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock>),
     CCSynch(CCSynch<T, P>),
     CCBanSpin(CCBan<T, P>),
     RCL(RclLock<T>),
 }
-
 
 impl<T, P: Parker> fmt::Display for DLockType<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
