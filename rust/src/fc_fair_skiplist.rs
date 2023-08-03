@@ -31,7 +31,8 @@ mod node;
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
 const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord,)]
+#[derive(Debug)]
 struct Usage {
     usage: u64,
     thread_id: NonZeroU64,
@@ -39,6 +40,7 @@ struct Usage {
 
 
 
+#[derive(Debug)]
 pub struct FcSL<T, L: RawSimpleLock> {
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,

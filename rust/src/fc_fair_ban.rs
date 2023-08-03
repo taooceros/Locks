@@ -29,6 +29,7 @@ mod node;
 const CLEAN_UP_PERIOD: u32 = 50;
 const CLEAN_UP_AGE: u32 = 50;
 
+#[derive(Debug)]
 pub struct FcFairBanLock<T, L: RawSimpleLock> {
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,

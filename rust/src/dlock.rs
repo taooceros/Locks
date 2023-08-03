@@ -70,6 +70,7 @@ where
 
 
 #[enum_dispatch(DLock<T>)]
+#[derive(Debug)]
 pub enum DLockType<T, P>
 where
     T: 'static,
@@ -84,21 +85,6 @@ where
     RCL(RclLock<T>),
 }
 
-
-impl<T, P: Parker> Debug for DLockType<T, P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::FlatCombining(_arg0) => f.debug_tuple("FlatCombining"),
-            Self::FlatCombiningFair(_arg0) => f.debug_tuple("FlatCombiningFair"),
-            Self::FlatCombiningFairSlice(_arg0) => f.debug_tuple("FlatCombiningFairSlice"),
-            Self::FlatCombiningFairSL(_arg0) => f.debug_tuple("Flat Combining (Skip List)"),
-            Self::CCSynch(_arg0) => f.debug_tuple("CCSynch"),
-            Self::CCBanSpin(_arg0) => f.debug_tuple("CCSynch (Ban)"),
-            Self::RCL(_arg0) => f.debug_tuple("RCL"),
-        }
-        .finish()
-    }
-}
 
 impl<T, P: Parker> fmt::Display for DLockType<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

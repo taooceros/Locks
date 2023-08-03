@@ -26,6 +26,7 @@ struct ThreadData<T, P: Parker> {
     node: AtomicPtr<Node<T, P>>,
 }
 
+#[derive(Debug)]
 pub struct CCSynch<T, P: Parker> {
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<T, P>>,

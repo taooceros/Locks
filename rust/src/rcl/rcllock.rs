@@ -15,6 +15,7 @@ use crate::{
 use super::{rclrequest::*, rclserver::*};
 pub(crate) use rcllockptr::*;
 
+#[derive(Debug)]
 pub struct RclLock<T: Sized> {
     server: SyncMutPtr<RclServer>,
     pub(super) holder: AtomicUsize,
