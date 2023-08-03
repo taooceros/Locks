@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     ccsynch::CCSynch,
-    dlock::{DLock, LockType},
+    dlock::{DLock, DLockType},
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
@@ -20,7 +20,7 @@ pub fn fc_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let fc_lock = Arc::new(LockType::from(FcLock::new(0usize)));
+        let fc_lock = Arc::new(DLockType::from(FcLock::new(0usize)));
         inner_test(fc_lock, cpu_count);
     })
     // rcl need one cpu free
@@ -31,7 +31,7 @@ pub fn cc_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
+        let cc_lock = Arc::new(DLockType::CCSynch(CCSynch::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
@@ -41,7 +41,7 @@ pub fn fc_fair_ban_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::from(FcFairBanLock::new(0usize)));
+        let cc_lock = Arc::new(DLockType::from(FcFairBanLock::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
@@ -51,7 +51,7 @@ pub fn fc_fair_ban_slice_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::from(FcFairBanSliceLock::new(0usize)));
+        let cc_lock = Arc::new(DLockType::from(FcFairBanSliceLock::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
@@ -61,7 +61,7 @@ pub fn fc_sl_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::from(FcSL::new(0usize)));
+        let cc_lock = Arc::new(DLockType::from(FcSL::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
@@ -73,7 +73,7 @@ pub fn rcl_test() {
         let mut server = RclServer::new();
         server.start(cpu_count - 1);
         let server_ptr: *mut RclServer = &mut server;
-        let rcl_lock = Arc::new(LockType::from(RclLock::new(server_ptr, 0)));
+        let rcl_lock = Arc::new(DLockType::from(RclLock::new(server_ptr, 0)));
         inner_test(rcl_lock, cpu_count - 1);
     })
 }
@@ -82,7 +82,7 @@ const THREAD_NUM: usize = 64;
 const ITERATION: usize = 10000;
 const INNER_ITERATION: usize = 100000;
 
-pub fn inner_test(lock: Arc<LockType<usize, SpinParker>>, cpu_count: usize) {
+pub fn inner_test(lock: Arc<DLockType<usize, SpinParker>>, cpu_count: usize) {
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));

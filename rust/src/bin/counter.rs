@@ -8,7 +8,7 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, available_parallelism, JoinHandle},
-    time::Duration,
+    time::Duration, fmt::Debug,
 };
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -19,7 +19,7 @@ use strum::{Display, EnumIter, IntoEnumIterator};
 use dlock::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
-    dlock::{DLock, LockType},
+    dlock::{BenchmarkType, DLock, DLockType},
     fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
@@ -38,10 +38,7 @@ const DURATION: u64 = 3;
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record<T, P>
-where
-    T: 'static,
-    P: Parker,
+struct Record
 {
     id: usize,
     cpu_id: usize,
@@ -53,7 +50,8 @@ where
     hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
     combine_time: Option<NonZeroI64>,
-    locktype: Arc<LockType<T, P>>,
+    locktype: String,
+    waiter_type: String,
 }
 
 fn benchmark<P: Parker + 'static>(
@@ -62,7 +60,7 @@ fn benchmark<P: Parker + 'static>(
     writer: &mut Writer<File>,
     target: &Option<LockTarget>,
 ) {
-    let targets: Vec<Option<LockType<u64, P>>> = match target {
+    let targets: Vec<Option<BenchmarkType<u64, P>>> = match target {
         Some(target) => vec![target.to_locktype()],
         None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
     };
@@ -78,7 +76,7 @@ fn benchmark<P: Parker + 'static>(
         server.start(num_cpu - 1);
         let lock = RclLock::new(&mut server, 0u64);
         inner_benchmark(
-            Arc::new(LockType::<u64, P>::RCL(lock)),
+            Arc::new(DLockType::<u64, P>::RCL(lock).into()),
             num_cpu - 1,
             num_thread,
             writer,
@@ -89,7 +87,7 @@ fn benchmark<P: Parker + 'static>(
 }
 
 fn inner_benchmark<P: Parker + 'static>(
-    lock_type: Arc<LockType<u64, P>>,
+    lock_type: Arc<BenchmarkType<u64, P>>,
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
@@ -141,12 +139,12 @@ fn inner_benchmark<P: Parker + 'static>(
 }
 
 fn benchmark_num_threads<P: Parker + 'static>(
-    lock_type: Arc<LockType<u64, P>>,
+    lock_type: Arc<BenchmarkType<u64, P>>,
     id: usize,
     num_thread: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
-) -> JoinHandle<Record<u64, P>> {
+) -> JoinHandle<Record> {
     let lock_type = lock_type.clone();
 
     thread::Builder::new()
@@ -189,7 +187,8 @@ fn benchmark_num_threads<P: Parker + 'static>(
                 num_acquire,
                 hold_time,
                 combine_time: lock_type.get_current_thread_combining_time(),
-                locktype: lock_type.clone(),
+                locktype: format!("{}", lock_type),
+                waiter_type: P::name().to_string(),
             };
         })
         .unwrap()
@@ -205,7 +204,7 @@ pub struct App {
     global_opts: GlobalOpts,
 }
 
-#[derive(Debug, Clone, ValueEnum, Display)]
+#[derive(Debug, Clone, ValueEnum, Display, Serialize)]
 enum WaiterType {
     Spin,
     Block,
@@ -235,22 +234,26 @@ enum LockTarget {
 }
 
 impl LockTarget {
-    pub fn to_locktype<P: Parker>(&self) -> Option<LockType<u64, P>> {
-        let locktype: LockType<u64, P> = match self {
+    pub fn to_locktype<P: Parker>(&self) -> Option<BenchmarkType<u64, P>> {
+        let locktype: DLockType<u64, P> = match self {
             LockTarget::FcSL => FcSL::new(0u64).into(),
             LockTarget::FcLock => FcLock::new(0u64).into(),
             LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
             LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
-            LockTarget::SpinLock => SpinLock::new(0u64).into(),
-            LockTarget::Mutex => Mutex::new(0u64).into(),
             LockTarget::CCSynch => CCSynch::new(0u64).into(),
             LockTarget::CCBan => CCBan::new(0u64).into(),
             LockTarget::RCL => {
                 return None;
             }
+            LockTarget::SpinLock => {
+                return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
+            }
+            LockTarget::Mutex => {
+                return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
+            }
         };
 
-        Some(locktype)
+        Some(BenchmarkType::DLock(locktype))
     }
 }
 

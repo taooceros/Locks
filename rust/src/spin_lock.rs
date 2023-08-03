@@ -13,6 +13,7 @@ use crate::{
 
 use super::RawSimpleLock;
 
+#[derive(Debug)]
 pub struct RawSpinLock {
     flag: AtomicBool,
 }
@@ -50,6 +51,7 @@ unsafe impl RawSimpleLock for RawSpinLock {
     }
 }
 
+#[derive(Debug)]
 pub struct SpinLock<T> {
     lock: RawSpinLock,
     data: UnsafeCell<T>,
