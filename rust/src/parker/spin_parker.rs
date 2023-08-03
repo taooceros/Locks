@@ -4,9 +4,9 @@ use quanta::Clock;
 use serde::Serialize;
 use std::cell::SyncUnsafeCell;
 use std::hint::spin_loop;
-use std::ops::ControlFlow;
+
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::sync::atomic::{AtomicU32, AtomicU8};
+use std::sync::atomic::{AtomicU32};
 use std::thread::{current, yield_now, Thread};
 use std::time::Duration;
 

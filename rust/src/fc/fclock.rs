@@ -6,7 +6,7 @@ use std::{
 
 use crossbeam::{
     atomic::AtomicConsume,
-    utils::{Backoff, CachePadded},
+    utils::{CachePadded},
 };
 use thread_local::ThreadLocal;
 

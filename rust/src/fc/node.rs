@@ -1,7 +1,7 @@
 use std::{ptr::null_mut, sync::atomic::AtomicBool};
 
 use crossbeam::utils::CachePadded;
-use linux_futex::{Futex, Private};
+
 
 use crate::{dlock::DLockDelegate, parker::Parker};
 
