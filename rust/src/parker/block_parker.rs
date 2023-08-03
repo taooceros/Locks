@@ -1,5 +1,6 @@
 use crossbeam::utils::Backoff;
 use linux_futex::{Futex, Private, TimedWaitError, WaitError::Interrupted};
+use serde::Serialize;
 use std::{sync::atomic::Ordering::*, time::Duration};
 
 use super::Parker;
@@ -12,6 +13,14 @@ const PRENOTIFIED: u32 = PARKED - 1;
 #[derive(Default, Debug)]
 pub struct BlockParker {
     state: Futex<Private>,
+}
+
+impl Serialize for BlockParker{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        serializer.serialize_str("BlockParker")
+    }
 }
 
 impl Parker for BlockParker {
@@ -140,6 +149,10 @@ impl Parker for BlockParker {
             PRENOTIFIED => super::State::Prenotified,
             _ => panic!(),
         };
+    }
+
+    fn name() -> &'static str {
+        "BlockParker"
     }
 }
 

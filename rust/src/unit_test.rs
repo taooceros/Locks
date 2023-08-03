@@ -12,7 +12,7 @@ use crate::{
     fc_fair_skiplist::FcSL,
     fc::fclock::FcLock,
     guard::DLockGuard,
-    rcl::{rcllock::RclLock, rclserver::RclServer},
+    rcl::{rcllock::RclLock, rclserver::RclServer}, parker::spin_parker::SpinParker,
 };
 
 #[test]
@@ -31,7 +31,7 @@ pub fn cc_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(LockType::CCSynchSpin(CCSynch::new(0usize)));
+        let cc_lock = Arc::new(LockType::CCSynch(CCSynch::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
@@ -82,7 +82,7 @@ const THREAD_NUM: usize = 64;
 const ITERATION: usize = 10000;
 const INNER_ITERATION: usize = 100000;
 
-pub fn inner_test(lock: Arc<LockType<usize>>, cpu_count: usize) {
+pub fn inner_test(lock: Arc<LockType<usize, SpinParker>>, cpu_count: usize) {
     let mut handles = vec![];
 
     let counter_mutex = Arc::new(Mutex::new(0i64));

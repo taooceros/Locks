@@ -23,6 +23,7 @@ use super::node::Node;
 const CLEAN_UP_PERIOD: u32 = 50;
 const CLEAN_UP_AGE: u32 = 50;
 
+#[derive(Debug)]
 pub struct FcLock<T, L, P>
 where
     L: RawSimpleLock,
