@@ -96,8 +96,6 @@ impl<T, P: Parker> fmt::Display for DLockType<T, P> {
             Self::CCBanSpin(_) => write!(f, "CCSynch (Ban)/Spin"),
             Self::RCL(_) => write!(f, "RCL"),
         }
-        .and(write!(f, "|"))
-        .and(write!(f, "{}", P::name()))
     }
 }
 
