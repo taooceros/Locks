@@ -78,7 +78,7 @@ where
 {
     FlatCombining(FcLock<T, RawSpinLock, P>),
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock, P>),
-    FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
+    FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock, P>),
     FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
     CCSynch(CCSynch<T, P>),
     CCBanSpin(CCBan<T, P>),
