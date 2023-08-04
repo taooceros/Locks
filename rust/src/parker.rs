@@ -2,7 +2,7 @@ use std::time::Duration;
 use std::fmt::Debug;
 use serde::Serialize;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum State {
     Empty,
     Parked,

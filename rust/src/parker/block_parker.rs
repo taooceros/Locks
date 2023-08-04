@@ -1,4 +1,4 @@
-use crossbeam::utils::Backoff;
+use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 use linux_futex::{Futex, Private, TimedWaitError, WaitError::Interrupted};
 use serde::Serialize;
 use std::{sync::atomic::Ordering::*, time::Duration};
@@ -15,10 +15,11 @@ pub struct BlockParker {
     state: Futex<Private>,
 }
 
-impl Serialize for BlockParker{
+impl Serialize for BlockParker {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         serializer.serialize_str("BlockParker")
     }
 }
@@ -83,7 +84,7 @@ impl Parker for BlockParker {
                 Ok(_) | Err(PARKED) => {
                     // Wait for something to happen, assuming it's still set to PARKED.
                     match self.state.wait_for(PARKED, timeout) {
-                        Ok(_) => return Ok(()),
+                        Ok(_) => {}
                         Err(reason) => match reason {
                             TimedWaitError::WrongValue => {}
                             TimedWaitError::TimedOut => return Err(()),

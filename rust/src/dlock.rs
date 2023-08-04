@@ -48,14 +48,17 @@ pub enum ThirdPartyLock<T: 'static> {
 
 #[enum_dispatch(DLock<T>)]
 #[derive(Debug)]
-pub enum BenchmarkType<T: 'static, P: Parker> {
+pub enum BenchmarkType<T, P>
+where
+    T: 'static,
+    P: Parker + 'static,
+{
     DLock(DLockType<T, P>),
     OtherLocks(ThirdPartyLock<T>),
 }
 
 impl<T, P> Display for BenchmarkType<T, P>
 where
-    T: 'static,
     P: Parker,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -71,12 +74,12 @@ where
 pub enum DLockType<T, P>
 where
     T: 'static,
-    P: Parker,
+    P: Parker + 'static,
 {
     FlatCombining(FcLock<T, RawSpinLock, P>),
     FlatCombiningFair(FcFairBanLock<T, RawSpinLock, P>),
     FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
-    FlatCombiningFairSL(FcSL<T, RawSpinLock>),
+    FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
     CCSynch(CCSynch<T, P>),
     CCBanSpin(CCBan<T, P>),
     RCL(RclLock<T>),
