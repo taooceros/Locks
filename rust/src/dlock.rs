@@ -93,7 +93,7 @@ impl<T, P: Parker> fmt::Display for DLockType<T, P> {
             Self::FlatCombiningFairSlice(_) => write!(f, "Flat Combining Fair With Combiner Slice"),
             Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
             Self::CCSynch(_) => write!(f, "CCSynch"),
-            Self::CCBanSpin(_) => write!(f, "CCSynch (Ban)/Spin"),
+            Self::CCBanSpin(_) => write!(f, "CCSynch (Ban)"),
             Self::RCL(_) => write!(f, "RCL"),
         }
     }
