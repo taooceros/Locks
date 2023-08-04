@@ -82,7 +82,7 @@ where
     FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
     CCSynch(CCSynch<T, P>),
     CCBan(CCBan<T, P>),
-    RCL(RclLock<T>),
+    RCL(RclLock<T, P>),
 }
 
 impl<T, P: Parker> fmt::Display for DLockType<T, P> {
