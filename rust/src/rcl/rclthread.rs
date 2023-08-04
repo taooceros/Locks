@@ -1,7 +1,7 @@
 use std::{
     cell::{SyncUnsafeCell, UnsafeCell},
     cmp::min,
-    sync::atomic::Ordering::*,
+    sync::atomic::{AtomicPtr, Ordering::*},
     thread::{self, yield_now, JoinHandle},
 };
 
@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct RclThread<P: Parker + 'static> {
-    server: *mut RclServer<P>,
+    server: AtomicPtr<RclServer<P>>,
     timestamp: i32,
     pub(super) waiting_to_serve: Futex<Private>,
     pub thread_handle: Option<JoinHandle<()>>,
@@ -28,7 +28,7 @@ unsafe impl<P: Parker> Sync for RclThread<P> {}
 impl<P: Parker> RclThread<P> {
     pub fn new(server: *mut RclServer<P>, _cpuid: usize) -> RclThread<P> {
         let mut thread = RclThread {
-            server,
+            server: AtomicPtr::new(server),
             timestamp: 0,
             waiting_to_serve: Futex::new(0),
             thread_handle: None,
@@ -41,7 +41,7 @@ impl<P: Parker> RclThread<P> {
 
     pub fn run(thread_cell: &SyncUnsafeCell<RclThread<P>>, cpuid: usize) {
         let thread = unsafe { &mut *(thread_cell).get() };
-        let server = unsafe { &mut *thread.server };
+        let server = unsafe { &mut *thread.server.load(Relaxed) };
 
         let thread2 = unsafe { &mut *thread_cell.get() };
 
@@ -85,20 +85,13 @@ impl<P: Parker> RclThread<P> {
 
                             req.parker.prewake();
 
-                            match (*req.lock).holder.compare_exchange(
-                                !0,
-                                req.real_me,
-                                Relaxed,
-                                Relaxed,
-                            ) {
-                                Ok(_) => {
-                                    req.call();
-                                    (*req.lock).holder.store(!0, Relaxed);
-                                }
-                                Err(_) => {
-                                    panic!("should not happen");
-                                }
-                            }
+                            _ = (*req.lock)
+                                .holder
+                                .compare_exchange(!0, req.real_me, Relaxed, Relaxed)
+                                .expect("should not happen as we only have one thread");
+
+                            req.call();
+                            (*req.lock).holder.store(!0, Relaxed);
 
                             req.parker.wake();
                         }
