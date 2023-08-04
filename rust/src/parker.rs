@@ -1,11 +1,23 @@
-use std::{time::Duration};
+use std::time::Duration;
+use std::fmt::Debug;
+use serde::Serialize;
 
-pub trait Parker: Default {
+#[derive(PartialEq, Eq, Debug)]
+pub enum State {
+    Empty,
+    Parked,
+    Prenotified,
+    Notified,
+}
+
+pub trait Parker: Debug + Default + Serialize {
     fn wait(&self);
-    fn wait_timeout(&self, timeout: Duration);
+    fn wait_timeout(&self, timeout: Duration) -> Result<(), ()>;
     fn wake(&self);
+    fn state(&self) -> State;
     fn reset(&self);
     fn prewake(&self);
+    fn name() -> &'static str;
 }
 
 pub mod block_parker;

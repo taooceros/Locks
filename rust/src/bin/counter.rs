@@ -1,6 +1,6 @@
 use std::{
     fs::{create_dir, remove_dir_all, File},
-    iter::{repeat},
+    iter::repeat,
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -8,24 +8,24 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, available_parallelism, JoinHandle},
-    time::Duration,
+    time::Duration, fmt::Debug,
 };
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use csv::Writer;
 use quanta::Clock;
-use strum::{EnumIter, IntoEnumIterator};
+use strum::{Display, EnumIter, IntoEnumIterator};
 
 use dlock::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
-    dlock::{DLock, LockType},
+    dlock::{BenchmarkType, DLock, DLockType},
     fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     guard::DLockGuard,
+    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::{rcllock::RclLock, rclserver::RclServer},
-    parker::spin_parker::SpinParker,
 };
 use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
@@ -33,12 +33,13 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 10;
+const DURATION: u64 = 3;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record<T: 'static> {
+struct Record
+{
     id: usize,
     cpu_id: usize,
     thread_num: usize,
@@ -49,16 +50,17 @@ struct Record<T: 'static> {
     hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
     combine_time: Option<NonZeroI64>,
-    locktype: Arc<LockType<T>>,
+    locktype: String,
+    waiter_type: String,
 }
 
-fn benchmark(
+fn benchmark<P: Parker + 'static>(
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
     target: &Option<LockTarget>,
 ) {
-    let targets: Vec<Option<LockType<u64>>> = match target {
+    let targets: Vec<Option<BenchmarkType<u64, P>>> = match target {
         Some(target) => vec![target.to_locktype()],
         None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
     };
@@ -74,7 +76,7 @@ fn benchmark(
         server.start(num_cpu - 1);
         let lock = RclLock::new(&mut server, 0u64);
         inner_benchmark(
-            Arc::new(LockType::RCL(lock)),
+            Arc::new(DLockType::<u64, P>::RCL(lock).into()),
             num_cpu - 1,
             num_thread,
             writer,
@@ -84,8 +86,8 @@ fn benchmark(
     println!("Benchmark finished");
 }
 
-fn inner_benchmark(
-    lock_type: Arc<LockType<u64>>,
+fn inner_benchmark<P: Parker + 'static>(
+    lock_type: Arc<BenchmarkType<u64, P>>,
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
@@ -95,7 +97,7 @@ fn inner_benchmark(
     STOP.store(false, Ordering::Release);
 
     let threads = (0..num_thread)
-        .map(|id| benchmark_num_threads(&lock_type, id, num_thread, num_cpu, &STOP))
+        .map(|id| benchmark_num_threads(lock_type.clone(), id, num_thread, num_cpu, &STOP))
         .collect::<Vec<_>>();
 
     println!("Starting benchmark for {}", lock_type);
@@ -136,14 +138,14 @@ fn inner_benchmark(
     );
 }
 
-fn benchmark_num_threads(
-    lock_type_ref: &Arc<LockType<u64>>,
+fn benchmark_num_threads<P: Parker + 'static>(
+    lock_type: Arc<BenchmarkType<u64, P>>,
     id: usize,
     num_thread: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
-) -> JoinHandle<Record<u64>> {
-    let lock_type = lock_type_ref.clone();
+) -> JoinHandle<Record> {
+    let lock_type = lock_type.clone();
 
     thread::Builder::new()
         .name(id.to_string())
@@ -185,7 +187,8 @@ fn benchmark_num_threads(
                 num_acquire,
                 hold_time,
                 combine_time: lock_type.get_current_thread_combining_time(),
-                locktype: lock_type.clone(),
+                locktype: format!("{}", lock_type),
+                waiter_type: P::name().to_string(),
             };
         })
         .unwrap()
@@ -199,6 +202,13 @@ pub struct App {
     lock_target: Option<LockTarget>,
     #[clap(flatten)]
     global_opts: GlobalOpts,
+}
+
+#[derive(Debug, Clone, ValueEnum, Display, Serialize)]
+enum WaiterType {
+    Spin,
+    Block,
+    All,
 }
 
 #[derive(Debug, Subcommand, EnumIter)]
@@ -216,44 +226,47 @@ enum LockTarget {
     /// Benchmark Mutex
     Mutex,
     /// Benchmark CCSynch
-    CCSynchSpin,
-    CCSynchBlock,
-    CCBanSpin,
+    CCSynch,
+    /// Benchmark CCSynch (Ban)
+    CCBan,
     /// Benchmark Remote Core Locking
-    CCBanBlock,
     RCL,
 }
 
 impl LockTarget {
-    pub fn to_locktype(&self) -> Option<LockType<u64>> {
-        let locktype: LockType<u64> = match self {
+    pub fn to_locktype<P: Parker>(&self) -> Option<BenchmarkType<u64, P>> {
+        let locktype: DLockType<u64, P> = match self {
             LockTarget::FcSL => FcSL::new(0u64).into(),
             LockTarget::FcLock => FcLock::new(0u64).into(),
             LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
             LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
-            LockTarget::SpinLock => SpinLock::new(0u64).into(),
-            LockTarget::Mutex => Mutex::new(0u64).into(),
-            LockTarget::CCSynchSpin => CCSynch::<_, SpinParker>::new(0u64).into(),
-            LockTarget::CCSynchBlock => LockType::CCSynchBlock(CCSynch::new(0u64)),
-            LockTarget::CCBanSpin => LockType::CCBanSpin(CCBan::new(0u64)),
-            LockTarget::CCBanBlock => LockType::CCBanBlock(CCBan::new(0u64)),
+            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::CCBan => CCBan::new(0u64).into(),
             LockTarget::RCL => {
                 return None;
             }
+            LockTarget::SpinLock => {
+                return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
+            }
+            LockTarget::Mutex => {
+                return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
+            }
         };
 
-        Some(locktype)
+        Some(BenchmarkType::DLock(locktype))
     }
 }
 
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
-    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(global = true, num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     threads: Vec<usize>,
-    #[arg(num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
+    #[arg(global = true, num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     cpus: Vec<usize>,
-    #[arg(long, short, default_value = "../visualization/output")]
+    #[arg(global = true, long, short, default_value = "../visualization/output")]
     output_path: String,
+    #[arg(global = true, long, short, default_value = "all")]
+    waiter: WaiterType,
 }
 
 fn main() {
@@ -298,6 +311,17 @@ fn main() {
         .into_iter()
         .zip(app.global_opts.threads)
     {
-        benchmark(ncpu, nthread, &mut writer, &app.lock_target);
+        match app.global_opts.waiter {
+            WaiterType::Spin => {
+                benchmark::<SpinParker>(ncpu, nthread, &mut writer, &app.lock_target)
+            }
+            WaiterType::Block => {
+                benchmark::<BlockParker>(ncpu, nthread, &mut writer, &app.lock_target)
+            }
+            WaiterType::All => {
+                benchmark::<SpinParker>(ncpu, nthread, &mut writer, &app.lock_target);
+                benchmark::<BlockParker>(ncpu, nthread, &mut writer, &app.lock_target);
+            }
+        }
     }
 }

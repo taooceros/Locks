@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Debug},
+    fmt::{self, Debug, Display},
     sync::Mutex,
 };
 
@@ -8,13 +8,14 @@ use enum_dispatch::enum_dispatch;
 use crate::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
+    fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
-    fc::fclock::FcLock,
     guard::DLockGuard,
+    parker::Parker,
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock}, parker::{spin_parker::SpinParker, block_parker::BlockParker},
+    spin_lock::{RawSpinLock, SpinLock},
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -39,63 +40,72 @@ pub trait DLock<T> {
 }
 
 #[enum_dispatch(DLock<T>)]
-pub enum LockType<T: 'static> {
-    FlatCombining(FcLock<T, RawSpinLock>),
-    FlatCombiningFair(FcFairBanLock<T, RawSpinLock>),
-    FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock>),
-    FlatCombiningFairSL(FcSL<T, RawSpinLock>),
-    CCSynchSpin(CCSynch<T, SpinParker>),
-    CCSynchBlock(CCSynch<T, BlockParker>),
-    CCBanSpin(CCBan<T, SpinParker>),
-    CCBanBlock(CCBan<T, BlockParker>),
-    SpinLock(SpinLock<T>),
+#[derive(Debug)]
+pub enum ThirdPartyLock<T: 'static> {
     Mutex(Mutex<T>),
-    RCL(RclLock<T>),
+    SpinLock(SpinLock<T>),
 }
 
-impl<T> serde::Serialize for LockType<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.collect_str(self)
-    }
+#[enum_dispatch(DLock<T>)]
+#[derive(Debug)]
+pub enum BenchmarkType<T, P>
+where
+    T: 'static,
+    P: Parker + 'static,
+{
+    DLock(DLockType<T, P>),
+    OtherLocks(ThirdPartyLock<T>),
 }
 
-impl<T> Debug for LockType<T> {
+impl<T, P> Display for BenchmarkType<T, P>
+where
+    P: Parker,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FlatCombining(_arg0) => f.debug_tuple("FlatCombining").finish(),
-            Self::FlatCombiningFair(_arg0) => f.debug_tuple("FlatCombiningFair").finish(),
-            Self::FlatCombiningFairSlice(_arg0) => f.debug_tuple("FlatCombiningFairSlice").finish(),
-            Self::FlatCombiningFairSL(_arg0) => {
-                f.debug_tuple("Flat Combining (Skip List)").finish()
-            }
-            Self::CCSynchSpin(_arg0) => f.debug_tuple("CCSynch/Spin").finish(),
-            Self::CCSynchBlock(_arg0) => f.debug_tuple("CCSynch/Block").finish(),
-            Self::CCBanSpin(_arg0) => f.debug_tuple("CCSynch (Ban)/Spin").finish(),
-            Self::CCBanBlock(_arg0) => f.debug_tuple("CCSynch (Ban)/Block").finish(),
-            Self::SpinLock(_arg0) => f.debug_tuple("SpinLock").finish(),
-            Self::Mutex(_arg0) => f.debug_tuple("Mutex").finish(),
-            Self::RCL(_arg0) => f.debug_tuple("RCL").finish(),
+            BenchmarkType::DLock(dlock) => Display::fmt(&dlock, f),
+            BenchmarkType::OtherLocks(other_lock) => Display::fmt(other_lock, f),
         }
     }
 }
 
-impl<T> fmt::Display for LockType<T> {
+#[enum_dispatch(DLock<T>)]
+#[derive(Debug)]
+pub enum DLockType<T, P>
+where
+    T: 'static,
+    P: Parker + 'static,
+{
+    FlatCombining(FcLock<T, RawSpinLock, P>),
+    FlatCombiningFair(FcFairBanLock<T, RawSpinLock, P>),
+    FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock, P>),
+    FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
+    CCSynch(CCSynch<T, P>),
+    CCBanSpin(CCBan<T, P>),
+    RCL(RclLock<T>),
+}
+
+impl<T, P: Parker> fmt::Display for DLockType<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FlatCombining(_) => write!(f, "Flat Combining"),
             Self::FlatCombiningFair(_) => write!(f, "Flat Combining Fair"),
             Self::FlatCombiningFairSlice(_) => write!(f, "Flat Combining Fair With Combiner Slice"),
             Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
-            Self::SpinLock(_) => write!(f, "SpinLock"),
-            Self::Mutex(_) => write!(f, "Mutex"),
-            Self::CCSynchSpin(_) => write!(f, "CCSynch/Spin"),
-            Self::CCSynchBlock(_) => write!(f, "CCSynch/Block"),
+            Self::CCSynch(_) => write!(f, "CCSynch"),
             Self::CCBanSpin(_) => write!(f, "CCSynch (Ban)/Spin"),
-            Self::CCBanBlock(_) => write!(f, "CCSynch (Ban)/Block"),
             Self::RCL(_) => write!(f, "RCL"),
+        }
+        .and(write!(f, "|"))
+        .and(write!(f, "{}", P::name()))
+    }
+}
+
+impl<T> fmt::Display for ThirdPartyLock<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ThirdPartyLock::Mutex(_) => write!(f, "Mutex"),
+            ThirdPartyLock::SpinLock(_) => write!(f, "SpinLock"),
         }
     }
 }

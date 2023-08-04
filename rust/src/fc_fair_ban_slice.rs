@@ -1,6 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, num::*,
-    ptr::null_mut, sync::atomic::*, time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, num::*, ptr::null_mut,
+    sync::atomic::*, time::Duration,
 };
 
 use crossbeam::{
@@ -12,6 +12,7 @@ use thread_local::ThreadLocal;
 use crate::{
     dlock::{DLock, DLockDelegate},
     guard::DLockGuard,
+    parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };
@@ -25,19 +26,24 @@ const CLEAN_UP_AGE: u32 = 50;
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
 const COMBINER_SLICE: i64 = (COMBINER_SLICE_MS.as_nanos() as i64) * 2400;
 
-pub struct FcFairBanSliceLock<T, L: RawSimpleLock> {
+#[derive(Debug)]
+pub struct FcFairBanSliceLock<T, L, P>
+where
+    L: RawSimpleLock,
+    P: Parker,
+{
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
-    head: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
+    head: AtomicPtr<Node<T, P>>,
+    local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
     avg_cs: SyncUnsafeCell<i64>,
     avg_combiner_slice: SyncUnsafeCell<i64>,
     num_exec: SyncUnsafeCell<i32>,
     num_waiting_threads: SyncUnsafeCell<i32>,
 }
 
-impl<T> FcFairBanSliceLock<T, RawSpinLock> {
+impl<T, P: Parker> FcFairBanSliceLock<T, RawSpinLock, P> {
     pub fn new(data: T) -> Self {
         Self {
             pass: AtomicU32::new(1),
@@ -52,7 +58,7 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
         }
     }
 
-    fn push_node(&self, node: &mut Node<T>) {
+    fn push_node(&self, node: &mut Node<T, P>) {
         let mut head = self.head.load(Ordering::Acquire);
         loop {
             node.next = head;
@@ -69,14 +75,14 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
         }
     }
 
-    fn push_if_unactive(&self, node: &mut Node<T>) {
+    fn push_if_unactive(&self, node: &mut Node<T, P>) {
         if node.active.load_consume() {
             return;
         }
         self.push_node(node);
     }
 
-    fn combine(&self, combiner_node: &mut Node<T>) {
+    fn combine(&self, combiner_node: &mut Node<T, P>) {
         let mut current_ptr = self.head.load_consume();
 
         let pass = self.pass.fetch_add(1, Ordering::Relaxed);
@@ -92,7 +98,7 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
         while !current_ptr.is_null() {
             let current = unsafe { &mut *(current_ptr) };
 
-            if let Some(f) = current.f.into_inner() {
+            if current.parker.state() == State::Parked {
                 current.age = pass;
 
                 let begin = unsafe { __rdtscp(&mut aux) };
@@ -103,8 +109,13 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
                 }
 
                 unsafe {
-                    (*f).apply(DLockGuard::new(&self.data));
+                    current.parker.prewake();
+
+                    (*current.f.expect("should contains delegate when parked"))
+                        .apply(DLockGuard::new(&self.data));
                     current.f = None.into();
+
+                    current.parker.wake();
                 }
 
                 let end = unsafe { __rdtscp(&mut aux) };
@@ -145,7 +156,7 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
         }
     }
 
-    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T>>, pass: u32) {
+    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T, P>>, pass: u32) {
         let mut previous_ptr = head.load(Ordering::Relaxed);
         debug_assert!(!previous_ptr.is_null());
 
@@ -169,8 +180,7 @@ impl<T> FcFairBanSliceLock<T, RawSpinLock> {
     }
 }
 
-
-impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
+impl<T, P: Parker> DLock<T> for FcFairBanSliceLock<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node = self.local_node.get_or(|| {
             unsafe {
@@ -182,16 +192,14 @@ impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
 
         let node = unsafe { &mut *(node).get() };
 
-        self.push_if_unactive(node);
-
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
         node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
-        node.waiter.value.store(0, Ordering::Release);
-
-        let backoff = Backoff::new();
+        node.parker.reset();
 
         loop {
+            self.push_if_unactive(node);
+
             if self.combiner_lock.try_lock() {
                 // combiner
 
@@ -206,26 +214,18 @@ impl<T> DLock<T> for FcFairBanSliceLock<T, RawSpinLock> {
                 self.combiner_lock.unlock();
             }
 
-            if node.f.into_inner().is_none() {
-                return;
-            }
-
             // combiner break
 
             unsafe {
-                let avg_combiner_slice = *self.avg_combiner_slice.get();
+                let avg_combiner_slice = *self.avg_combiner_slice.get() + 1;
                 let _spin_factor = 1;
 
-                backoff.snooze();
-
-                if avg_combiner_slice != 0 {
-                    for _ in 0..(node.combiner_time / (avg_combiner_slice)) {
-                        backoff.snooze();
-                    }
+                if let Ok(_) = node.parker.wait_timeout(Duration::from_micros(
+                    (node.combiner_time / (avg_combiner_slice)) as u64,
+                )) {
+                    return;
                 }
             }
-
-            self.push_if_unactive(node);
         }
     }
 

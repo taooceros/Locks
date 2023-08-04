@@ -1,12 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    mem::transmute,
-    num::*,
-    sync::atomic::Ordering::*,
-    sync::atomic::*,
-    thread::{current},
-    time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*,
+    sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
 };
 
 use crossbeam::{
@@ -20,6 +14,7 @@ use thread_local::ThreadLocal;
 use crate::{
     dlock::{DLock, DLockDelegate},
     guard::DLockGuard,
+    parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };
@@ -31,22 +26,29 @@ mod node;
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
 const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Usage {
     usage: u64,
     thread_id: NonZeroU64,
 }
 
-
-
-pub struct FcSL<T, L: RawSimpleLock> {
+#[derive(Debug)]
+pub struct FcSL<T, L, P>
+where
+    L: RawSimpleLock,
+    P: Parker + 'static,
+{
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
-    local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
-    jobs: SkipList<Usage, AtomicPtr<Node<T>>>,
+    local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
+    jobs: SkipList<Usage, AtomicPtr<Node<T, P>>>,
 }
 
-impl<T: 'static> FcSL<T, RawSpinLock> {
+impl<T, P> FcSL<T, RawSpinLock, P>
+where
+    T: 'static,
+    P: Parker,
+{
     pub fn new(data: T) -> Self {
         Self {
             combiner_lock: CachePadded::new(RawSpinLock::new()),
@@ -56,24 +58,15 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
         }
     }
 
-    fn push_node(&self, node: *mut Node<T>, guard: &Guard) {
+    fn push_node(&self, node: *mut Node<T, P>, guard: &Guard) {
         unsafe {
-            let key = Usage{
+            let key = Usage {
                 usage: (*node).usage,
-                thread_id: current().id().as_u64()
+                thread_id: current().id().as_u64(),
             };
-
-            (*node).active.store(true, Release);
 
             self.jobs.insert(key, AtomicPtr::new(node), guard);
         }
-    }
-
-    fn push_if_unactive(&self, node: &mut Node<T>, guard: &Guard) {
-        if node.active.load_consume() {
-            return;
-        }
-        self.push_node(node, guard);
     }
 
     fn combine(&self, guard: &Guard) {
@@ -90,14 +83,18 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
                 Some(entry) => {
                     let node_ptr = entry.value();
 
-                    let node = unsafe { &mut *node_ptr.load_consume() };
+                    let node = unsafe { &mut *node_ptr.load(Acquire) };
 
-                    if let Some(f) = node.f.into_inner() {
-                        unsafe {
-                            (*f).apply(DLockGuard::new(&self.data));
-                            node.f = None.into();
-                        }
+                    let _state = node.parker.state();
+
+                    unsafe {
+                        node.parker.prewake();
+                        (*node.f.expect("delegate should be found"))
+                            .apply(DLockGuard::new(&self.data));
+                        // No need for the following but can be used to test
+                        // node.f = None.into();
                     }
+
                     let end = unsafe { __rdtscp(&mut aux) };
 
                     let cs = end - begin;
@@ -106,7 +103,7 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
 
                     node.usage += cs;
 
-                    node.active.store(false, Release);
+                    node.parker.wake();
                 }
                 // No additional jobs
                 None => break,
@@ -122,7 +119,7 @@ impl<T: 'static> FcSL<T, RawSpinLock> {
     }
 }
 
-impl<T: 'static> DLock<T> for FcSL<T, RawSpinLock> {
+impl<T: 'static, P: Parker> DLock<T> for FcSL<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node_cell = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
@@ -133,29 +130,29 @@ impl<T: 'static> DLock<T> for FcSL<T, RawSpinLock> {
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
         node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
-        self.push_if_unactive(node, guard);
+        node.parker.reset();
 
-        let backoff = Backoff::new();
+        self.push_node(node, guard);
 
         loop {
             if self.combiner_lock.try_lock() {
                 // combiner
-
                 self.combine(guard);
 
                 self.combiner_lock.unlock();
             }
 
-            if node.f.into_inner().is_none() {
-                node.active.store(false, Release);
-                return;
+            match node.parker.wait_timeout(Duration::from_micros(10)) {
+                Ok(_) => {
+                    assert!(
+                        node.parker.state() == State::Notified,
+                        "{:?}",
+                        node.parker.state()
+                    );
+                    return;
+                }
+                Err(_) => continue,
             }
-
-            if node.f.into_inner().is_some() {
-                backoff.snooze();
-            }
-
-            self.push_if_unactive(node, guard);
         }
     }
 
