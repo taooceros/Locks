@@ -1,9 +1,577 @@
 Id,CpuId,ThreadNum,CpuNum,LoopCount,NumAcquire,HoldTime,CombineTime,Locktype,WaiterType
-0,0,4,4,58297880,60028,622,1918576278,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
-1,1,4,4,59193332,20295,622,2141368080,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
-2,2,4,4,58436813,60152,630,1980465478,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
-3,3,4,4,59117910,20262,628,2062271820,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
-0,0,4,4,33025732,36120,364,1501946634,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
-1,1,4,4,54628490,19733,593,2046197137,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
-2,2,4,4,42101700,45689,461,1620211977,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
-3,3,4,4,54563338,19722,593,1859827870,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+0,0,32,32,5381019,8593,86,484924800,Flat Combining (SkipList)|Spin Parker,Spin Parker
+1,1,32,32,5665785,3013,91,484782270,Flat Combining (SkipList)|Spin Parker,Spin Parker
+2,2,32,32,5367388,8567,86,242384820,Flat Combining (SkipList)|Spin Parker,Spin Parker
+3,3,32,32,5659613,3011,90,484930950,Flat Combining (SkipList)|Spin Parker,Spin Parker
+4,4,32,32,5351640,8545,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+5,5,32,32,5656641,3007,90,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+6,6,32,32,5350469,8536,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+7,7,32,32,5656391,3008,90,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+8,8,32,32,5359886,8556,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+9,9,32,32,5660884,3010,90,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+10,10,32,32,5382900,8597,86,484713600,Flat Combining (SkipList)|Spin Parker,Spin Parker
+11,11,32,32,5659742,3011,90,1212160020,Flat Combining (SkipList)|Spin Parker,Spin Parker
+12,12,32,32,5371124,8578,86,484655400,Flat Combining (SkipList)|Spin Parker,Spin Parker
+13,13,32,32,5662912,3011,90,242466450,Flat Combining (SkipList)|Spin Parker,Spin Parker
+14,14,32,32,5367719,8568,86,17829780,Flat Combining (SkipList)|Spin Parker,Spin Parker
+15,15,32,32,5657748,3010,90,727276230,Flat Combining (SkipList)|Spin Parker,Spin Parker
+16,16,32,32,5362821,8563,86,242430090,Flat Combining (SkipList)|Spin Parker,Spin Parker
+17,17,32,32,5658329,3009,90,484876230,Flat Combining (SkipList)|Spin Parker,Spin Parker
+18,18,32,32,5363833,8565,86,484748010,Flat Combining (SkipList)|Spin Parker,Spin Parker
+19,19,32,32,5663674,3011,90,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+20,20,32,32,5347582,8537,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+21,21,32,32,5655219,3007,90,242431650,Flat Combining (SkipList)|Spin Parker,Spin Parker
+22,22,32,32,5356099,8546,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+23,23,32,32,5659106,3009,90,242495910,Flat Combining (SkipList)|Spin Parker,Spin Parker
+24,24,32,32,5356053,8555,86,727192920,Flat Combining (SkipList)|Spin Parker,Spin Parker
+25,25,32,32,5662372,3011,90,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+26,26,32,32,5366506,8568,86,,Flat Combining (SkipList)|Spin Parker,Spin Parker
+27,27,32,32,5666815,3013,91,242454390,Flat Combining (SkipList)|Spin Parker,Spin Parker
+28,28,32,32,5359185,8558,86,242368470,Flat Combining (SkipList)|Spin Parker,Spin Parker
+29,29,32,32,5666665,3013,91,484888290,Flat Combining (SkipList)|Spin Parker,Spin Parker
+30,30,32,32,5365807,8569,86,484750710,Flat Combining (SkipList)|Spin Parker,Spin Parker
+31,31,32,32,5661107,3012,90,242466960,Flat Combining (SkipList)|Spin Parker,Spin Parker
+0,0,32,32,2961275,4437,45,290998380,Flat Combining|Spin Parker,Spin Parker
+1,1,32,32,9070906,4535,136,317493180,Flat Combining|Spin Parker,Spin Parker
+2,2,32,32,3055204,4587,46,328765080,Flat Combining|Spin Parker,Spin Parker
+3,3,32,32,9172115,4587,138,158591310,Flat Combining|Spin Parker,Spin Parker
+4,4,32,32,3053189,4586,46,572693880,Flat Combining|Spin Parker,Spin Parker
+5,5,32,32,9167261,4586,138,156868530,Flat Combining|Spin Parker,Spin Parker
+6,6,32,32,3054433,4586,46,331261230,Flat Combining|Spin Parker,Spin Parker
+7,7,32,32,9158882,4585,138,143293020,Flat Combining|Spin Parker,Spin Parker
+8,8,32,32,3050455,4585,46,280004940,Flat Combining|Spin Parker,Spin Parker
+9,9,32,32,9164517,4585,138,223705500,Flat Combining|Spin Parker,Spin Parker
+10,10,32,32,3054760,4585,46,280260180,Flat Combining|Spin Parker,Spin Parker
+11,11,32,32,9161713,4585,138,263100630,Flat Combining|Spin Parker,Spin Parker
+12,12,32,32,3053815,4585,46,293989050,Flat Combining|Spin Parker,Spin Parker
+13,13,32,32,9177285,4585,138,183736890,Flat Combining|Spin Parker,Spin Parker
+14,14,32,32,3053404,4585,46,264740550,Flat Combining|Spin Parker,Spin Parker
+15,15,32,32,9170344,4584,138,137498430,Flat Combining|Spin Parker,Spin Parker
+16,16,32,32,3055287,4584,46,529499490,Flat Combining|Spin Parker,Spin Parker
+17,17,32,32,9168838,4584,138,172423710,Flat Combining|Spin Parker,Spin Parker
+18,18,32,32,3056219,4584,46,453037170,Flat Combining|Spin Parker,Spin Parker
+19,19,32,32,9168306,4581,138,150934890,Flat Combining|Spin Parker,Spin Parker
+20,20,32,32,3049608,4584,46,337825110,Flat Combining|Spin Parker,Spin Parker
+21,21,32,32,9169932,4584,138,398261940,Flat Combining|Spin Parker,Spin Parker
+22,22,32,32,3049492,4584,46,176289420,Flat Combining|Spin Parker,Spin Parker
+23,23,32,32,9170604,4584,138,278185350,Flat Combining|Spin Parker,Spin Parker
+24,24,32,32,3055455,4584,46,256799160,Flat Combining|Spin Parker,Spin Parker
+25,25,32,32,9175209,4584,138,333481020,Flat Combining|Spin Parker,Spin Parker
+26,26,32,32,3050527,4585,46,317654010,Flat Combining|Spin Parker,Spin Parker
+27,27,32,32,9165532,4584,138,408143430,Flat Combining|Spin Parker,Spin Parker
+28,28,32,32,3053635,4584,46,214356600,Flat Combining|Spin Parker,Spin Parker
+29,29,32,32,8873748,4442,133,233658630,Flat Combining|Spin Parker,Spin Parker
+30,30,32,32,3053004,4584,46,276346380,Flat Combining|Spin Parker,Spin Parker
+31,31,32,32,9159509,4584,138,215581830,Flat Combining|Spin Parker,Spin Parker
+0,0,32,32,6074920,8693,87,264672900,Flat Combining Fair|Spin Parker,Spin Parker
+1,1,32,32,6105337,2912,87,279366720,Flat Combining Fair|Spin Parker,Spin Parker
+2,2,32,32,6073234,8695,87,167370600,Flat Combining Fair|Spin Parker,Spin Parker
+3,3,32,32,6099716,2911,87,259035000,Flat Combining Fair|Spin Parker,Spin Parker
+4,4,32,32,6054548,8672,87,240243060,Flat Combining Fair|Spin Parker,Spin Parker
+5,5,32,32,6113273,2912,87,237831000,Flat Combining Fair|Spin Parker,Spin Parker
+6,6,32,32,6073134,8685,87,247989000,Flat Combining Fair|Spin Parker,Spin Parker
+7,7,32,32,6108486,2912,87,240167700,Flat Combining Fair|Spin Parker,Spin Parker
+8,8,32,32,6080187,8697,87,273027360,Flat Combining Fair|Spin Parker,Spin Parker
+9,9,32,32,6108972,2911,87,322479270,Flat Combining Fair|Spin Parker,Spin Parker
+10,10,32,32,6081179,8696,87,350816250,Flat Combining Fair|Spin Parker,Spin Parker
+11,11,32,32,6104969,2911,87,332686740,Flat Combining Fair|Spin Parker,Spin Parker
+12,12,32,32,6080729,8696,87,292989780,Flat Combining Fair|Spin Parker,Spin Parker
+13,13,32,32,6098135,2909,87,326162880,Flat Combining Fair|Spin Parker,Spin Parker
+14,14,32,32,6069270,8681,87,251481030,Flat Combining Fair|Spin Parker,Spin Parker
+15,15,32,32,6097176,2910,87,315145290,Flat Combining Fair|Spin Parker,Spin Parker
+16,16,32,32,6018932,8672,87,287988690,Flat Combining Fair|Spin Parker,Spin Parker
+17,17,32,32,6104099,2909,87,276341040,Flat Combining Fair|Spin Parker,Spin Parker
+18,18,32,32,6047276,8687,87,262137480,Flat Combining Fair|Spin Parker,Spin Parker
+19,19,32,32,6084970,2911,87,283339890,Flat Combining Fair|Spin Parker,Spin Parker
+20,20,32,32,6076004,8688,87,235825920,Flat Combining Fair|Spin Parker,Spin Parker
+21,21,32,32,6104594,2910,87,236925600,Flat Combining Fair|Spin Parker,Spin Parker
+22,22,32,32,6062504,8669,87,228493830,Flat Combining Fair|Spin Parker,Spin Parker
+23,23,32,32,6107152,2910,87,260876490,Flat Combining Fair|Spin Parker,Spin Parker
+24,24,32,32,6038130,8682,87,315482160,Flat Combining Fair|Spin Parker,Spin Parker
+25,25,32,32,6109174,2911,87,300680430,Flat Combining Fair|Spin Parker,Spin Parker
+26,26,32,32,6070439,8680,87,333644310,Flat Combining Fair|Spin Parker,Spin Parker
+27,27,32,32,6104745,2911,87,333258660,Flat Combining Fair|Spin Parker,Spin Parker
+28,28,32,32,6070183,8685,87,288213960,Flat Combining Fair|Spin Parker,Spin Parker
+29,29,32,32,6097625,2910,87,292617180,Flat Combining Fair|Spin Parker,Spin Parker
+30,30,32,32,6058623,8674,87,297729150,Flat Combining Fair|Spin Parker,Spin Parker
+31,31,32,32,6099051,2910,87,302837010,Flat Combining Fair|Spin Parker,Spin Parker
+0,0,32,32,1438032,8381,85,464676870,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+1,1,32,32,1495122,2900,88,275410320,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+2,2,32,32,1427914,8365,85,274525680,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+3,3,32,32,1492612,2902,88,274601190,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+4,4,32,32,1422443,8374,85,273335130,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+5,5,32,32,1491301,2901,88,274541670,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+6,6,32,32,1416973,8361,85,273468810,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+7,7,32,32,1479230,2901,88,273260100,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+8,8,32,32,1408939,8353,85,270493650,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+9,9,32,32,1482885,2901,88,268955250,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+10,10,32,32,1409470,8351,85,267897330,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+11,11,32,32,1482242,2900,88,270800820,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+12,12,32,32,1406295,8323,85,263350050,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+13,13,32,32,1477749,2900,88,248087610,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+14,14,32,32,1420726,8357,85,244697970,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+15,15,32,32,1485990,2901,88,249304050,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+16,16,32,32,1419271,8375,85,274223730,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+17,17,32,32,1484936,2901,88,274344780,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+18,18,32,32,1419729,8373,85,274288680,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+19,19,32,32,1482519,2900,88,274809960,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+20,20,32,32,1403532,8275,84,273095820,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+21,21,32,32,1475680,2900,88,276079170,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+22,22,32,32,1408151,8357,85,272459820,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+23,23,32,32,1483397,2900,88,276436080,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+24,24,32,32,1408795,8349,85,271173300,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+25,25,32,32,1476229,2899,88,271705110,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+26,26,32,32,1407753,8355,85,267241710,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+27,27,32,32,1478316,2899,88,272172690,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+28,28,32,32,1406375,8333,85,270746250,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+29,29,32,32,1477867,2899,88,272072400,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+30,30,32,32,1412944,8338,85,253727970,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+31,31,32,32,1485785,2897,87,248061630,Flat Combining Fair With Combiner Slice|Spin Parker,Spin Parker
+0,0,32,32,115354,164,2,,Mutex,Spin Parker
+1,1,32,32,12288819,5221,157,,Mutex,Spin Parker
+2,2,32,32,71164,112,1,,Mutex,Spin Parker
+3,3,32,32,6288860,2671,80,,Mutex,Spin Parker
+4,4,32,32,605728,854,9,,Mutex,Spin Parker
+5,5,32,32,6700219,2853,86,,Mutex,Spin Parker
+6,6,32,32,3218335,4631,47,,Mutex,Spin Parker
+7,7,32,32,1927100,831,25,,Mutex,Spin Parker
+8,8,32,32,1469935,2094,21,,Mutex,Spin Parker
+9,9,32,32,14350501,6104,183,,Mutex,Spin Parker
+10,10,32,32,34076,65,1,,Mutex,Spin Parker
+11,11,32,32,2413,1,0,,Mutex,Spin Parker
+12,12,32,32,814854,1273,13,,Mutex,Spin Parker
+13,13,32,32,27742729,11823,355,,Mutex,Spin Parker
+14,14,32,32,7961271,11569,116,,Mutex,Spin Parker
+15,15,32,32,27427608,11704,352,,Mutex,Spin Parker
+16,16,32,32,79098,129,1,,Mutex,Spin Parker
+17,17,32,32,1346191,575,17,,Mutex,Spin Parker
+18,18,32,32,11017226,15930,160,,Mutex,Spin Parker
+19,19,32,32,392653,178,5,,Mutex,Spin Parker
+20,20,32,32,349717,498,5,,Mutex,Spin Parker
+21,21,32,32,12889223,5485,165,,Mutex,Spin Parker
+22,22,32,32,247483,378,4,,Mutex,Spin Parker
+23,23,32,32,4959080,2108,63,,Mutex,Spin Parker
+24,24,32,32,103302,195,2,,Mutex,Spin Parker
+25,25,32,32,2430,1,0,,Mutex,Spin Parker
+26,26,32,32,1084082,1581,16,,Mutex,Spin Parker
+27,27,32,32,33630613,14297,430,,Mutex,Spin Parker
+28,28,32,32,2262393,3307,33,,Mutex,Spin Parker
+29,29,32,32,24665091,10511,316,,Mutex,Spin Parker
+30,30,32,32,389379,608,6,,Mutex,Spin Parker
+31,31,32,32,13964885,5963,179,,Mutex,Spin Parker
+0,0,32,32,252955,1647,17,,SpinLock,Spin Parker
+1,1,32,32,189164,424,13,,SpinLock,Spin Parker
+2,2,32,32,756304,4937,51,,SpinLock,Spin Parker
+3,3,32,32,92082,200,6,,SpinLock,Spin Parker
+4,4,32,32,778467,5516,57,,SpinLock,Spin Parker
+5,5,32,32,17760,41,1,,SpinLock,Spin Parker
+6,6,32,32,1031682,7252,74,,SpinLock,Spin Parker
+7,7,32,32,32117,75,2,,SpinLock,Spin Parker
+8,8,32,32,21301,174,2,,SpinLock,Spin Parker
+9,9,32,32,1859,5,0,,SpinLock,Spin Parker
+10,10,32,32,12873,101,1,,SpinLock,Spin Parker
+11,11,32,32,28577,77,2,,SpinLock,Spin Parker
+12,12,32,32,15985228,130608,1326,,SpinLock,Spin Parker
+13,13,32,32,4220980,11457,346,,SpinLock,Spin Parker
+14,14,32,32,85467,701,7,,SpinLock,Spin Parker
+15,15,32,32,221750,596,18,,SpinLock,Spin Parker
+16,16,32,32,96341,635,7,,SpinLock,Spin Parker
+17,17,32,32,871,2,0,,SpinLock,Spin Parker
+18,18,32,32,330904,2165,22,,SpinLock,Spin Parker
+19,19,32,32,81739,182,5,,SpinLock,Spin Parker
+20,20,32,32,465632,3273,34,,SpinLock,Spin Parker
+21,21,32,32,1906,3,0,,SpinLock,Spin Parker
+22,22,32,32,97891,689,7,,SpinLock,Spin Parker
+23,23,32,32,124717,293,9,,SpinLock,Spin Parker
+24,24,32,32,2192,18,0,,SpinLock,Spin Parker
+25,25,32,32,24194,64,2,,SpinLock,Spin Parker
+26,26,32,32,26259,215,2,,SpinLock,Spin Parker
+27,27,32,32,53707,145,4,,SpinLock,Spin Parker
+28,28,32,32,3631323,29930,304,,SpinLock,Spin Parker
+29,29,32,32,8113866,21879,661,,SpinLock,Spin Parker
+30,30,32,32,48956,399,4,,SpinLock,Spin Parker
+31,31,32,32,84565,227,7,,SpinLock,Spin Parker
+0,0,32,32,2712858,4582,46,,CCSynch|Spin Parker,Spin Parker
+1,1,32,32,8247088,4582,138,,CCSynch|Spin Parker,Spin Parker
+2,2,32,32,2698618,4582,46,63450,CCSynch|Spin Parker,Spin Parker
+3,3,32,32,8243427,4580,138,,CCSynch|Spin Parker,Spin Parker
+4,4,32,32,2716544,4579,46,1701668700,CCSynch|Spin Parker,Spin Parker
+5,5,32,32,8230566,4578,138,,CCSynch|Spin Parker,Spin Parker
+6,6,32,32,2715954,4578,46,1702115190,CCSynch|Spin Parker,Spin Parker
+7,7,32,32,8234085,4578,138,1792464090,CCSynch|Spin Parker,Spin Parker
+8,8,32,32,2717539,4578,46,,CCSynch|Spin Parker,Spin Parker
+9,9,32,32,8221842,4577,138,,CCSynch|Spin Parker,Spin Parker
+10,10,32,32,2682260,4575,46,92229990,CCSynch|Spin Parker,Spin Parker
+11,11,32,32,8248332,4577,138,981720,CCSynch|Spin Parker,Spin Parker
+12,12,32,32,2716901,4576,46,,CCSynch|Spin Parker,Spin Parker
+13,13,32,32,8227304,4577,138,,CCSynch|Spin Parker,Spin Parker
+14,14,32,32,2697030,4576,46,1794701280,CCSynch|Spin Parker,Spin Parker
+15,15,32,32,8226627,4576,138,1703130960,CCSynch|Spin Parker,Spin Parker
+16,16,32,32,2706112,4576,46,,CCSynch|Spin Parker,Spin Parker
+17,17,32,32,8229590,4576,138,,CCSynch|Spin Parker,Spin Parker
+18,18,32,32,2704746,4575,46,,CCSynch|Spin Parker,Spin Parker
+19,19,32,32,8248884,4575,137,93114360,CCSynch|Spin Parker,Spin Parker
+20,20,32,32,2708653,4574,46,,CCSynch|Spin Parker,Spin Parker
+21,21,32,32,8243354,4575,137,,CCSynch|Spin Parker,Spin Parker
+22,22,32,32,2701550,4575,46,,CCSynch|Spin Parker,Spin Parker
+23,23,32,32,8225527,4575,137,,CCSynch|Spin Parker,Spin Parker
+24,24,32,32,2709774,4575,46,,CCSynch|Spin Parker,Spin Parker
+25,25,32,32,8229496,4575,137,,CCSynch|Spin Parker,Spin Parker
+26,26,32,32,2685856,4574,46,1041870,CCSynch|Spin Parker,Spin Parker
+27,27,32,32,8231697,4575,137,989040,CCSynch|Spin Parker,Spin Parker
+28,28,32,32,2682622,4574,46,,CCSynch|Spin Parker,Spin Parker
+29,29,32,32,8231430,4574,137,1911570,CCSynch|Spin Parker,Spin Parker
+30,30,32,32,2687648,4574,46,93926130,CCSynch|Spin Parker,Spin Parker
+31,31,32,32,8236316,4574,137,,CCSynch|Spin Parker,Spin Parker
+0,0,32,32,5273102,8987,90,274123410,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+1,1,32,32,5447328,3052,92,274060770,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+2,2,32,32,5282616,8994,90,295008450,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+3,3,32,32,5445393,3052,92,259560570,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+4,4,32,32,5277370,8993,90,254226120,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+5,5,32,32,5445405,3051,92,293534760,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+6,6,32,32,5280380,8993,90,255868950,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+7,7,32,32,5443713,3051,92,287428170,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+8,8,32,32,5283300,8993,90,295829610,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+9,9,32,32,5450251,3051,92,267085320,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+10,10,32,32,5275160,8993,90,288990990,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+11,11,32,32,5448662,3051,92,247790670,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+12,12,32,32,5278056,8993,90,236177430,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+13,13,32,32,5439539,3050,92,266956590,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+14,14,32,32,5271099,8991,90,271808910,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+15,15,32,32,5442491,3050,92,263285700,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+16,16,32,32,5280221,8992,90,268125510,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+17,17,32,32,5439813,3050,92,271139640,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+18,18,32,32,5278611,8992,90,283055610,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+19,19,32,32,5440196,3050,92,269059320,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+20,20,32,32,5274433,8990,90,260563320,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+21,21,32,32,5439993,3050,92,279013620,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+22,22,32,32,5268927,8992,90,269763300,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+23,23,32,32,5437854,3050,92,271490970,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+24,24,32,32,5270050,8992,90,283530840,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+25,25,32,32,5439750,3050,92,268403430,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+26,26,32,32,5277789,8990,90,267102000,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+27,27,32,32,5440567,3050,92,275437440,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+28,28,32,32,5268119,8991,90,289732290,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+29,29,32,32,5443367,3049,92,270205890,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+30,30,32,32,5276803,8990,90,266744220,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+31,31,32,32,5438374,3050,92,266462970,CCSynch (Ban)/Spin|Spin Parker,Spin Parker
+0,0,32,31,2709064,4628,47,,RCL|Spin Parker,Spin Parker
+1,1,32,31,8317668,4627,139,,RCL|Spin Parker,Spin Parker
+2,2,32,31,2732785,4626,46,,RCL|Spin Parker,Spin Parker
+3,3,32,31,8312116,4626,139,,RCL|Spin Parker,Spin Parker
+4,4,32,31,2732970,4625,46,,RCL|Spin Parker,Spin Parker
+5,5,32,31,8312243,4625,139,,RCL|Spin Parker,Spin Parker
+6,6,32,31,2737581,4625,46,,RCL|Spin Parker,Spin Parker
+7,7,32,31,8317801,4625,139,,RCL|Spin Parker,Spin Parker
+8,8,32,31,2736823,4624,46,,RCL|Spin Parker,Spin Parker
+9,9,32,31,8317327,4624,139,,RCL|Spin Parker,Spin Parker
+10,10,32,31,2735625,4624,46,,RCL|Spin Parker,Spin Parker
+11,11,32,31,8316326,4624,139,,RCL|Spin Parker,Spin Parker
+12,12,32,31,2740099,4623,46,,RCL|Spin Parker,Spin Parker
+13,13,32,31,8317606,4624,139,,RCL|Spin Parker,Spin Parker
+14,14,32,31,2719750,4623,46,,RCL|Spin Parker,Spin Parker
+15,15,32,31,8358648,4623,139,,RCL|Spin Parker,Spin Parker
+16,16,32,31,2787393,4622,46,,RCL|Spin Parker,Spin Parker
+17,17,32,31,8307178,4622,139,,RCL|Spin Parker,Spin Parker
+18,18,32,31,2730822,4622,46,,RCL|Spin Parker,Spin Parker
+19,19,32,31,8301801,4622,139,,RCL|Spin Parker,Spin Parker
+20,20,32,31,2784265,4621,46,,RCL|Spin Parker,Spin Parker
+21,21,32,31,8308657,4622,139,,RCL|Spin Parker,Spin Parker
+22,22,32,31,2729624,4622,46,,RCL|Spin Parker,Spin Parker
+23,23,32,31,8313756,4622,139,,RCL|Spin Parker,Spin Parker
+24,24,32,31,2729713,4622,46,,RCL|Spin Parker,Spin Parker
+25,25,32,31,8311097,4622,139,,RCL|Spin Parker,Spin Parker
+26,26,32,31,2734159,4622,46,,RCL|Spin Parker,Spin Parker
+27,27,32,31,8312219,4622,139,,RCL|Spin Parker,Spin Parker
+28,28,32,31,2734612,4621,46,,RCL|Spin Parker,Spin Parker
+29,29,32,31,8313741,4621,139,,RCL|Spin Parker,Spin Parker
+30,30,32,31,2712587,4621,46,,RCL|Spin Parker,Spin Parker
+31,0,32,31,8301040,4615,139,,RCL|Spin Parker,Spin Parker
+0,0,32,32,6117616,7808,78,726327360,Flat Combining (SkipList)|BlockParker,BlockParker
+1,1,32,32,7083035,2921,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+2,2,32,32,6251219,7783,78,,Flat Combining (SkipList)|BlockParker,BlockParker
+3,3,32,32,7049356,2906,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+4,4,32,32,6261204,7878,79,,Flat Combining (SkipList)|BlockParker,BlockParker
+5,5,32,32,7068948,2916,88,968494980,Flat Combining (SkipList)|BlockParker,BlockParker
+6,6,32,32,6314289,7837,79,1210645050,Flat Combining (SkipList)|BlockParker,BlockParker
+7,7,32,32,6961009,2926,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+8,8,32,32,6161223,7745,78,,Flat Combining (SkipList)|BlockParker,BlockParker
+9,9,32,32,7046079,2906,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+10,10,32,32,5970876,7479,75,271551990,Flat Combining (SkipList)|BlockParker,BlockParker
+11,11,32,32,7054605,2909,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+12,12,32,32,6361446,7907,79,,Flat Combining (SkipList)|BlockParker,BlockParker
+13,13,32,32,6670283,2925,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+14,14,32,32,6122552,7817,79,,Flat Combining (SkipList)|BlockParker,BlockParker
+15,15,32,32,7080243,2918,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+16,16,32,32,6143606,7790,78,967927080,Flat Combining (SkipList)|BlockParker,BlockParker
+17,17,32,32,7084599,2919,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+18,18,32,32,6193396,7738,78,,Flat Combining (SkipList)|BlockParker,BlockParker
+19,19,32,32,7055340,2905,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+20,20,32,32,6260527,7792,78,484298700,Flat Combining (SkipList)|BlockParker,BlockParker
+21,21,32,32,6902204,2919,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+22,22,32,32,6141240,7872,79,,Flat Combining (SkipList)|BlockParker,BlockParker
+23,23,32,32,7076463,2920,88,726393600,Flat Combining (SkipList)|BlockParker,BlockParker
+24,24,32,32,6193356,7744,78,242210310,Flat Combining (SkipList)|BlockParker,BlockParker
+25,25,32,32,7059120,2909,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+26,26,32,32,6248051,7782,78,,Flat Combining (SkipList)|BlockParker,BlockParker
+27,27,32,32,7050090,2910,87,,Flat Combining (SkipList)|BlockParker,BlockParker
+28,28,32,32,6386503,7919,80,,Flat Combining (SkipList)|BlockParker,BlockParker
+29,29,32,32,7040435,2904,87,2179148130,Flat Combining (SkipList)|BlockParker,BlockParker
+30,30,32,32,6257956,7751,78,1210410390,Flat Combining (SkipList)|BlockParker,BlockParker
+31,31,32,32,7081263,2918,88,,Flat Combining (SkipList)|BlockParker,BlockParker
+0,0,32,32,2693393,3474,35,1996928340,Flat Combining|BlockParker,BlockParker
+1,1,32,32,8519842,3544,107,1795717860,Flat Combining|BlockParker,BlockParker
+2,2,32,32,3611809,4455,45,,Flat Combining|BlockParker,BlockParker
+3,3,32,32,10428072,4350,131,417253020,Flat Combining|BlockParker,BlockParker
+4,4,32,32,3626881,4453,45,4092510,Flat Combining|BlockParker,BlockParker
+5,5,32,32,10779901,4450,134,8358840,Flat Combining|BlockParker,BlockParker
+6,6,32,32,3553198,4452,45,4084740,Flat Combining|BlockParker,BlockParker
+7,7,32,32,10807494,4433,133,80608590,Flat Combining|BlockParker,BlockParker
+8,8,32,32,3518399,4448,45,20431200,Flat Combining|BlockParker,BlockParker
+9,9,32,32,10789221,4453,134,,Flat Combining|BlockParker,BlockParker
+10,10,32,32,3462920,4292,43,655597440,Flat Combining|BlockParker,BlockParker
+11,11,32,32,10326214,4311,130,576237690,Flat Combining|BlockParker,BlockParker
+12,12,32,32,3636099,4451,45,8181780,Flat Combining|BlockParker,BlockParker
+13,13,32,32,10531246,4402,132,201125430,Flat Combining|BlockParker,BlockParker
+14,14,32,32,3626098,4444,45,32649210,Flat Combining|BlockParker,BlockParker
+15,15,32,32,10745694,4452,134,,Flat Combining|BlockParker,BlockParker
+16,16,32,32,3563660,4442,45,40906620,Flat Combining|BlockParker,BlockParker
+17,17,32,32,9177910,3792,114,2664883290,Flat Combining|BlockParker,BlockParker
+18,18,32,32,3540485,4445,45,28677720,Flat Combining|BlockParker,BlockParker
+19,19,32,32,10792361,4450,134,8071170,Flat Combining|BlockParker,BlockParker
+20,20,32,32,3539126,4449,45,12295290,Flat Combining|BlockParker,BlockParker
+21,21,32,32,10738941,4451,134,4034190,Flat Combining|BlockParker,BlockParker
+22,22,32,32,3618078,4439,45,36836700,Flat Combining|BlockParker,BlockParker
+23,23,32,32,10604300,4448,134,16172100,Flat Combining|BlockParker,BlockParker
+24,24,32,32,3650071,4434,45,20497950,Flat Combining|BlockParker,BlockParker
+25,25,32,32,10702916,4434,133,68692380,Flat Combining|BlockParker,BlockParker
+26,26,32,32,3502232,4445,45,24600000,Flat Combining|BlockParker,BlockParker
+27,27,32,32,10799955,4446,134,20209920,Flat Combining|BlockParker,BlockParker
+28,28,32,32,3568319,4450,45,8195430,Flat Combining|BlockParker,BlockParker
+29,29,32,32,10870500,4447,134,20566650,Flat Combining|BlockParker,BlockParker
+30,30,32,32,3493169,4442,45,40954920,Flat Combining|BlockParker,BlockParker
+31,31,32,32,10808285,4415,133,149549520,Flat Combining|BlockParker,BlockParker
+0,0,32,32,5767556,7385,74,1554568440,Flat Combining Fair|BlockParker,BlockParker
+1,1,32,32,6749991,2850,86,559624590,Flat Combining Fair|BlockParker,BlockParker
+2,2,32,32,5783183,7404,74,768226890,Flat Combining Fair|BlockParker,BlockParker
+3,3,32,32,6758041,2848,86,178322580,Flat Combining Fair|BlockParker,BlockParker
+4,4,32,32,5780247,7389,74,349241370,Flat Combining Fair|BlockParker,BlockParker
+5,5,32,32,6747386,2848,86,292965210,Flat Combining Fair|BlockParker,BlockParker
+6,6,32,32,5782997,7396,74,211993800,Flat Combining Fair|BlockParker,BlockParker
+7,7,32,32,6735462,2846,86,160823550,Flat Combining Fair|BlockParker,BlockParker
+8,8,32,32,5749594,7358,74,196745280,Flat Combining Fair|BlockParker,BlockParker
+9,9,32,32,6739342,2846,86,168132960,Flat Combining Fair|BlockParker,BlockParker
+10,10,32,32,5761064,7367,74,220904310,Flat Combining Fair|BlockParker,BlockParker
+11,11,32,32,6736647,2845,85,161220270,Flat Combining Fair|BlockParker,BlockParker
+12,12,32,32,5761230,7366,74,196632810,Flat Combining Fair|BlockParker,BlockParker
+13,13,32,32,6737168,2844,85,168864840,Flat Combining Fair|BlockParker,BlockParker
+14,14,32,32,5760375,7361,74,209663490,Flat Combining Fair|BlockParker,BlockParker
+15,15,32,32,6732977,2846,86,183186600,Flat Combining Fair|BlockParker,BlockParker
+16,16,32,32,5612043,7409,74,238080060,Flat Combining Fair|BlockParker,BlockParker
+17,17,32,32,6652174,2849,86,185309340,Flat Combining Fair|BlockParker,BlockParker
+18,18,32,32,5685439,7369,74,210353160,Flat Combining Fair|BlockParker,BlockParker
+19,19,32,32,6735278,2847,86,168114090,Flat Combining Fair|BlockParker,BlockParker
+20,20,32,32,5707654,7328,74,224207730,Flat Combining Fair|BlockParker,BlockParker
+21,21,32,32,6710095,2845,85,174358590,Flat Combining Fair|BlockParker,BlockParker
+22,22,32,32,5728735,7342,74,219213900,Flat Combining Fair|BlockParker,BlockParker
+23,23,32,32,6751457,2844,85,181438110,Flat Combining Fair|BlockParker,BlockParker
+24,24,32,32,5728831,7338,74,231298110,Flat Combining Fair|BlockParker,BlockParker
+25,25,32,32,6721210,2844,85,172545150,Flat Combining Fair|BlockParker,BlockParker
+26,26,32,32,5730022,7344,74,221762610,Flat Combining Fair|BlockParker,BlockParker
+27,27,32,32,6718356,2846,86,176417910,Flat Combining Fair|BlockParker,BlockParker
+28,28,32,32,5719392,7317,74,211618260,Flat Combining Fair|BlockParker,BlockParker
+29,29,32,32,6729517,2842,85,186229650,Flat Combining Fair|BlockParker,BlockParker
+30,30,32,32,5704285,7265,73,223626930,Flat Combining Fair|BlockParker,BlockParker
+31,31,32,32,6712005,2839,85,172372800,Flat Combining Fair|BlockParker,BlockParker
+0,0,32,32,5259982,7336,74,1640370210,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+1,1,32,32,6158582,2846,86,614505690,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+2,2,32,32,5244952,7337,74,842102250,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+3,3,32,32,6155832,2843,85,295716450,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+4,4,32,32,5236924,7314,74,337712670,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+5,5,32,32,6165503,2841,85,178066110,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+6,6,32,32,5230369,7320,74,193072950,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+7,7,32,32,6161698,2843,85,158961510,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+8,8,32,32,5234750,7322,74,206310780,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+9,9,32,32,6140249,2841,85,172647420,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+10,10,32,32,5216899,7283,73,174549930,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+11,11,32,32,6155362,2840,85,169011450,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+12,12,32,32,5231138,7295,73,176455950,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+13,13,32,32,6147346,2840,85,166657410,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+14,14,32,32,5212719,7284,73,163157670,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+15,15,32,32,6162324,2839,85,169405890,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+16,16,32,32,5075513,7352,74,206827620,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+17,17,32,32,6041649,2844,85,193502040,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+18,18,32,32,5123253,7298,73,210418980,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+19,19,32,32,6124584,2842,85,156365850,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+20,20,32,32,5172894,7250,73,200895990,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+21,21,32,32,6151419,2841,85,166391790,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+22,22,32,32,5217113,7288,73,189764310,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+23,23,32,32,6147677,2839,85,150155580,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+24,24,32,32,5208199,7269,73,201607350,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+25,25,32,32,6154658,2841,85,186371250,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+26,26,32,32,5222314,7280,73,200560230,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+27,27,32,32,6153152,2839,85,184577730,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+28,28,32,32,5222745,7277,73,196372380,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+29,29,32,32,6134718,2836,85,175499070,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+30,30,32,32,5187823,7228,73,208352160,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+31,31,32,32,6140911,2838,85,190336920,Flat Combining Fair With Combiner Slice|BlockParker,BlockParker
+0,0,32,32,2222659,3216,32,,Mutex,BlockParker
+1,1,32,32,3005375,1278,38,,Mutex,BlockParker
+2,2,32,32,2477506,3597,36,,Mutex,BlockParker
+3,3,32,32,17996236,7659,230,,Mutex,BlockParker
+4,4,32,32,4714452,6926,70,,Mutex,BlockParker
+5,5,32,32,46472474,19821,595,,Mutex,BlockParker
+6,6,32,32,96199,159,2,,Mutex,BlockParker
+7,7,32,32,22822136,9745,293,,Mutex,BlockParker
+8,8,32,32,625405,906,9,,Mutex,BlockParker
+9,9,32,32,1115726,474,14,,Mutex,BlockParker
+10,10,32,32,416447,599,6,,Mutex,BlockParker
+11,11,32,32,7504043,3194,96,,Mutex,BlockParker
+12,12,32,32,11591,16,0,,Mutex,BlockParker
+13,13,32,32,7287109,3101,93,,Mutex,BlockParker
+14,14,32,32,424630,589,6,,Mutex,BlockParker
+15,15,32,32,17553339,7466,224,,Mutex,BlockParker
+16,16,32,32,1838611,2619,26,,Mutex,BlockParker
+17,17,32,32,15810110,6721,202,,Mutex,BlockParker
+18,18,32,32,188006,265,3,,Mutex,BlockParker
+19,19,32,32,7351662,3130,94,,Mutex,BlockParker
+20,20,32,32,1686698,2497,25,,Mutex,BlockParker
+21,21,32,32,20239468,8628,259,,Mutex,BlockParker
+22,22,32,32,38456,62,1,,Mutex,BlockParker
+23,23,32,32,2450,1,0,,Mutex,BlockParker
+24,24,32,32,374586,578,6,,Mutex,BlockParker
+25,25,32,32,9282450,3938,118,,Mutex,BlockParker
+26,26,32,32,992933,1420,14,,Mutex,BlockParker
+27,27,32,32,2495,1,0,,Mutex,BlockParker
+28,28,32,32,84664,117,1,,Mutex,BlockParker
+29,29,32,32,2499576,1068,32,,Mutex,BlockParker
+30,30,32,32,3236998,4659,47,,Mutex,BlockParker
+31,31,32,32,22414026,9547,287,,Mutex,BlockParker
+0,0,32,32,23014,169,2,,SpinLock,BlockParker
+1,1,32,32,223681,607,18,,SpinLock,BlockParker
+2,2,32,32,298056,2444,25,,SpinLock,BlockParker
+3,3,32,32,790,2,0,,SpinLock,BlockParker
+4,4,32,32,247,2,0,,SpinLock,BlockParker
+5,5,32,32,25467090,68685,2075,,SpinLock,BlockParker
+6,6,32,32,52029,427,4,,SpinLock,BlockParker
+7,7,32,32,7104,19,1,,SpinLock,BlockParker
+8,8,32,32,31012,204,2,,SpinLock,BlockParker
+9,9,32,32,590,1,0,,SpinLock,BlockParker
+10,10,32,32,56697,367,4,,SpinLock,BlockParker
+11,11,32,32,180665,400,12,,SpinLock,BlockParker
+12,12,32,32,1205883,8453,87,,SpinLock,BlockParker
+13,13,32,32,901,2,0,,SpinLock,BlockParker
+14,14,32,32,1249401,8759,90,,SpinLock,BlockParker
+15,15,32,32,6754,16,0,,SpinLock,BlockParker
+16,16,32,32,2992,24,0,,SpinLock,BlockParker
+17,17,32,32,46264,125,4,,SpinLock,BlockParker
+18,18,32,32,142,1,0,,SpinLock,BlockParker
+19,19,32,32,1180,3,0,,SpinLock,BlockParker
+20,20,32,32,504,4,0,,SpinLock,BlockParker
+21,21,32,32,7707624,20780,628,,SpinLock,BlockParker
+22,22,32,32,126781,1039,11,,SpinLock,BlockParker
+23,23,32,32,78654,214,6,,SpinLock,BlockParker
+24,24,32,32,615,4,0,,SpinLock,BlockParker
+25,25,32,32,73979,161,5,,SpinLock,BlockParker
+26,26,32,32,737,3,0,,SpinLock,BlockParker
+27,27,32,32,150580,329,10,,SpinLock,BlockParker
+28,28,32,32,423,3,0,,SpinLock,BlockParker
+29,29,32,32,432,1,0,,SpinLock,BlockParker
+30,30,32,32,164642,1155,12,,SpinLock,BlockParker
+31,31,32,32,1449,2,0,,SpinLock,BlockParker
+0,0,32,32,3360774,4248,43,,CCSynch|BlockParker,BlockParker
+1,1,32,32,10317848,4248,128,,CCSynch|BlockParker,BlockParker
+2,2,32,32,3413405,4250,43,,CCSynch|BlockParker,BlockParker
+3,3,32,32,10327286,4248,128,1109850,CCSynch|BlockParker,BlockParker
+4,4,32,32,3414148,4248,43,,CCSynch|BlockParker,BlockParker
+5,5,32,32,10519270,4247,128,1805006070,CCSynch|BlockParker,BlockParker
+6,6,32,32,3410376,4246,43,30270,CCSynch|BlockParker,BlockParker
+7,7,32,32,10529132,4246,128,,CCSynch|BlockParker,BlockParker
+8,8,32,32,3406189,4245,43,,CCSynch|BlockParker,BlockParker
+9,9,32,32,10515128,4245,128,,CCSynch|BlockParker,BlockParker
+10,10,32,32,3358554,4245,43,,CCSynch|BlockParker,BlockParker
+11,11,32,32,10315172,4245,128,1793353980,CCSynch|BlockParker,BlockParker
+12,12,32,32,3354155,4245,43,1012050,CCSynch|BlockParker,BlockParker
+13,13,32,32,10321588,4244,128,,CCSynch|BlockParker,BlockParker
+14,14,32,32,3408039,4244,43,,CCSynch|BlockParker,BlockParker
+15,15,32,32,10312893,4244,128,1794492330,CCSynch|BlockParker,BlockParker
+16,16,32,32,3416007,4242,43,,CCSynch|BlockParker,BlockParker
+17,17,32,32,10521933,4244,128,,CCSynch|BlockParker,BlockParker
+18,18,32,32,3357340,4244,43,,CCSynch|BlockParker,BlockParker
+19,19,32,32,10523903,4244,128,,CCSynch|BlockParker,BlockParker
+20,20,32,32,3414756,4243,43,,CCSynch|BlockParker,BlockParker
+21,21,32,32,10315674,4243,127,,CCSynch|BlockParker,BlockParker
+22,22,32,32,3349657,4243,43,,CCSynch|BlockParker,BlockParker
+23,23,32,32,10510281,4243,127,,CCSynch|BlockParker,BlockParker
+24,24,32,32,3419057,4243,43,1794654840,CCSynch|BlockParker,BlockParker
+25,25,32,32,10327691,4243,127,,CCSynch|BlockParker,BlockParker
+26,26,32,32,3409343,4243,43,,CCSynch|BlockParker,BlockParker
+27,27,32,32,10132624,4243,127,981900,CCSynch|BlockParker,BlockParker
+28,28,32,32,3354332,4243,43,,CCSynch|BlockParker,BlockParker
+29,29,32,32,10501412,4243,127,,CCSynch|BlockParker,BlockParker
+30,30,32,32,3419645,4242,43,,CCSynch|BlockParker,BlockParker
+31,31,32,32,10132323,4242,127,,CCSynch|BlockParker,BlockParker
+0,0,32,32,4698671,7910,80,270662190,CCSynch (Ban)/Spin|BlockParker,BlockParker
+1,1,32,32,5291461,2946,89,273285660,CCSynch (Ban)/Spin|BlockParker,BlockParker
+2,2,32,32,4720492,7913,80,268122960,CCSynch (Ban)/Spin|BlockParker,BlockParker
+3,3,32,32,5315966,2946,89,280053510,CCSynch (Ban)/Spin|BlockParker,BlockParker
+4,4,32,32,4700991,7912,80,277458180,CCSynch (Ban)/Spin|BlockParker,BlockParker
+5,5,32,32,5210779,2946,89,271406550,CCSynch (Ban)/Spin|BlockParker,BlockParker
+6,6,32,32,4691062,7909,80,283674420,CCSynch (Ban)/Spin|BlockParker,BlockParker
+7,7,32,32,5232980,2945,89,277512870,CCSynch (Ban)/Spin|BlockParker,BlockParker
+8,8,32,32,4712712,7909,80,275682390,CCSynch (Ban)/Spin|BlockParker,BlockParker
+9,9,32,32,5237875,2945,89,267707340,CCSynch (Ban)/Spin|BlockParker,BlockParker
+10,10,32,32,4725841,7906,79,274159020,CCSynch (Ban)/Spin|BlockParker,BlockParker
+11,11,32,32,5394683,2945,88,276942060,CCSynch (Ban)/Spin|BlockParker,BlockParker
+12,12,32,32,4691874,7910,80,276478710,CCSynch (Ban)/Spin|BlockParker,BlockParker
+13,13,32,32,5368330,2945,89,257773740,CCSynch (Ban)/Spin|BlockParker,BlockParker
+14,14,32,32,4707243,7910,80,258964290,CCSynch (Ban)/Spin|BlockParker,BlockParker
+15,15,32,32,5304944,2944,88,266513010,CCSynch (Ban)/Spin|BlockParker,BlockParker
+16,16,32,32,4725904,7908,80,271312410,CCSynch (Ban)/Spin|BlockParker,BlockParker
+17,17,32,32,5338665,2944,88,261914490,CCSynch (Ban)/Spin|BlockParker,BlockParker
+18,18,32,32,4741079,7908,80,278517180,CCSynch (Ban)/Spin|BlockParker,BlockParker
+19,19,32,32,5384697,2944,88,274603020,CCSynch (Ban)/Spin|BlockParker,BlockParker
+20,20,32,32,4723115,7909,80,270076290,CCSynch (Ban)/Spin|BlockParker,BlockParker
+21,21,32,32,5302006,2945,89,270689010,CCSynch (Ban)/Spin|BlockParker,BlockParker
+22,22,32,32,4735233,7907,80,254516790,CCSynch (Ban)/Spin|BlockParker,BlockParker
+23,23,32,32,5330645,2944,88,255430890,CCSynch (Ban)/Spin|BlockParker,BlockParker
+24,24,32,32,4693012,7908,80,250117320,CCSynch (Ban)/Spin|BlockParker,BlockParker
+25,25,32,32,5331740,2944,88,268401780,CCSynch (Ban)/Spin|BlockParker,BlockParker
+26,26,32,32,4693971,7908,80,266112510,CCSynch (Ban)/Spin|BlockParker,BlockParker
+27,27,32,32,5218800,2944,88,266427900,CCSynch (Ban)/Spin|BlockParker,BlockParker
+28,28,32,32,4736511,7905,80,274339110,CCSynch (Ban)/Spin|BlockParker,BlockParker
+29,29,32,32,5331874,2944,88,274075410,CCSynch (Ban)/Spin|BlockParker,BlockParker
+30,30,32,32,4689473,7906,80,271262340,CCSynch (Ban)/Spin|BlockParker,BlockParker
+31,31,32,32,5244188,2944,88,256932030,CCSynch (Ban)/Spin|BlockParker,BlockParker
+0,0,32,31,2775534,4625,46,,RCL|BlockParker,BlockParker
+1,1,32,31,8314022,4628,139,,RCL|BlockParker,BlockParker
+2,2,32,31,2729204,4629,47,,RCL|BlockParker,BlockParker
+3,3,32,31,8320608,4627,139,,RCL|BlockParker,BlockParker
+4,4,32,31,2729230,4627,46,,RCL|BlockParker,BlockParker
+5,5,32,31,8313516,4626,139,,RCL|BlockParker,BlockParker
+6,6,32,31,2736643,4626,46,,RCL|BlockParker,BlockParker
+7,7,32,31,8315791,4626,139,,RCL|BlockParker,BlockParker
+8,8,32,31,2730693,4626,46,,RCL|BlockParker,BlockParker
+9,9,32,31,8320880,4626,139,,RCL|BlockParker,BlockParker
+10,10,32,31,2738366,4626,46,,RCL|BlockParker,BlockParker
+11,11,32,31,8319100,4625,139,,RCL|BlockParker,BlockParker
+12,12,32,31,2736848,4625,46,,RCL|BlockParker,BlockParker
+13,13,32,31,8318606,4625,139,,RCL|BlockParker,BlockParker
+14,14,32,31,2710654,4625,46,,RCL|BlockParker,BlockParker
+15,15,32,31,8362976,4625,139,,RCL|BlockParker,BlockParker
+16,16,32,31,2733049,4625,46,,RCL|BlockParker,BlockParker
+17,17,32,31,8311396,4624,139,,RCL|BlockParker,BlockParker
+18,18,32,31,2727333,4624,46,,RCL|BlockParker,BlockParker
+19,19,32,31,8313164,4624,139,,RCL|BlockParker,BlockParker
+20,20,32,31,2724401,4624,46,,RCL|BlockParker,BlockParker
+21,21,32,31,8314199,4624,139,,RCL|BlockParker,BlockParker
+22,22,32,31,2730029,4624,46,,RCL|BlockParker,BlockParker
+23,23,32,31,8364965,4623,139,,RCL|BlockParker,BlockParker
+24,24,32,31,2733361,4624,46,,RCL|BlockParker,BlockParker
+25,25,32,31,8312886,4624,139,,RCL|BlockParker,BlockParker
+26,26,32,31,2737037,4623,46,,RCL|BlockParker,BlockParker
+27,27,32,31,8314310,4623,139,,RCL|BlockParker,BlockParker
+28,28,32,31,2735699,4623,46,,RCL|BlockParker,BlockParker
+29,29,32,31,8314851,4623,139,,RCL|BlockParker,BlockParker
+30,30,32,31,2723888,4623,46,,RCL|BlockParker,BlockParker
+31,0,32,31,8300252,4616,139,,RCL|BlockParker,BlockParker
