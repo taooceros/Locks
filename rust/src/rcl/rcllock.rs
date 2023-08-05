@@ -3,14 +3,12 @@ use std::{
     mem::transmute,
     ops::Deref,
     sync::atomic::{AtomicUsize, Ordering::*},
-    thread::yield_now,
 };
 
 pub mod rcllockptr;
 use crate::{
     dlock::{DLock, DLockDelegate},
     parker::Parker,
-    syncptr::SyncMutPtr,
 };
 
 use super::{rclrequest::*, rclserver::*};
@@ -22,7 +20,7 @@ where
     T: Sized,
     P: Parker + 'static,
 {
-    server: SyncMutPtr<RclServer<P>>,
+    server: &'static SyncUnsafeCell<RclServer<P>>,
     pub(super) holder: AtomicUsize,
     pub(super) data: SyncUnsafeCell<T>,
 }
@@ -39,16 +37,18 @@ impl<T, P: Parker> DLock<T> for RclLock<T, P> {
 }
 
 impl<T, P: Parker> RclLock<T, P> {
-    pub fn new<'a>(server: *mut RclServer<P>, t: T) -> RclLock<T, P> {
+    pub fn new<'a>(server: &mut RclServer<P>, t: T) -> RclLock<T, P> {
         RclLock {
-            server: server.into(),
+            server: unsafe {
+                &*(server as *mut RclServer<P> as *const SyncUnsafeCell<RclServer<P>>)
+            },
             holder: AtomicUsize::new(!0),
             data: SyncUnsafeCell::new(t),
         }
     }
 
     pub fn lock<'a>(&self, mut f: impl DLockDelegate<T> + 'a) {
-        let serverptr: *mut RclServer<P> = self.server.into();
+        let serverptr: *mut RclServer<P> = self.server.get();
 
         let server = unsafe { &mut *serverptr };
 
@@ -66,7 +66,6 @@ impl<T, P: Parker> RclLock<T, P> {
 
         unsafe {
             let f_request = &mut *(request.f.get());
-
 
             *f_request = Some(transmute(&mut f as &mut dyn DLockDelegate<T>));
 

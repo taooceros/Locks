@@ -7,12 +7,13 @@ use std::{
 use crate::{
     ccsynch::CCSynch,
     dlock::{DLock, DLockType},
+    fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
-    fc::fclock::FcLock,
     guard::DLockGuard,
-    rcl::{rcllock::RclLock, rclserver::RclServer}, parker::spin_parker::SpinParker,
+    parker::spin_parker::SpinParker,
+    rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
 #[test]
@@ -72,8 +73,7 @@ pub fn rcl_test() {
         let cpu_count = available_parallelism().unwrap().get();
         let mut server = RclServer::new();
         server.start(cpu_count - 1);
-        let server_ptr: *mut RclServer = &mut server;
-        let rcl_lock = Arc::new(DLockType::from(RclLock::new(server_ptr, 0)));
+        let rcl_lock = Arc::new(DLockType::from(RclLock::new(&mut server, 0)));
         inner_test(rcl_lock, cpu_count - 1);
     })
 }

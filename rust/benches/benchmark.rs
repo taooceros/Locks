@@ -29,7 +29,7 @@ pub fn lock_bench(bencher: &mut Criterion) {
         let thread = i * THREAD_CPU_RATIO;
         ccbench(&mut group, cpu_count, thread);
         fcbench(&mut group, cpu_count, thread);
-        rclbench(&mut group, cpu_count, thread);
+        rclbench::<SpinParker>(&mut group, cpu_count, thread);
     }
 
     group.finish();
@@ -55,14 +55,17 @@ pub fn fcbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_
     )
 }
 
-pub fn rclbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
+pub fn rclbench<P: Parker + 'static>(
+    bencher: &mut BenchmarkGroup<WallTime>,
+    cpu_count: usize,
+    thread_count: usize,
+) {
     let mut server = RclServer::new();
 
     server.start(cpu_count - 1);
 
-    let server_ptr = &mut server as *mut RclServer;
-    let cc = Arc::new(DLockType::<u64, SpinParker>::RCL(RclLock::new(
-        server_ptr, 0u64,
+    let cc = Arc::new(DLockType::<u64, P>::RCL(RclLock::new(
+        &mut server, 0u64,
     )));
 
     bench_inner(

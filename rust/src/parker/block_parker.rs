@@ -68,43 +68,38 @@ impl Parker for BlockParker {
     }
 
     fn wait_timeout(&self, timeout: Duration) -> Result<(), ()> {
-        loop {
-            // Change NOTIFIED=>EMPTY or EMPTY=>PARKED, or PRENOTIFIED=>PRENOTIFIED2, and directly return in the
-            // first case.
-            match self
-                .state
-                .value
-                .compare_exchange(EMPTY, PARKED, Acquire, Acquire)
-            {
-                Err(NOTIFIED) => return Ok(()),
-                Err(PRENOTIFIED) => {
-                    self.wait_prenotified();
-                    return Ok(());
-                }
-                Ok(_) | Err(PARKED) => {
-                    // Wait for something to happen, assuming it's still set to PARKED.
-                    match self.state.wait_for(PARKED, timeout) {
-                        Ok(_) => {}
-                        Err(reason) => match reason {
-                            TimedWaitError::WrongValue => {}
-                            TimedWaitError::TimedOut => return Err(()),
-                            TimedWaitError::Interrupted => continue,
-                        },
-                    };
-
-                    let state = self.state.value.load(Acquire);
-
-                    match state {
-                        NOTIFIED => return Ok(()),
-                        PRENOTIFIED => {
-                            self.wait_prenotified();
-                            return Ok(());
-                        }
-                        _ => panic!("unexpected state: {:?}", state),
-                    }
-                }
-                value => panic!("unexpected value: {:?}", value),
+        // Change NOTIFIED=>EMPTY or EMPTY=>PARKED, or PRENOTIFIED=>PRENOTIFIED2, and directly return in the
+        // first case.
+        match self
+            .state
+            .value
+            .compare_exchange(EMPTY, PARKED, Acquire, Acquire)
+        {
+            Err(NOTIFIED) => return Ok(()),
+            Err(PRENOTIFIED) => {
+                self.wait_prenotified();
+                return Ok(());
             }
+            Ok(_) | Err(PARKED) => loop {
+                // Wait for something to happen, assuming it's still set to PARKED.
+                match self.state.wait_for(PARKED, timeout) {
+                    Ok(_) | Err(TimedWaitError::WrongValue) => {}
+                    Err(TimedWaitError::TimedOut) => return Err(()),
+                    Err(TimedWaitError::Interrupted) => continue,
+                };
+
+                let state = self.state.value.load(Acquire);
+
+                match state {
+                    NOTIFIED => return Ok(()),
+                    PRENOTIFIED => {
+                        self.wait_prenotified();
+                        return Ok(());
+                    }
+                    _ => panic!("unexpected state: {:?}", state),
+                }
+            },
+            value => panic!("unexpected value: {:?}", value),
         }
     }
 
