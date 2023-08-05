@@ -1,5 +1,5 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::{SyncUnsafeCell},
     cmp::min,
     sync::atomic::{AtomicPtr, Ordering::*},
     thread::{self, yield_now, JoinHandle},

@@ -1,7 +1,7 @@
 use crossbeam::queue::ArrayQueue;
 
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::{SyncUnsafeCell},
     collections::LinkedList,
     ptr::null,
     sync::atomic::{Ordering::*, *},

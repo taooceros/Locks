@@ -4,9 +4,8 @@ use std::{
 };
 
 use crossbeam::{
-    atomic::AtomicConsume,
     epoch::{default_collector, pin, Guard},
-    utils::{Backoff, CachePadded},
+    utils::{CachePadded},
 };
 use crossbeam_skiplist::SkipList;
 use thread_local::ThreadLocal;

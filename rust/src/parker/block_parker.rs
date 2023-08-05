@@ -1,4 +1,4 @@
-use crossbeam::{atomic::AtomicConsume, utils::Backoff};
+use crossbeam::{utils::Backoff};
 use linux_futex::{Futex, Private, TimedWaitError, WaitError::Interrupted};
 use serde::Serialize;
 use std::{sync::atomic::Ordering::*, time::Duration};
