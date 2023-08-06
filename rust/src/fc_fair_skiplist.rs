@@ -5,7 +5,7 @@ use std::{
 
 use crossbeam::{
     epoch::{default_collector, pin, Guard},
-    utils::{CachePadded},
+    utils::CachePadded,
 };
 use crossbeam_skiplist::SkipList;
 use thread_local::ThreadLocal;
@@ -143,7 +143,7 @@ impl<T: 'static, P: Parker> DLock<T> for FcSL<T, RawSpinLock, P> {
 
             match node.parker.wait_timeout(Duration::from_micros(10)) {
                 Ok(_) => {
-                    assert!(
+                    debug_assert!(
                         node.parker.state() == State::Notified,
                         "{:?}",
                         node.parker.state()
@@ -157,7 +157,14 @@ impl<T: 'static, P: Parker> DLock<T> for FcSL<T, RawSpinLock, P> {
 
     #[cfg(feature = "combiner_stat")]
     fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
-        let count = unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
+        let count = unsafe {
+            (*self
+                .local_node
+                .get()
+                .expect("should contains thread local value")
+                .get())
+            .combiner_time_stat
+        };
         NonZeroI64::new(count)
     }
 }

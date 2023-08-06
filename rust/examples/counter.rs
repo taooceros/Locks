@@ -1,6 +1,8 @@
 use std::{
+    fmt::Debug,
     fs::{create_dir, remove_dir_all, File},
     iter::repeat,
+    mem::MaybeUninit,
     num::NonZeroI64,
     path::Path,
     sync::{
@@ -8,11 +10,12 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, available_parallelism, JoinHandle},
-    time::Duration, fmt::Debug,
+    time::Duration,
 };
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use csv::Writer;
+use itertools::Itertools;
 use quanta::Clock;
 use strum::{Display, EnumIter, IntoEnumIterator};
 
@@ -33,13 +36,12 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 3;
+const DURATION: u64 = 1;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct Record
-{
+struct Record {
     id: usize,
     cpu_id: usize,
     thread_num: usize,
@@ -54,16 +56,14 @@ struct Record
     waiter_type: String,
 }
 
-fn benchmark<P: Parker + 'static>(
+fn benchmark(
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
-    target: &Option<LockTarget>,
+    target: Option<LockTarget>,
+    waiter: WaiterType,
 ) {
-    let targets: Vec<Option<BenchmarkType<u64, P>>> = match target {
-        Some(target) => vec![target.to_locktype()],
-        None => (LockTarget::iter().map(|t| t.to_locktype())).collect(),
-    };
+    let targets = extract_targets(waiter, target);
 
     for target in targets {
         if let Some(lock) = target {
@@ -71,23 +71,68 @@ fn benchmark<P: Parker + 'static>(
         }
     }
 
-    if matches!(target, Some(LockTarget::RCL) | None) {
-        let mut server = RclServer::new();
-        server.start(num_cpu - 1);
-        let lock = RclLock::new(&mut server, 0u64);
-        inner_benchmark(
-            Arc::new(DLockType::<u64, P>::RCL(lock).into()),
-            num_cpu - 1,
-            num_thread,
-            writer,
-        );
+    if matches!(target, Some(LockTarget::DLock(DLockTarget::RCL)) | None) {
+        match waiter {
+            WaiterType::Spin => bench_rcl::<SpinParker>(num_cpu, num_thread, writer),
+            WaiterType::Block => bench_rcl::<BlockParker>(num_cpu, num_thread, writer),
+            WaiterType::All => {
+                bench_rcl::<SpinParker>(num_cpu, num_thread, writer);
+                bench_rcl::<BlockParker>(num_cpu, num_thread, writer)
+            }
+        }
     }
 
     println!("Benchmark finished");
 }
 
-fn inner_benchmark<P: Parker + 'static>(
-    lock_type: Arc<BenchmarkType<u64, P>>,
+fn extract_targets(
+    waiter: WaiterType,
+    target: Option<LockTarget>,
+) -> Vec<Option<BenchmarkType<u64>>> {
+    let targets: Vec<Option<BenchmarkType<u64>>> = match waiter {
+        WaiterType::Spin => match target {
+            Some(target) => vec![target.to_locktype::<SpinParker>()],
+            None => (LockTarget::iter().map(|t| t.to_locktype::<SpinParker>())).collect(),
+        },
+        WaiterType::Block => match target {
+            Some(target) => vec![target.to_locktype::<BlockParker>()],
+            None => (LockTarget::iter().map(|t| t.to_locktype::<BlockParker>())).collect(),
+        },
+        WaiterType::All => match target {
+            Some(target) => {
+                let mut locks = vec![target.to_locktype::<SpinParker>()];
+                if matches!(target, LockTarget::DLock(_)) {
+                    locks.push(target.to_locktype::<BlockParker>());
+                }
+                locks
+            }
+            None => (LockTarget::iter().map(|t| t.to_locktype::<SpinParker>()))
+                .interleave(
+                    LockTarget::iter()
+                        .filter(|x| matches!(x, LockTarget::DLock(_)))
+                        .map(|t| t.to_locktype::<BlockParker>()),
+                )
+                .collect(),
+        },
+    };
+    targets
+}
+
+fn bench_rcl<P: Parker>(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
+    let mut server = RclServer::new();
+    server.start(num_cpu - 1);
+    let lock = RclLock::new(&mut server, 0u64);
+
+    inner_benchmark(
+        Arc::new(DLockType::<u64, SpinParker>::RCL(lock).into()),
+        num_cpu - 1,
+        num_thread,
+        writer,
+    );
+}
+
+fn inner_benchmark(
+    lock_type: Arc<BenchmarkType<u64>>,
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
@@ -138,8 +183,8 @@ fn inner_benchmark<P: Parker + 'static>(
     );
 }
 
-fn benchmark_num_threads<P: Parker + 'static>(
-    lock_type: Arc<BenchmarkType<u64, P>>,
+fn benchmark_num_threads(
+    lock_type: Arc<BenchmarkType<u64>>,
     id: usize,
     num_thread: usize,
     num_cpu: usize,
@@ -188,7 +233,7 @@ fn benchmark_num_threads<P: Parker + 'static>(
                 hold_time,
                 combine_time: lock_type.get_current_thread_combining_time(),
                 locktype: format!("{}", lock_type),
-                waiter_type: P::name().to_string(),
+                waiter_type: lock_type.parker_name().to_string(),
             };
         })
         .unwrap()
@@ -198,21 +243,21 @@ fn benchmark_num_threads<P: Parker + 'static>(
 #[clap(name = "lock counter benchmark", version)]
 /// Benchmark Utility
 pub struct App {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     lock_target: Option<LockTarget>,
-    #[clap(flatten)]
+    #[command(flatten)]
     global_opts: GlobalOpts,
 }
 
-#[derive(Debug, Clone, ValueEnum, Display, Serialize)]
+#[derive(Debug, Clone, Copy, ValueEnum, Display, Serialize)]
 enum WaiterType {
     Spin,
     Block,
     All,
 }
 
-#[derive(Debug, Subcommand, EnumIter)]
-enum LockTarget {
+#[derive(Debug, Subcommand, EnumIter, Clone, Copy)]
+enum DLockTarget {
     /// Benchmark Flat-Combining Skiplist
     FcSL,
     /// Benchmark Flat-Combining Lock
@@ -221,10 +266,7 @@ enum LockTarget {
     FcFairBanLock,
     /// Benchmark Flat-Combining Fair (Banning & Combiner Slice) Lock
     FcFairBanSliceLock,
-    /// Benchmark Spinlock
-    SpinLock,
-    /// Benchmark Mutex
-    Mutex,
+
     /// Benchmark CCSynch
     CCSynch,
     /// Benchmark CCSynch (Ban)
@@ -233,18 +275,83 @@ enum LockTarget {
     RCL,
 }
 
-impl LockTarget {
-    pub fn to_locktype<P: Parker>(&self) -> Option<BenchmarkType<u64, P>> {
-        let locktype: DLockType<u64, P> = match self {
-            LockTarget::FcSL => FcSL::new(0u64).into(),
-            LockTarget::FcLock => FcLock::new(0u64).into(),
-            LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
-            LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
-            LockTarget::CCSynch => CCSynch::new(0u64).into(),
-            LockTarget::CCBan => CCBan::new(0u64).into(),
-            LockTarget::RCL => {
+#[derive(Debug, Subcommand, Clone, Copy)]
+enum LockTarget {
+    #[command(flatten)]
+    DLock(DLockTarget),
+    /// Benchmark Mutex
+    Mutex,
+    /// Benchmark Spinlock
+    SpinLock,
+}
+
+enum LockTargetIterState {
+    DLock(DLockTargetIter),
+    Mutex,
+    SpinLock,
+    Stop,
+}
+
+struct LockTargetIter {
+    state: LockTargetIterState,
+}
+
+impl Iterator for LockTargetIter {
+    type Item = LockTarget;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.state {
+            LockTargetIterState::DLock(iter) => {
+                if let Some(dlock) = iter.next() {
+                    return Some(LockTarget::DLock(dlock));
+                } else {
+                    self.state = LockTargetIterState::Mutex;
+                    return self.next();
+                }
+            }
+            LockTargetIterState::Mutex => {
+                self.state = LockTargetIterState::SpinLock;
+                return Some(LockTarget::Mutex);
+            }
+            LockTargetIterState::SpinLock => {
+                self.state = LockTargetIterState::Stop;
+                return Some(LockTarget::SpinLock);
+            }
+            LockTargetIterState::Stop => {
+                self.state = LockTargetIterState::DLock(DLockTarget::iter());
                 return None;
             }
+        }
+    }
+}
+
+impl IntoEnumIterator for LockTarget {
+    type Iterator = LockTargetIter;
+
+    fn iter() -> Self::Iterator {
+        LockTargetIter {
+            state: LockTargetIterState::DLock(DLockTarget::iter()),
+        }
+    }
+}
+
+impl LockTarget {
+    pub fn to_locktype<P>(&self) -> Option<BenchmarkType<u64>>
+    where
+        P: Parker + 'static,
+        BenchmarkType<u64>: From<DLockType<u64, P>>,
+    {
+        let locktype: DLockType<u64, P> = match self {
+            LockTarget::DLock(DLockTarget::FcSL) => FcSL::new(0u64).into(),
+            LockTarget::DLock(DLockTarget::FcLock) => FcLock::new(0u64).into(),
+            LockTarget::DLock(DLockTarget::FcFairBanLock) => FcFairBanLock::new(0u64).into(),
+            LockTarget::DLock(DLockTarget::FcFairBanSliceLock) => {
+                FcFairBanSliceLock::new(0u64).into()
+            }
+            LockTarget::DLock(DLockTarget::CCSynch) => CCSynch::new(0u64).into(),
+            LockTarget::DLock(DLockTarget::CCBan) => CCBan::new(0u64).into(),
+            // RCL requires) special treatment
+            LockTarget::DLock(DLockTarget::RCL) => return None,
             LockTarget::SpinLock => {
                 return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
             }
@@ -253,7 +360,7 @@ impl LockTarget {
             }
         };
 
-        Some(BenchmarkType::DLock(locktype))
+        Some(locktype.into())
     }
 }
 
@@ -311,17 +418,12 @@ fn main() {
         .into_iter()
         .zip(app.global_opts.threads)
     {
-        match app.global_opts.waiter {
-            WaiterType::Spin => {
-                benchmark::<SpinParker>(ncpu, nthread, &mut writer, &app.lock_target)
-            }
-            WaiterType::Block => {
-                benchmark::<BlockParker>(ncpu, nthread, &mut writer, &app.lock_target)
-            }
-            WaiterType::All => {
-                benchmark::<SpinParker>(ncpu, nthread, &mut writer, &app.lock_target);
-                benchmark::<BlockParker>(ncpu, nthread, &mut writer, &app.lock_target);
-            }
-        }
+        benchmark(
+            ncpu,
+            nthread,
+            &mut writer,
+            app.lock_target,
+            app.global_opts.waiter,
+        )
     }
 }
