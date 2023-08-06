@@ -36,7 +36,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 
-const DURATION: u64 = 1;
+const DURATION: u64 = 30;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
