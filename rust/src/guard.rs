@@ -22,7 +22,7 @@ impl<T: Sized> DerefMut for DLockGuard<'_, T> {
 }
 
 impl<T> DLockGuard<'_, T> {
-    pub fn new<'a>(data: &'a SyncUnsafeCell<T>) -> DLockGuard<'a, T> {
+    pub unsafe fn new<'a>(data: &'a SyncUnsafeCell<T>) -> DLockGuard<'a, T> {
         DLockGuard { data }
     }
 }

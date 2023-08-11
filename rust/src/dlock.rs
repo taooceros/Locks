@@ -15,7 +15,7 @@ use crate::{
     guard::DLockGuard,
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock},
+    spin_lock::{RawSpinLock, SpinLock}, u_scl::USCL,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -44,6 +44,7 @@ pub trait DLock<T> {
 pub enum ThirdPartyLock<T: 'static> {
     Mutex(Mutex<T>),
     SpinLock(SpinLock<T>),
+    USCL(USCL<T>),
 }
 
 #[enum_dispatch(DLock<T>)]
@@ -124,6 +125,7 @@ impl<T> fmt::Display for ThirdPartyLock<T> {
         match self {
             ThirdPartyLock::Mutex(_) => write!(f, "Mutex"),
             ThirdPartyLock::SpinLock(_) => write!(f, "SpinLock"),
+            ThirdPartyLock::USCL(_) => write!(f, "U-SCL")
         }
     }
 }

@@ -59,7 +59,7 @@ impl<T, W: Parker> CCSynch<T, W> {
     }
 
     fn execute_fn(&self, node: &mut Node<T, W>, f: &mut (impl DLockDelegate<T> + ?Sized)) {
-        let guard = DLockGuard::new(&self.data);
+        let guard = unsafe { DLockGuard::new(&self.data) };
         f.apply(guard);
 
         node.completed.store(true, Release);

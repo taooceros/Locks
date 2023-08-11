@@ -29,14 +29,13 @@ use dlock::{
     guard::DLockGuard,
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::{rcllock::RclLock, rclserver::RclServer},
+    u_scl::USCL,
 };
 use dlock::{fc_fair_skiplist::FcSL, spin_lock::SpinLock};
 
 use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
-
-const DURATION: u64 = 30;
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -62,22 +61,23 @@ fn benchmark(
     writer: &mut Writer<File>,
     target: Option<LockTarget>,
     waiter: WaiterType,
+    duration: u64,
 ) {
     let targets = extract_targets(waiter, target);
 
     for target in targets {
         if let Some(lock) = target {
-            inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer);
+            inner_benchmark(Arc::new(lock), num_cpu, num_thread, writer, duration);
         }
     }
 
     if matches!(target, Some(LockTarget::DLock(DLockTarget::RCL)) | None) {
         match waiter {
-            WaiterType::Spin => bench_rcl::<SpinParker>(num_cpu, num_thread, writer),
-            WaiterType::Block => bench_rcl::<BlockParker>(num_cpu, num_thread, writer),
+            WaiterType::Spin => bench_rcl::<SpinParker>(num_cpu, num_thread, writer, duration),
+            WaiterType::Block => bench_rcl::<BlockParker>(num_cpu, num_thread, writer, duration),
             WaiterType::All => {
-                bench_rcl::<SpinParker>(num_cpu, num_thread, writer);
-                bench_rcl::<BlockParker>(num_cpu, num_thread, writer)
+                bench_rcl::<SpinParker>(num_cpu, num_thread, writer, duration);
+                bench_rcl::<BlockParker>(num_cpu, num_thread, writer, duration)
             }
         }
     }
@@ -118,7 +118,12 @@ fn extract_targets(
     targets
 }
 
-fn bench_rcl<P: Parker>(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>) {
+fn bench_rcl<P: Parker>(
+    num_cpu: usize,
+    num_thread: usize,
+    writer: &mut Writer<File>,
+    duration: u64,
+) {
     let mut server = RclServer::new();
     server.start(num_cpu - 1);
     let lock = RclLock::new(&mut server, 0u64);
@@ -128,6 +133,7 @@ fn bench_rcl<P: Parker>(num_cpu: usize, num_thread: usize, writer: &mut Writer<F
         num_cpu - 1,
         num_thread,
         writer,
+        duration,
     );
 }
 
@@ -136,6 +142,7 @@ fn inner_benchmark(
     num_cpu: usize,
     num_thread: usize,
     writer: &mut Writer<File>,
+    duration: u64,
 ) {
     static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -149,7 +156,7 @@ fn inner_benchmark(
 
     let mut results = Vec::new();
 
-    thread::sleep(Duration::from_secs(DURATION));
+    thread::sleep(Duration::from_secs(duration as u64));
 
     STOP.store(true, Ordering::Release);
 
@@ -174,7 +181,11 @@ fn inner_benchmark(
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
     lock_type.lock(|guard: DLockGuard<u64>| {
-        assert_eq!(*guard, total_count);
+        assert_eq!(
+            *guard, total_count,
+            "Total counter is not matched with lock value {}, but thread local loop sum {}",
+            *guard, total_count
+        );
     });
 
     println!(
@@ -283,12 +294,15 @@ enum LockTarget {
     Mutex,
     /// Benchmark Spinlock
     SpinLock,
+    /// Benchmark U-SCL
+    USCL,
 }
 
 enum LockTargetIterState {
     DLock(DLockTargetIter),
     Mutex,
     SpinLock,
+    USCL,
     Stop,
 }
 
@@ -314,6 +328,10 @@ impl Iterator for LockTargetIter {
                 return Some(LockTarget::Mutex);
             }
             LockTargetIterState::SpinLock => {
+                self.state = LockTargetIterState::USCL;
+                return Some(LockTarget::SpinLock);
+            }
+            LockTargetIterState::USCL => {
                 self.state = LockTargetIterState::Stop;
                 return Some(LockTarget::SpinLock);
             }
@@ -353,11 +371,12 @@ impl LockTarget {
             // RCL requires) special treatment
             LockTarget::DLock(DLockTarget::RCL) => return None,
             LockTarget::SpinLock => {
-                return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
-            }
-            LockTarget::Mutex => {
                 return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
             }
+            LockTarget::Mutex => {
+                return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
+            }
+            LockTarget::USCL => return Some(BenchmarkType::OtherLocks(USCL::new(0u64).into())),
         };
 
         Some(locktype.into())
@@ -374,6 +393,8 @@ pub struct GlobalOpts {
     output_path: String,
     #[arg(global = true, long, short, default_value = "all")]
     waiter: WaiterType,
+    #[arg(global = true, long, short, default_value = "5")]
+    duration: u64,
 }
 
 fn main() {
@@ -424,6 +445,7 @@ fn main() {
             &mut writer,
             app.lock_target,
             app.global_opts.waiter,
+            app.global_opts.duration,
         )
     }
 }

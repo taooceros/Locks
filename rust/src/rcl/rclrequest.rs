@@ -54,8 +54,8 @@ impl<T, P: Parker> RequestCallable for RclRequest<T, P> {
             panic!("lock is null");
         }
 
-        let guard = DLockGuard::new(&(*self.lock).data);
         unsafe {
+            let guard = DLockGuard::new(&(*self.lock).data);
             (*f).apply(guard);
         }
     }
