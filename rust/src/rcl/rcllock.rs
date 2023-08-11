@@ -3,26 +3,29 @@ use std::{
     mem::transmute,
     ops::Deref,
     sync::atomic::{AtomicUsize, Ordering::*},
-    thread::yield_now,
 };
 
 pub mod rcllockptr;
 use crate::{
     dlock::{DLock, DLockDelegate},
-    syncptr::SyncMutPtr,
+    parker::Parker,
 };
 
 use super::{rclrequest::*, rclserver::*};
 pub(crate) use rcllockptr::*;
 
 #[derive(Debug)]
-pub struct RclLock<T: Sized> {
-    server: SyncMutPtr<RclServer>,
+pub struct RclLock<T, P>
+where
+    T: Sized,
+    P: Parker + 'static,
+{
+    server: &'static SyncUnsafeCell<RclServer<P>>,
     pub(super) holder: AtomicUsize,
     pub(super) data: SyncUnsafeCell<T>,
 }
 
-impl<T> DLock<T> for RclLock<T> {
+impl<T, P: Parker> DLock<T> for RclLock<T, P> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a) {
         self.lock(f);
     }
@@ -33,17 +36,19 @@ impl<T> DLock<T> for RclLock<T> {
     }
 }
 
-impl<T> RclLock<T> {
-    pub fn new<'a>(server: *mut RclServer, t: T) -> RclLock<T> {
+impl<T, P: Parker> RclLock<T, P> {
+    pub fn new<'a>(server: &mut RclServer<P>, t: T) -> RclLock<T, P> {
         RclLock {
-            server: server.into(),
+            server: unsafe {
+                &*(server as *mut RclServer<P> as *const SyncUnsafeCell<RclServer<P>>)
+            },
             holder: AtomicUsize::new(!0),
             data: SyncUnsafeCell::new(t),
         }
     }
 
     pub fn lock<'a>(&self, mut f: impl DLockDelegate<T> + 'a) {
-        let serverptr: *mut RclServer = self.server.into();
+        let serverptr: *mut RclServer<P> = self.server.get();
 
         let server = unsafe { &mut *serverptr };
 
@@ -52,7 +57,8 @@ impl<T> RclLock<T> {
             id
         });
 
-        let request: &mut RclRequest<T> = unsafe { transmute(&mut (server.requests[*client_id])) };
+        let request: &mut RclRequest<T, P> =
+            unsafe { transmute(&mut (server.requests[*client_id])) };
 
         request.lock = self.into();
         let real_me = client_id;
@@ -63,9 +69,8 @@ impl<T> RclLock<T> {
 
             *f_request = Some(transmute(&mut f as &mut dyn DLockDelegate<T>));
 
-            while f_request.is_some() {
-                yield_now();
-            }
+            request.parker.reset();
+            request.parker.wait();
         }
     }
 }

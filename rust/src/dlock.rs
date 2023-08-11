@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Debug, Display},
-    sync::Mutex,
+    sync::Mutex, mem::MaybeUninit,
 };
 
 use enum_dispatch::enum_dispatch;
@@ -13,9 +13,9 @@ use crate::{
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_fair_skiplist::FcSL,
     guard::DLockGuard,
-    parker::Parker,
+    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock},
+    spin_lock::{RawSpinLock, SpinLock}, u_scl::USCL,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -44,27 +44,48 @@ pub trait DLock<T> {
 pub enum ThirdPartyLock<T: 'static> {
     Mutex(Mutex<T>),
     SpinLock(SpinLock<T>),
+    USCL(USCL<T>),
 }
 
 #[enum_dispatch(DLock<T>)]
 #[derive(Debug)]
-pub enum BenchmarkType<T, P>
+pub enum BenchmarkType<T>
 where
     T: 'static,
-    P: Parker + 'static,
 {
-    DLock(DLockType<T, P>),
+    SpinDLock(DLockType<T, SpinParker>),
+    BlockDLock(DLockType<T, BlockParker>),
     OtherLocks(ThirdPartyLock<T>),
 }
 
-impl<T, P> Display for BenchmarkType<T, P>
-where
-    P: Parker,
-{
+impl<T> BenchmarkType<T> {
+    pub fn parker_name(&self) -> &str {
+        match self {
+            BenchmarkType::SpinDLock(_) => SpinParker::name(),
+            BenchmarkType::BlockDLock(_) => BlockParker::name(),
+            BenchmarkType::OtherLocks(_) => "",
+        }
+    }
+
+    pub fn lock_name(&self) -> String {
+        match self {
+            BenchmarkType::SpinDLock(lock) => format!("{}", lock),
+            BenchmarkType::BlockDLock(lock) => format!("{}", lock),
+            BenchmarkType::OtherLocks(lock) => format!("{}", lock),
+        }
+    }
+}
+
+impl<T> Display for BenchmarkType<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BenchmarkType::DLock(dlock) => Display::fmt(&dlock, f),
             BenchmarkType::OtherLocks(other_lock) => Display::fmt(other_lock, f),
+            BenchmarkType::SpinDLock(spin_dlock) => {
+                write!(f, "{}|{}", spin_dlock, SpinParker::name())
+            }
+            BenchmarkType::BlockDLock(block_dlock) => {
+                write!(f, "{}|{}", block_dlock, BlockParker::name())
+            }
         }
     }
 }
@@ -82,7 +103,7 @@ where
     FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
     CCSynch(CCSynch<T, P>),
     CCBan(CCBan<T, P>),
-    RCL(RclLock<T>),
+    RCL(RclLock<T, P>),
 }
 
 impl<T, P: Parker> fmt::Display for DLockType<T, P> {
@@ -104,6 +125,7 @@ impl<T> fmt::Display for ThirdPartyLock<T> {
         match self {
             ThirdPartyLock::Mutex(_) => write!(f, "Mutex"),
             ThirdPartyLock::SpinLock(_) => write!(f, "SpinLock"),
+            ThirdPartyLock::USCL(_) => write!(f, "U-SCL")
         }
     }
 }

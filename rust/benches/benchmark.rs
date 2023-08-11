@@ -4,6 +4,7 @@ use criterion::BenchmarkGroup;
 use criterion::BenchmarkId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dlock::guard::DLockGuard;
+use dlock::parker::block_parker::BlockParker;
 use dlock::parker::spin_parker::SpinParker;
 use dlock::parker::Parker;
 use quanta::Clock;
@@ -27,24 +28,33 @@ pub fn lock_bench(bencher: &mut Criterion) {
 
     for i in [2, 4, 8].iter() {
         let thread = i * THREAD_CPU_RATIO;
-        ccbench(&mut group, cpu_count, thread);
-        fcbench(&mut group, cpu_count, thread);
-        rclbench(&mut group, cpu_count, thread);
+        ccbench::<SpinParker>(&mut group, cpu_count, thread);
+        fcbench::<SpinParker>(&mut group, cpu_count, thread);
+        rclbench::<SpinParker>(&mut group, cpu_count, thread);
+        ccbench::<BlockParker>(&mut group, cpu_count, thread);
+        fcbench::<BlockParker>(&mut group, cpu_count, thread);
+        rclbench::<BlockParker>(&mut group, cpu_count, thread);
     }
 
     group.finish();
 }
 
-pub fn ccbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
-    let lock = Arc::new(DLockType::<u64, SpinParker>::CCSynch(CCSynch::new(0u64)));
+pub fn ccbench<P: Parker + 'static>(
+    bencher: &mut BenchmarkGroup<WallTime>,
+    cpu_count: usize,
+    thread_count: usize,
+) {
+    let lock = Arc::new(DLockType::<u64, P>::CCSynch(CCSynch::new(0u64)));
 
     bench_inner(lock.clone(), "ccsynch", bencher, cpu_count, thread_count)
 }
 
-pub fn fcbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
-    let lock = Arc::new(DLockType::<u64, SpinParker>::FlatCombining(FcLock::new(
-        0u64,
-    )));
+pub fn fcbench<P: Parker + 'static>(
+    bencher: &mut BenchmarkGroup<WallTime>,
+    cpu_count: usize,
+    thread_count: usize,
+) {
+    let lock = Arc::new(DLockType::<u64, P>::FlatCombining(FcLock::new(0u64)));
 
     bench_inner(
         lock.clone(),
@@ -55,15 +65,16 @@ pub fn fcbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_
     )
 }
 
-pub fn rclbench(bencher: &mut BenchmarkGroup<WallTime>, cpu_count: usize, thread_count: usize) {
+pub fn rclbench<P: Parker + 'static>(
+    bencher: &mut BenchmarkGroup<WallTime>,
+    cpu_count: usize,
+    thread_count: usize,
+) {
     let mut server = RclServer::new();
 
     server.start(cpu_count - 1);
 
-    let server_ptr = &mut server as *mut RclServer;
-    let cc = Arc::new(DLockType::<u64, SpinParker>::RCL(RclLock::new(
-        server_ptr, 0u64,
-    )));
+    let cc = Arc::new(DLockType::<u64, P>::RCL(RclLock::new(&mut server, 0u64)));
 
     bench_inner(
         cc.clone(),

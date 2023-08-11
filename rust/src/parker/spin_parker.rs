@@ -1,7 +1,6 @@
 use crate::parker::Parker;
 use crossbeam::utils::Backoff;
 use quanta::Clock;
-use serde::Serialize;
 use std::cell::SyncUnsafeCell;
 use std::hint::spin_loop;
 
@@ -16,12 +15,6 @@ use super::State;
 pub struct SpinParker {
     state: AtomicU32,
     last_wake: SyncUnsafeCell<Option<Thread>>,
-}
-
-impl Serialize for SpinParker {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("SpinParker")
-    }
 }
 
 const PARKED: u32 = u32::MAX;

@@ -1,6 +1,5 @@
 use std::time::Duration;
 use std::fmt::Debug;
-use serde::Serialize;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum State {
@@ -10,7 +9,7 @@ pub enum State {
     Notified,
 }
 
-pub trait Parker: Debug + Default + Serialize {
+pub trait Parker: Debug + Default {
     fn wait(&self);
     fn wait_timeout(&self, timeout: Duration) -> Result<(), ()>;
     fn wake(&self);

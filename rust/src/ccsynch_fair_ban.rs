@@ -86,7 +86,7 @@ impl<T, P: Parker> CCBan<T, P> {
         let mut aux = 0;
         let cs_begin = unsafe { __rdtscp(&mut aux) };
 
-        let guard = DLockGuard::new(&self.data);
+        let guard = unsafe { DLockGuard::new(&self.data) };
         f.apply(guard);
 
         let cs_end = unsafe { __rdtscp(&mut aux) };

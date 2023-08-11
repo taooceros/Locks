@@ -1,30 +1,34 @@
 use std::{
+    cell::{SyncUnsafeCell},
     cmp::min,
-    sync::atomic::Ordering::*,
+    sync::atomic::{AtomicPtr, Ordering::*},
     thread::{self, yield_now, JoinHandle},
 };
 
 use linux_futex::{Futex, Private};
 
-use super::{
-    rclrequest::{RequestCallable},
-    rclserver::*,
+use super::{rclrequest::RequestCallable, rclserver::*};
+
+use crate::{
+    parker::{Parker, State},
+    syncptr::*,
 };
 
-use crate::syncptr::*;
-
 #[derive(Debug)]
-pub struct RclThread {
-    server: SyncMutPtr<RclServer>,
+pub struct RclThread<P: Parker + 'static> {
+    server: AtomicPtr<RclServer<P>>,
     timestamp: i32,
     pub(super) waiting_to_serve: Futex<Private>,
     pub thread_handle: Option<JoinHandle<()>>,
 }
 
-impl RclThread {
-    pub fn new(server: SyncMutPtr<RclServer>, _cpuid: usize) -> RclThread {
+unsafe impl<P: Parker> Send for RclThread<P> {}
+unsafe impl<P: Parker> Sync for RclThread<P> {}
+
+impl<P: Parker> RclThread<P> {
+    pub fn new(server: *mut RclServer<P>, _cpuid: usize) -> RclThread<P> {
         let mut thread = RclThread {
-            server,
+            server: AtomicPtr::new(server),
             timestamp: 0,
             waiting_to_serve: Futex::new(0),
             thread_handle: None,
@@ -35,30 +39,25 @@ impl RclThread {
         return thread;
     }
 
-    pub fn run(&mut self, cpuid: usize) {
-        let server = self.server;
-        let threadptr = {
-            let ptr: *mut RclThread = self;
-            SyncMutPtr::from(ptr)
-        };
+    pub fn run(thread_cell: &SyncUnsafeCell<RclThread<P>>, cpuid: usize) {
+        let thread = unsafe { &mut *(thread_cell).get() };
+        let server = unsafe { &mut *thread.server.load(Relaxed) };
 
-        self.thread_handle = Some(
+        let thread2 = unsafe { &mut *thread_cell.get() };
+
+        thread.thread_handle = Some(
             thread::Builder::new()
                 .name("server".to_string())
                 .spawn(move || {
                     core_affinity::set_for_current(core_affinity::CoreId { id: cpuid });
 
-                    let server = server;
-                    let threadptr = threadptr;
-
-                    let server = unsafe { &mut *server.ptr };
+                    let thread = thread2;
 
                     loop {
                         // Should change in the future
                         if server.is_alive == false {
                             break;
                         }
-                        let thread = unsafe { &mut *threadptr.ptr };
 
                         thread.timestamp = server.timestmap;
                         server.num_free_threads.fetch_add(-1, SeqCst);
@@ -74,29 +73,27 @@ impl RclThread {
 
                             // assert!((req.f.get()).is_aligned());
 
-                            let f_request = unsafe { &mut *(req.f.get()) };
+                            let state = req.parker.state();
 
-                            if f_request.is_none() {
+                            if state != State::Parked {
                                 continue;
                             }
 
                             if req.lock.lock.is_null() {
-                                continue;
+                                panic!("lock is null");
                             }
-                            match (*req.lock).holder.compare_exchange(
-                                !0,
-                                req.real_me,
-                                Relaxed,
-                                Relaxed,
-                            ) {
-                                Ok(_) => {
-                                    req.call();
-                                    (*req.lock).holder.store(!0, Relaxed);
-                                }
-                                Err(_) => {
-                                    eprintln!("should not happen");
-                                }
-                            }
+
+                            req.parker.prewake();
+
+                            _ = (*req.lock)
+                                .holder
+                                .compare_exchange(!0, req.real_me, Relaxed, Relaxed)
+                                .expect("should not happen as we only have one thread");
+
+                            req.call();
+                            (*req.lock).holder.store(!0, Relaxed);
+
+                            req.parker.wake();
                         }
                         let free_thread = server.num_free_threads.fetch_add(1, SeqCst);
 

@@ -4,6 +4,10 @@
 #![feature(atomic_from_ptr)]
 #![feature(thread_id_value)]
 
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+
 pub mod ccsynch;
 pub mod ccsynch_fair_ban;
 pub mod dlock;
@@ -20,6 +24,11 @@ mod syncptr;
 #[cfg(test)]
 mod unit_test;
 pub mod spin_lock;
+pub mod u_scl;
+
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+
 
 pub unsafe trait RawSimpleLock {
     fn new() -> Self;
