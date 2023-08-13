@@ -333,7 +333,7 @@ impl Iterator for LockTargetIter {
             }
             LockTargetIterState::USCL => {
                 self.state = LockTargetIterState::Stop;
-                return Some(LockTarget::SpinLock);
+                return Some(LockTarget::USCL);
             }
             LockTargetIterState::Stop => {
                 self.state = LockTargetIterState::DLock(DLockTarget::iter());
