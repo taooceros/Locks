@@ -243,7 +243,7 @@ fn benchmark_num_threads(
                 num_acquire,
                 hold_time,
                 combine_time: lock_type.get_current_thread_combining_time(),
-                locktype: format!("{}", lock_type),
+                locktype: lock_type.lock_name(),
                 waiter_type: lock_type.parker_name().to_string(),
             };
         })
