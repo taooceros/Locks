@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread::{self, available_parallelism, JoinHandle},
+    thread::{self, available_parallelism, JoinHandle, Thread},
     time::Duration,
 };
 
@@ -118,18 +118,17 @@ fn extract_targets(
     targets
 }
 
-fn bench_rcl<P: Parker>(
-    num_cpu: usize,
-    num_thread: usize,
-    writer: &mut Writer<File>,
-    duration: u64,
-) {
+fn bench_rcl<P>(num_cpu: usize, num_thread: usize, writer: &mut Writer<File>, duration: u64)
+where
+    BenchmarkType<u64>: From<DLockType<u64, P>>,
+    P: Parker + 'static,
+{
     let mut server = RclServer::new();
     server.start(num_cpu - 1);
     let lock = RclLock::new(&mut server, 0u64);
 
     inner_benchmark(
-        Arc::new(DLockType::<u64, SpinParker>::RCL(lock).into()),
+        Arc::new(DLockType::<u64, P>::RCL(lock).into()),
         num_cpu - 1,
         num_thread,
         writer,
@@ -221,6 +220,8 @@ fn benchmark_num_threads(
             let mut hold_time = Duration::ZERO;
 
             while !stop.load(Ordering::Acquire) {
+                // critical section
+
                 lock_type.lock(|mut guard: DLockGuard<u64>| {
                     num_acquire += 1;
                     let begin = timer.now();
@@ -231,6 +232,9 @@ fn benchmark_num_threads(
                     }
                     hold_time += timer.now().duration_since(begin);
                 });
+                
+                // non-critical section
+                thread::sleep(Duration::from_micros(10));
             }
             println!("Thread {} finished with result {}", id, loop_result);
 
@@ -373,9 +377,7 @@ impl LockTarget {
             LockTarget::SpinLock => {
                 return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
             }
-            LockTarget::Mutex => {
-                return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into()))
-            }
+            LockTarget::Mutex => return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into())),
             LockTarget::USCL => return Some(BenchmarkType::OtherLocks(USCL::new(0u64).into())),
         };
 
