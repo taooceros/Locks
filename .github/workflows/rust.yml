@@ -11,12 +11,12 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./rust
     steps:
+    - uses: rui314/setup-mold@v1
     - uses: actions/checkout@v3
     - name: Install latest nightly
       uses: actions-rs/toolchain@v1

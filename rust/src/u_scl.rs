@@ -1,7 +1,6 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::{SyncUnsafeCell},
     mem::MaybeUninit,
-    sync::MutexGuard,
 };
 
 use crate::{

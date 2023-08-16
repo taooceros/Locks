@@ -1,7 +1,4 @@
-
-use crossbeam::{
-    atomic::AtomicConsume,
-};
+use crossbeam::atomic::AtomicConsume;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -11,8 +8,6 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 use thread_local::ThreadLocal;
-
-
 
 use crate::{dlock::DLock, guard::DLockGuard};
 use crate::{dlock::DLockDelegate, parker::Parker};
