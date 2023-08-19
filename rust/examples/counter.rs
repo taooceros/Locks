@@ -232,8 +232,6 @@ fn benchmark_num_threads(
                     hold_time += timer.now().duration_since(begin);
                 });
                 
-                // non-critical section
-                thread::sleep(Duration::from_micros(10));
             }
             println!("Thread {} finished with result {}", id, loop_result);
 
