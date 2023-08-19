@@ -1,5 +1,6 @@
 use super::*;
 
+#[repr(C)]
 pub struct RclLockPtr<T, P>
 where
     T: Sized,

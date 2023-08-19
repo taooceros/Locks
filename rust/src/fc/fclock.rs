@@ -34,7 +34,6 @@ where
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<T, P>>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
-    num_waiting_threads: SyncUnsafeCell<i32>,
 }
 
 impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
@@ -45,7 +44,6 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
-            num_waiting_threads: SyncUnsafeCell::new(0),
         }
     }
 
@@ -141,10 +139,6 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
 impl<T, P: Parker> DLock<T> for FcLock<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node = self.local_node.get_or(|| {
-            unsafe {
-                (AtomicI32::from_ptr(self.num_waiting_threads.get()))
-                    .fetch_add(1, Ordering::Release);
-            }
             SyncUnsafeCell::new(Node::new())
         });
 

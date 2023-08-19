@@ -1,7 +1,4 @@
-
-use crossbeam::{
-    atomic::AtomicConsume,
-};
+use crossbeam::atomic::AtomicConsume;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -12,8 +9,6 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-
-
 use crate::{dlock::DLock, guard::DLockGuard};
 use crate::{dlock::DLockDelegate, parker::Parker};
 
@@ -22,7 +17,6 @@ use self::node::Node;
 mod node;
 
 struct ThreadData<T, P: Parker> {
-    banned_until: i64,
     node: AtomicPtr<Node<T, P>>,
 }
 
@@ -69,7 +63,6 @@ impl<T, W: Parker> CCSynch<T, W> {
     pub fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let thread_data = self.local_node.get_or(|| {
             SyncUnsafeCell::new(ThreadData {
-                banned_until: 0,
                 node: AtomicPtr::new(Box::leak(Box::new(Node::new()))),
             })
         });

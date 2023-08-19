@@ -2,14 +2,13 @@ use std::{
     fmt::Debug,
     fs::{create_dir, remove_dir_all, File},
     iter::repeat,
-    mem::MaybeUninit,
     num::NonZeroI64,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread::{self, available_parallelism, JoinHandle, Thread},
+    thread::{self, available_parallelism, JoinHandle},
     time::Duration,
 };
 
@@ -233,8 +232,6 @@ fn benchmark_num_threads(
                     hold_time += timer.now().duration_since(begin);
                 });
                 
-                // non-critical section
-                thread::sleep(Duration::from_micros(10));
             }
             println!("Thread {} finished with result {}", id, loop_result);
 
