@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Debug, Display},
-    sync::Mutex, mem::MaybeUninit,
+    sync::Mutex,
 };
 
 use enum_dispatch::enum_dispatch;

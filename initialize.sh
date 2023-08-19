@@ -1,3 +1,6 @@
+sudo apt update
+sudo apt install clang mold
+
 git clone https://github.com/taooceros/Locks.git
 cd Locks
 git submodule init
