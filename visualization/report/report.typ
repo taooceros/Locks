@@ -255,15 +255,28 @@ The following locks are benchmarked in our example:
 + Spinlock (@rawspinlock)
 + U-SCL (@scl_ref)
 
-The workers will be split into two groups. The first group will run for 10ns, and the second group will run for 30ns.
+The experiment is run in an AMD EPYC 7302P machine, with 16 cores and 32 threads (hyperthread enabled).
+
+The workers will be split into two groups. The first group will run for 10ns, and the second group will run for 30ns. There will be two sets of experiment. One with a long non-critical sections (thread will sleep for 10ns), and one with an empty non-critical sections.
 
 Since all delegation-style is implemented with a generic parker. We will split the result based on the two parker.
 
+
 == General Performance Comparison
 
-#figure(caption: "Performance Comparison")[
+
+@loop_comparison_nc_10ns is an illustration of the lock performance when the non-critical section is 10ns. The graph is split based on the parker type (whether waiter shall block or actively spinning). As we can see at the bottom graph, the U-SCL is performing really worse when the length of non-critical section is long (not sure why the performance is not half but way worse).
+
+#figure(caption: "Performance Comparison (non-critical section 10ns)")[
     #image("../graphs/loop_comparison_together.svg")
-]<loop_comparison>
+]<loop_comparison_nc_10ns>
+
+
+== Fairness Comparison
+
+#figure(caption: "Fairness Comparison (non-critical section 10ns)")[
+    #image("../graphs/loop_comparison_per_thread.svg")
+]<loop_comparison_fairness>
 
 
 
