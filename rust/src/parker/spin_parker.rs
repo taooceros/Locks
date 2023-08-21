@@ -13,8 +13,7 @@ use super::State;
 
 #[derive(Default, Debug)]
 pub struct SpinParker {
-    state: AtomicU32,
-    last_wake: SyncUnsafeCell<Option<Thread>>,
+    state: AtomicU32
 }
 
 const PARKED: u32 = u32::MAX;
@@ -48,9 +47,6 @@ impl Parker for SpinParker {
     }
 
     fn wake(&self) {
-        unsafe {
-            *self.last_wake.get() = Some(current());
-        }
         self.state.store(NOTIFIED, Release);
     }
 
