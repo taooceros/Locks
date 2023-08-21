@@ -86,8 +86,10 @@
   line("combine.right", "wait.top", mark: (end: ">"))
 });
 
+#let fc = smallcaps[Flat-Combining]
+
 #let flatcombining = [
-  Flat Combining maintains a list of node that is owned by each thread. Each node contains the context of the thread and the job that the thread is trying to execute. The combiner will enumerate the list of nodes to check whether the node is ready. If the node is ready, the combiner will execute the job and update the node to indicate that the job is finished.
+  #fc upholds a list of nodes owned by each thread. Each node incorporates the thread's context and the job it intends to execute. The combiner iterates through this list of nodes, evaluating their readiness. If a node is deemed ready, the combiner proceeds to execute the job and subsequently updates the node to signal the job's completion.
 
   The struct is defined as follows:
 
@@ -106,10 +108,10 @@
   }
   ```
 
-  The `pass` field is used to indicate the age of the lock, thus able to removing threads that hasn't executed job for too long.
-  The `head` field is the head of the list of thread nodes.
-  The `local_node` field is used to store the thread local node of the current thread, similar to `pthread_getspecific`.
-  The `combiner_lock` is used for threads to elect the combiner. The implementation idea is retrieved from @rs_concurrent_ref (code are avaliable in @rawspinlock).
+  - The `pass` field serves to indicate the age of the lock, making it possible to remove threads that have not executed a job for an extended period.
+  - The `head` field is the head of the list of thread nodes.
+  - The `local_node` field is designed to store the current thread's local node, akin to `pthread_getspecific`.
+  - The `combiner_lock` is utilized for thread-based combiner election. The implementation idea is retrieved from @rs_concurrent_ref (code are avaliable in @rawspinlock).
 
 
   The node struct is defined as follows:
@@ -129,17 +131,16 @@
   }
   ```
 
-  The `age` field synchrnizes with the `pass` field of the lock to indicate the age of the node. If `age` is too far from `pass`, the node will be removed from the linkedlist and marked as false at `active`.
-  The `f` field is the function pointer to the job that the thread is trying to execute. The `next` field is the pointer to the next node in the linkedlist. 
-  The `parker` field is the parker that is used to block the thread when job is published but not yet executed (refer to @parker_impl).
+  -The `age` field synchronizes with the `pass` field of the lock, indicating the age of the node. If the `age` is significantly different from `pass`, the node will be removed from the linked list and marked as inactive (false in the `active` field).
+  -The `f` field is the function pointer to the job that the thread is trying to execute. 
+  - The `next` field is the pointer to the next node in the linkedlist. 
+  - The `parker` field is the parker that is used to block the thread when job is published but not yet executed (refer to @parker_impl).
+  - The `combiner_time_stat` field is used to record the time that each thread becomes the combiner. It is not marked with `Atomic` because only the combiner (which is guarded by the `combiner_lock`) will overwrite this field (maybe volatile is needed?). 
 
   The original paper proposed that the ready state can be embedded into `f` field, thus saving a bool field @flatcombining_ref. However, we choose not to do this in our implementation for tow reason.
 
-  The `combiner_time_stat` field is used to record the time that each thread becomes the combiner. It is not marked with `Atomic` because only the combiner (which is guarded by the `combiner_lock`) will overwrite this field (maybe volatile is needed?). 
-
-
-  1. In rust, as we encapsulate the job into a trait object, whose pointer is a fat pointer (which contains two pointer). We don't want to have another layer of indirection that points to the fat pointer, which cannot be accessed atomically (with rust std). With an additional bool field as a write fence (`Release` Ordering), we make sure that the combiner will see the whole job before the node appears to be ready.
-  2. We want to extract the waiting as a `parker` field, so that we can share blocking code among different locks. This is not so possible if we embed the ready state into `f` field.
+  + In rust, as we encapsulate the job into a trait object, whose pointer is a fat pointer (which contains two pointer). Introducing another layer of indirection that points to the fat pointer to make it accessible atomically will involve additional cost. With an additional bool field as a write fence (`Release` Ordering), we ensure that the combiner views the entire job before the node is perceived as ready.
+  + We aim to extract the waiting process into a `parker` field, enabling the sharing of blocking code across different locks. However, embedding the ready state into the `f` field would hinder this capability.
 
   The overall algorithm can be roughly represented by the following graph:
 
@@ -166,5 +167,5 @@
   }
   ```
 
-  The combiner will periodically remove the unactive nodes. The head of the list will not be removed to make sure the removal can be done when new node is added.
+  The combiner will regularly remove inactive nodes. The head of the list won't be removed to ensure that removal can be safely performed even when new nodes are being added.
 ]
