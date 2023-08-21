@@ -18,6 +18,7 @@
 
 #let ccsynch = smallcaps([CC-Synch])
 #let fc = smallcaps[Flat-Combining]
+#let ffwd = smallcaps[ffwd]
 
 #let fc-ban = [#fc (Banning)]
 #let ccsynch-ban = [#ccsynch (Banning)]
@@ -25,7 +26,7 @@
 
 = Introduction
 
-Delegation locking adapts the request-response style of communication to minimize shared data movement. Specifically, the waiter delegates their critical section to a combiner (#fc/#ccsynch) #cite("flatcombining_ref", "ccsynch_ref"), or a dedicated thread (RCL/ffwd) #cite("rcl_ref", "ffwd_ref"). We will describe the implementation details of these locks in @impl. Further, the idea of combining allows us to batch-process operations for special data structures. For example, multiple insertion and deletion operations can be batched into a single operation for a linked list.
+Delegation locking adapts the request-response style of communication to minimize shared data movement. Specifically, the waiter delegates their critical section to a combiner (#fc/#ccsynch) #cite("flatcombining_ref", "ccsynch_ref"), or a dedicated #ffwd #cite("rcl_ref", "ffwd_ref"). We will describe the implementation details of these locks in @impl. Further, the idea of combining allows us to batch-process operations for special data structures. For example, multiple insertion and deletion operations can be batched into a single operation for a linked list.
 
 
 It's important to highlight that the concept of the _lock slice_, as introduced in U-SCL, also intersects with the idea of delegation-style locks. _Lock slice_ ensures that only a single thread executes the critical section within a given time slice. This design reduces the necessity for transferring shared data across cores, leading to enhanced performance @scl_ref. Notably, this approach aligns closely with the objectives of delegation-style locks, resulting in comparable performance improvements.
@@ -117,7 +118,7 @@ To implement a delegation-style lock, two aspects need consideration:
 
 There are two natural ways to publish jobs: per thread or per job. 
 
-For "per thread", each thread owns a dedicated memory location (node) that enables it to publish a job with its context. Then the combiner enumerate the threads' nodes, check whether the node is ready, and, if ready, execute the job. This method is adopted by #fc (@flatcombining), RCL (@rcl), and #smallcaps[ffwd] @ffwd_ref.
+For "per thread", each thread owns a dedicated memory location (node) that enables it to publish a job with its context. Then the combiner enumerate the threads' nodes, check whether the node is ready, and, if ready, execute the job. This method is adopted by #fc (@flatcombining), RCL (@rcl), and #ffwd @ffwd_ref.
 
 On the other hand, in the "per job" approach, each thread publishes the job for execution to a dedicated job queue. The combiner then traverses the job queues to execute the jobs. This approach is embraced by #smallcaps[CC-Synch] and its variants (@ccsynch).
 
