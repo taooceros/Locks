@@ -131,22 +131,22 @@
   }
   ```
 
-  -The `age` field synchronizes with the `pass` field of the lock, indicating the age of the node. If the `age` is significantly different from `pass`, the node will be removed from the linked list and marked as inactive (false in the `active` field).
-  -The `f` field is the function pointer to the job that the thread is trying to execute. 
+  - The `age` field synchronizes with the `pass` field of the lock, indicating the age of the node. If the `age` is significantly different from `pass`, the node will be removed from the linked list and marked as inactive (false in the `active` field).
+  - The `f` field represents the critical section.
   - The `next` field is the pointer to the next node in the linkedlist. 
   - The `parker` field is the parker that is used to block the thread when job is published but not yet executed (refer to @parker_impl).
   - The `combiner_time_stat` field is used to record the time that each thread becomes the combiner. It is not marked with `Atomic` because only the combiner (which is guarded by the `combiner_lock`) will overwrite this field (maybe volatile is needed?). 
 
-  The original paper proposed that the ready state can be embedded into `f` field, thus saving a bool field @flatcombining_ref. However, we choose not to do this in our implementation for tow reason.
+  The original paper proposed that the ready state can be embedded into `f` field, thus saving a boolean field @flatcombining_ref. However, we choose not to do this in our implementation for two reason.
 
-  + In rust, as we encapsulate the job into a trait object, whose pointer is a fat pointer (which contains two pointer). Introducing another layer of indirection that points to the fat pointer to make it accessible atomically will involve additional cost. With an additional bool field as a write fence (`Release` Ordering), we ensure that the combiner views the entire job before the node is perceived as ready.
+  + In _rust_, we encapsulate the job into a trait object. A pointer pointing to a trait object is a fat pointer (which contains two pointer). Atomic operation toward such double-sized field are not available universally. Introducing another layer of indirection that points to the fat pointer to make it accessible atomically will involve additional cost. With an additional bool field used as a write-fence (`Release` Ordering), we ensure that the combiner views the entire job before the node is perceived as ready.
   + We aim to extract the waiting process into a `parker` field, enabling the sharing of blocking code across different locks. However, embedding the ready state into the `f` field would hinder this capability.
 
   The overall algorithm can be roughly represented by the following graph:
 
   #illustration
 
-  The insertion is done via a simple CAS loop similar to a singly linked list:
+  The insertion is done via a simple CAS loop as a singly linked list:
 
   ```rs
   fn push_node(&self, node: &mut Node<T, P>) {
@@ -167,5 +167,5 @@
   }
   ```
 
-  The combiner will regularly remove inactive nodes. The head of the list won't be removed to ensure that removal can be safely performed even when new nodes are being added.
+  The combiner will regularly remove inactive nodes. Subtly, the head of the list won't be removed to ensure that removal can be safely performed even when new nodes are being added.
 ]

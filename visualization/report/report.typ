@@ -26,14 +26,13 @@
 
 = Introduction
 
-Delegation locking adapts the request-response style of communication to minimize shared data movement. Specifically, the waiter delegates their critical section to a combiner (#fc/#ccsynch) #cite("flatcombining_ref", "ccsynch_ref"), or a dedicated #ffwd #cite("rcl_ref", "ffwd_ref"). We will describe the implementation details of these locks in @impl. Further, the idea of combining allows us to batch-process operations for special data structures. For example, multiple insertion and deletion operations can be batched into a single operation for a linked list.
+Delegation locking adapts the request-response style of communication to minimize shared data movement. Specifically, the waiter delegates their critical section to a combiner (#fc/#ccsynch) #cite("flatcombining_ref", "ccsynch_ref"), or a dedicated server thread #cite("rcl_ref", "ffwd_ref"). We will describe some implementation details of #fc, #ccsynch, and RCL in @impl.
 
-
-It's important to highlight that the concept of the _lock slice_, as introduced in U-SCL, also intersects with the idea of delegation-style locks. _Lock slice_ ensures that only a single thread executes the critical section within a given time slice. This design reduces the necessity for transferring shared data across cores, leading to enhanced performance @scl_ref. Notably, this approach aligns closely with the objectives of delegation-style locks, resulting in comparable performance improvements.
+It's important to highlight that the concept of the _lock slice_, as introduced in U-SCL, also intersects with the idea behinds delegation-style locks. _Lock slice_ ensures that only a single thread executes the critical section within a given time slice. This design reduces the necessity for transferring shared data across threads/cores, leading to enhanced performance @scl_ref. Notably, this approach aligns closely with the objectives of delegation-style locks, resulting in comparable performance improvements.
 
 However, the _lock slice_ strategy presents a significant limitation: during a valid _lock slice_, no other thread can hold the lock, even if the preceding thread has released it. Consequently, the non-critical section must be concise to prevent a substantial impact on throughput. In contrast, delegation-style locks offer similar performance benefits without the associated drawback of the _lock slice_ strategy. This distinction underscores the trade-offs involved in different locking mechanisms and their impact on performance and concurrency.
 
-The primary challenge of delegation-style locks lies in refactoring existing code, as they do not offer a comparable API to regular locks. Nevertheless, recent research has showcased the potential of transparent delegation in resolving this challenge @transparent_dlock_ref.
+The central obstacle associated with delegation-style locks revolves around the need to refactor pre-existing code. This arises from the fact that delegation-style locks do not provide a standard locking API. In response to this concern, RCL has been developed as a solution. RCL offers a code migration aid, facilitating the seamless transition of legacy code to one that employs RCL's locking mechanism @rcl_ref. Moreover, recent research efforts have demonstrated the viability of transparent delegation to provide delegation-style lock in standard locking API @transparent_dlock_ref.
 
 The majority of delegation-style locks inherently offer a degree of fairness guarantee. The rationale behind this lies in the notion that the combiner generally treat its critical sections similarly to those of other threads. As a result, the prevailing approach is to enumerate all ready jobs. For instance, in the case of #fc, the combiner (or the server of RCL) scans through all the thread lists to determine if a thread is attempting to execute a critical section. This equitable treatment is not mirrored in spin-locks, where certain threads might dominate lock usage, causing others to be starved. Moreover, when threads repetitively acquire the lock, the thread releasing the lock gains an advantage in reacquiring it.
 
@@ -107,7 +106,7 @@ lock_type.lock(|mut guard: DLockGuard<u64>| {
 });
 ```)
 
-@rust_impl_difficulty describes some additional difficulty in implementing these locks in _rust_.
+// @rust_impl_difficulty describes some additional difficulty in implementing these locks in _rust_.
 
 == Delegation-style Locks
 
@@ -123,7 +122,7 @@ For "per thread", each thread owns a dedicated memory location (node) that enabl
 On the other hand, in the "per job" approach, each thread publishes the job for execution to a dedicated job queue. The combiner then traverses the job queues to execute the jobs. This approach is embraced by #smallcaps[CC-Synch] and its variants (@ccsynch).
 
 
-=== Flat Combining <flatcombining>
+=== #fc <flatcombining>
 
 #import "flatcombining.typ": flatcombining
 
@@ -131,7 +130,7 @@ On the other hand, in the "per job" approach, each thread publishes the job for 
 
 === Remote Core Locking <rcl>
 
-Similar to FlatCombining, RCL also maintains a list of nodes owned by each thread. The primary distinction is that RCL designates a specific thread to act as the server (combiner). Consequently, it's akin to a remote procedure call, as proposed in the original paper. Notably, RCL utilizes an array of nodes, whereas FlatCombining uses a linked list of nodes. This design difference in RCL should yield improved performance when the number of inactive threads is relatively small.
+Similar to #fc, RCL also maintains a list of nodes owned by each thread. The primary distinction is that RCL designates a specific thread to act as the server (combiner). Consequently, it's akin to a remote procedure call, as proposed in the original paper. Notably, RCL utilizes an array of nodes, whereas #fc uses a linked list of nodes. This design difference in RCL should yield improved performance when the number of inactive threads is relatively small.
 
 One of the primary goals of RCL is to facilitate easy migration of legacy code. To achieve this, RCL employs a complex algorithm to ensure that the server thread won't be blocked or engaged in active spinning, which could negatively impact performance. Additionally, RCL's design enables the server to handle multiple locks, allowing for straightforward porting of legacy code. While our implementation doesn't cover the complete version of RCL and thus won't delve into these aspects, one core goal of enabling one server to manage various types of locks is retained. Achieving this presents a significant challenge within the Rust type system, as we aim to statically dispatch type information to prevent performance regression. Further implementation details can be found in the appendix labeled @rcl_detail_impl.
 
@@ -466,6 +465,20 @@ unsafe impl RawSimpleLock for RawSpinLock {
 The additional load doesn't seem to provide better performance to FlatCombining given that most of the time the thread will only `try_lock` once and then block for a while. However, it does provide better performance when used completely alone.
 
 == RCL Implementation Details <rcl_detail_impl>
+
+#todo
+
+
+== Spin Parker Code <spinparker_code>
+
+Spin Parker is implemented with expoentially backoff from CrossBeam @crossbeam_ref. Note that the `PreNotified` state greatly complex the code. Without it, a `swap` is enough to implement it.
+
+#sourcefile("../../rust/src/parker/spin_parker.rs")
+
+== Block Parker Code <blockparker_code>
+
+We take a Futex wrapper from Mara Bos to simplify our code @futex_rs_ref. The code is as follows:
+ion Details <rcl_detail_impl>
 
 #todo
 
