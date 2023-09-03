@@ -922,23 +922,6 @@ implement it.
 == Block Parker Code <blockparker_code>
 
 We take a Futex wrapper from Mara Bos to simplify our code
-@futex_rs_ref. The code is as follows: ion Details
-<rcl_detail_impl>
-
-#todo
-
-== Spin Parker Code <spinparker_code>
-
-Spin Parker is implemented with expoentially backoff from
-CrossBeam @crossbeam_ref. Note that the `PreNotified` state
-greatly complex the code. Without it, a `swap` is enough to
-implement it.
-
-#sourcefile("../../rust/src/parker/spin_parker.rs")
-
-== Block Parker Code <blockparker_code>
-
-We take a Futex wrapper from Mara Bos to simplify our code
 @futex_rs_ref. The code is as follows:
 
-#sourcefile("../../rust/src/parker/block_parker.rs")
+#todo
