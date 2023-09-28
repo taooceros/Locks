@@ -3,20 +3,18 @@ use criterion::measurement::WallTime;
 use criterion::BenchmarkGroup;
 use criterion::BenchmarkId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use dlock::guard::DLockGuard;
-use dlock::parker::block_parker::BlockParker;
-use dlock::parker::spin_parker::SpinParker;
-use dlock::parker::Parker;
+use libdlock::guard::DLockGuard;
+use libdlock::parker::block_parker::BlockParker;
+use libdlock::parker::spin_parker::SpinParker;
+use libdlock::parker::Parker;
 use quanta::Clock;
 use std::{sync::Arc, thread::*, time::Duration};
 
-extern crate dlock;
-
-use dlock::ccsynch::*;
-use dlock::dlock::*;
-use dlock::fc::fclock::*;
-use dlock::rcl::rcllock::*;
-use dlock::rcl::rclserver::*;
+use libdlock::ccsynch::*;
+use libdlock::dlock::*;
+use libdlock::fc::fclock::*;
+use libdlock::rcl::rcllock::*;
+use libdlock::rcl::rclserver::*;
 
 const ITERATION: u64 = 1000;
 const THREAD_CPU_RATIO: usize = 1;
