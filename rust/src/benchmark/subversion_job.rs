@@ -15,7 +15,7 @@ pub fn subversion_benchmark(
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let mut loop_result = 0u64;
     let mut num_acquire = 0u64;
-    let mut hold_time = Duration::ZERO;
+    let hold_time = Duration::ZERO;
 
     if id % 2 == 0 {
         ThreadPriority::Min

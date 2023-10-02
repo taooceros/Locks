@@ -1,6 +1,6 @@
-use coalesce::{coalesce, Coalesce2};
+
 use serde_with::DurationMilliSeconds;
-use std::iter::{once, Once};
+
 use std::num::NonZeroI64;
 use std::path::Path;
 use std::{
@@ -9,7 +9,7 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
-use thread_priority::ThreadPriority;
+
 
 use csv::Writer;
 use itertools::Itertools;
@@ -144,7 +144,7 @@ fn inner_benchmark<T: Send + Sync + 'static, R: Serialize>(
     num_thread: usize,
     writer: &mut Writer<File>,
     duration: u64,
-    job: impl FnOnce(Arc<BenchmarkType<T>>, usize, usize, usize, &'static AtomicBool) -> R
+    _job: impl FnOnce(Arc<BenchmarkType<T>>, usize, usize, usize, &'static AtomicBool) -> R
         + Send
         + 'static,
 ) where

@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::Mutex, thread::available_parallelism};
+use std::{sync::Mutex, thread::available_parallelism};
 
 use clap::*;
 use libdlock::{
