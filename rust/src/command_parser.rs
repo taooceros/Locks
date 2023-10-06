@@ -26,7 +26,7 @@ pub struct App {
     pub global_opts: GlobalOpts,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum, EnumIter)]
+#[derive(Debug, Clone, Copy, Display, ValueEnum, EnumIter)]
 pub enum Experiment {
     RatioOneThree,
     Subversion,
@@ -140,7 +140,7 @@ impl LockTarget {
             }
             LockTarget::DLock(DLockTarget::CCSynch) => CCSynch::new(0u64).into(),
             LockTarget::DLock(DLockTarget::CCBan) => CCBan::new(0u64).into(),
-            // RCL requires) special treatment
+            // RCL requires special treatment
             LockTarget::DLock(DLockTarget::RCL) => return None,
             LockTarget::SpinLock => {
                 return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))

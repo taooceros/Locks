@@ -1,17 +1,28 @@
-use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use libdlock::{dlock::{BenchmarkType, DLock}, guard::DLockGuard};
+use libdlock::{
+    dlock::{BenchmarkType, DLock},
+    guard::DLockGuard,
+};
 use thread_priority::ThreadPriority;
 
-use super::Record;
+use super::{Record, bencher::LockBenchInfo};
 
-pub fn subversion_benchmark(
-    lock_type: Arc<BenchmarkType<u64>>,
-    id: usize,
-    num_thread: usize,
-    num_cpu: usize,
-    stop: &'static AtomicBool,
-) -> Record {
+pub fn subversion_benchmark(info: &LockBenchInfo<u64>) -> Record {
+    let (id, num_thread, num_cpu, stop, lock_type) = (
+        info.id,
+        info.num_thread,
+        info.num_cpu,
+        info.stop,
+        &info.lock_type,
+    );
+    
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let mut loop_result = 0u64;
     let mut num_acquire = 0u64;

@@ -11,13 +11,20 @@ use libdlock::{
 };
 use quanta::Clock;
 
+use super::bencher::LockBenchInfo;
+
 pub fn one_three_benchmark(
-    lock_type: Arc<BenchmarkType<u64>>,
-    id: usize,
-    num_thread: usize,
-    num_cpu: usize,
-    stop: &'static AtomicBool,
+    info: &LockBenchInfo<u64>
 ) -> Record {
+
+    let (id, num_thread, num_cpu, stop, lock_type) = (
+        info.id,
+        info.num_thread,
+        info.num_cpu,
+        info.stop,
+        info.lock_type,
+    );
+
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let single_iter_duration: Duration = Duration::from_micros({
         if id % 2 == 0 {
