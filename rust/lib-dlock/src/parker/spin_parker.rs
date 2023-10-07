@@ -4,8 +4,8 @@ use quanta::Clock;
 use std::cell::SyncUnsafeCell;
 use std::hint::spin_loop;
 
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::sync::atomic::{AtomicU32};
 use std::thread::{current, yield_now, Thread};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use super::State;
 
 #[derive(Default, Debug)]
 pub struct SpinParker {
-    state: AtomicU32
+    state: AtomicU32,
 }
 
 const PARKED: u32 = u32::MAX;
@@ -61,41 +61,46 @@ impl Parker for SpinParker {
     }
 
     fn wait_timeout(&self, timeout: Duration) -> Result<(), ()> {
-        let clock = Clock::new();
-        let begin = clock.now();
-        let backoff = Backoff::new();
-
-        match self.state.compare_exchange(EMPTY, PARKED, Acquire, Acquire) {
-            Ok(_) | Err(PARKED) => loop {
-                match self.state.load(Acquire) {
-                    NOTIFIED => return Ok(()),
-                    PRENOTIFIED => {
-                        for _ in 0..SPINLIMIT {
-                            if self.state.load(Acquire) == NOTIFIED {
-                                return Ok(());
-                            }
-                            spin_loop();
-                        }
-                        if clock.now().duration_since(begin) >= timeout {
-                            return Err(());
-                        }
-                        yield_now();
-                    }
-                    _ => {
-                        if clock.now().duration_since(begin) >= timeout {
-                            return Err(());
-                        }
-                        backoff.snooze();
-                    }
-                }
-            },
-            Err(NOTIFIED) => return Ok(()),
-            Err(PRENOTIFIED) => {
-                self.wait_prenotified();
-                return Ok(());
-            }
-            Err(value) => panic!("unexpected flag value {}", value),
+        thread_local! {
+            static CLOCK: Clock = Clock::new();
         }
+
+        CLOCK.with(|clock| {
+            let begin = clock.now();
+            let backoff = Backoff::new();
+
+            match self.state.compare_exchange(EMPTY, PARKED, Acquire, Acquire) {
+                Ok(_) | Err(PARKED) => loop {
+                    match self.state.load(Acquire) {
+                        NOTIFIED => return Ok(()),
+                        PRENOTIFIED => {
+                            for _ in 0..SPINLIMIT {
+                                if self.state.load(Acquire) == NOTIFIED {
+                                    return Ok(());
+                                }
+                                spin_loop();
+                            }
+                            if clock.now().duration_since(begin) >= timeout {
+                                return Err(());
+                            }
+                            yield_now();
+                        }
+                        _ => {
+                            if clock.now().duration_since(begin) >= timeout {
+                                return Err(());
+                            }
+                            backoff.snooze();
+                        }
+                    }
+                },
+                Err(NOTIFIED) => return Ok(()),
+                Err(PRENOTIFIED) => {
+                    self.wait_prenotified();
+                    return Ok(());
+                }
+                Err(value) => panic!("unexpected flag value {}", value),
+            }
+        })
     }
 
     fn state(&self) -> State {
