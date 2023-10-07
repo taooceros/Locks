@@ -65,7 +65,7 @@ impl Parker for SpinParker {
         let begin = clock.now();
         let backoff = Backoff::new();
 
-        match self.state.compare_exchange(EMPTY, PARKED, Acquire, Relaxed) {
+        match self.state.compare_exchange(EMPTY, PARKED, Acquire, Acquire) {
             Ok(_) | Err(PARKED) => loop {
                 match self.state.load(Acquire) {
                     NOTIFIED => return Ok(()),
