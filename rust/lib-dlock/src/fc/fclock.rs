@@ -6,7 +6,7 @@ use std::{
 
 use crossbeam::{
     atomic::AtomicConsume,
-    utils::{CachePadded},
+    utils::CachePadded,
 };
 use thread_local::ThreadLocal;
 
@@ -113,7 +113,7 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
     }
 
     unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T, P>>, pass: u32) {
-        let mut previous_ptr = head.load(Ordering::Relaxed);
+        let mut previous_ptr = head.load(Ordering::Acquire);
         debug_assert!(!previous_ptr.is_null());
 
         let mut current_ptr = (*previous_ptr).next;
@@ -125,7 +125,7 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
             if pass - current.age > CLEAN_UP_AGE {
                 previous.next = current.next;
                 current.next = null_mut();
-                current.active.store(false, Ordering::SeqCst);
+                current.active.store(false, Ordering::Release);
                 current_ptr = previous.next;
                 continue;
             }
