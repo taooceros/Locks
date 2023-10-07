@@ -3,6 +3,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    thread::current,
     time::Duration,
 };
 
@@ -10,11 +11,11 @@ use libdlock::{
     dlock::{BenchmarkType, DLock},
     guard::DLockGuard,
 };
-use thread_priority::ThreadPriority;
+use thread_priority::{ThreadExt, ThreadPriority, ThreadPriorityValue};
 
-use super::{Record, bencher::LockBenchInfo};
+use super::{bencher::LockBenchInfo, Record};
 
-pub fn subversion_benchmark(info: &LockBenchInfo<u64>) -> Record {
+pub fn subversion_benchmark(info: LockBenchInfo<u64>) -> Record {
     let (id, num_thread, num_cpu, stop, lock_type) = (
         info.id,
         info.num_thread,
@@ -22,19 +23,17 @@ pub fn subversion_benchmark(info: &LockBenchInfo<u64>) -> Record {
         info.stop,
         &info.lock_type,
     );
-    
+
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let mut loop_result = 0u64;
     let mut num_acquire = 0u64;
     let hold_time = Duration::ZERO;
 
-    if id % 2 == 0 {
-        ThreadPriority::Min
-    } else {
-        ThreadPriority::Max
-    }
-    .set_for_current()
-    .unwrap();
+    let priority = if id % 2 == 0 { 0u8 } else { 50u8 };
+
+    // println!("Thread {} started with priority {:?}", id, priority);
+
+    ThreadPriority::Crossplatform(ThreadPriorityValue::try_from(priority).unwrap()).set_for_current().unwrap();
 
     while !stop.load(Ordering::Acquire) {
         // critical section

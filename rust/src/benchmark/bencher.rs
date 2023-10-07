@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     marker::PhantomData,
+    mem::take,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -102,7 +103,7 @@ impl Bencher {
         &self,
         experiment: Experiment,
         writer: &mut Writer<File>,
-        job: fn(&LockBenchInfo<u64>) -> R,
+        job: fn(LockBenchInfo<u64>) -> R,
     ) where
         P: Parker + 'static,
         R: Serialize + Send + Sync + 'static,
@@ -125,7 +126,7 @@ impl Bencher {
         lock_type: Arc<BenchmarkType<T>>,
         experiment: Experiment,
         writer: &mut Writer<File>,
-        job: fn(&LockBenchInfo<T>) -> R,
+        job: fn(LockBenchInfo<T>) -> R,
     ) where
         R: Serialize,
     {
@@ -141,7 +142,7 @@ impl Bencher {
                     .map(|id| BenchJob::new(self, lock_type.clone(), &STOP, id, s))
                     .collect::<Vec<_>>();
 
-                println!("Starting benchmark for {}", experiment);
+                println!("Starting {} for {}|{}", experiment, lock_type.lock_name(), lock_type.parker_name());
 
                 for thread in threads.iter_mut() {
                     thread.start_benchmark(job);
@@ -153,8 +154,10 @@ impl Bencher {
 
                 let mut i = 0;
 
-                for job in threads {
-                    let l = job.handle.expect("Unexpected None Handle").join();
+                for job in threads.iter_mut() {
+                    let l = std::mem::take(&mut job.handle)
+                        .expect("Unexpected None Handle")
+                        .join();
                     match l {
                         Ok(l) => {
                             results.push(l);
@@ -204,8 +207,7 @@ where
     T: Send + Sync + 'static,
     R: Serialize,
 {
-    bencher: &'scope Bencher,
-    info: LockBenchInfo<'scope, T>,
+    info: Option<LockBenchInfo<'scope, T>>,
     handle: Option<ScopedJoinHandle<'scope, R>>,
     scope: &'scope Scope<'scope, 'env>,
     _photom_r: PhantomData<R>,
@@ -224,27 +226,26 @@ where
         scope: &'scope Scope<'scope, 'env>,
     ) -> BenchJob<'scope, 'env, T, R> {
         Self {
-            bencher,
-            info: LockBenchInfo {
+            info: Some(LockBenchInfo {
                 lock_type,
                 num_thread: bencher.num_thread,
                 num_cpu: bencher.num_cpu,
                 stop,
                 id,
-            },
+            }),
             handle: None,
             _photom_r: PhantomData,
             scope,
         }
     }
 
-    fn start_benchmark<F>(&'scope mut self, job: F)
+    fn start_benchmark<F>(&mut self, job: F)
     where
-        F: FnOnce(&LockBenchInfo<T>) -> R + Send + Sync + 'static,
+        F: FnOnce(LockBenchInfo<T>) -> R + Send + Sync + 'static,
     {
-        let info = &self.info;
+        let info = self.info.take().expect("Unexpected None Info");
 
-        self.handle = Some(self.scope.spawn(|| job(info)));
+        self.handle = Some(self.scope.spawn(move || job(info)));
     }
 }
 

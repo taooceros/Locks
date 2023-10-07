@@ -14,7 +14,7 @@ use quanta::Clock;
 use super::bencher::LockBenchInfo;
 
 pub fn one_three_benchmark(
-    info: &LockBenchInfo<u64>
+    info: LockBenchInfo<u64>
 ) -> Record {
 
     let (id, num_thread, num_cpu, stop, lock_type) = (
