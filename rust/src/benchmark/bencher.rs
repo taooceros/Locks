@@ -1,21 +1,19 @@
 use std::{
     fs::File,
     marker::PhantomData,
-    mem::take,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread::{self, JoinHandle, Scope, ScopedJoinHandle},
+    thread::{self, Scope, ScopedJoinHandle},
     time::Duration,
 };
 
 use csv::Writer;
 use itertools::Itertools;
 use libdlock::{
-    dlock::{BenchmarkType, DLock, DLockType},
-    guard::DLockGuard,
+    dlock::{BenchmarkType, DLockType},
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };

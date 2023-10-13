@@ -1,12 +1,12 @@
 use std::{
-    sync::{atomic::*, Arc},
+    sync::{atomic::*},
     time::Duration,
 };
 
 use crate::benchmark::Record;
 
 use libdlock::{
-    dlock::{BenchmarkType, DLock},
+    dlock::{DLock},
     guard::DLockGuard,
 };
 use quanta::Clock;

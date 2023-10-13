@@ -1,17 +1,15 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+        atomic::{Ordering},
     },
-    thread::current,
     time::Duration,
 };
 
 use libdlock::{
-    dlock::{BenchmarkType, DLock},
+    dlock::{DLock},
     guard::DLockGuard,
 };
-use thread_priority::{ThreadExt, ThreadPriority, ThreadPriorityValue};
+use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
 use super::{bencher::LockBenchInfo, Record};
 
