@@ -1,10 +1,15 @@
-use std::{fs::{File, OpenOptions}, os::unix::prelude::PermissionsExt, path::Path};
+use std::{
+    fs::{File, OpenOptions},
+    os::unix::prelude::PermissionsExt,
+    path::Path,
+};
 
 use csv::Writer;
 
 pub fn create_writer(path: &Path) -> Result<Writer<File>, std::io::Error> {
-    let f = OpenOptions::new().write(true)
-        .create_new(true)
+    let f = OpenOptions::new()
+        .append(true)
+        .create(true)
         .open(path)?;
 
     let metadata = f.metadata()?;

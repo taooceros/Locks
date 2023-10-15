@@ -19,7 +19,7 @@ use crate::benchmark::helper::create_writer;
 use super::{bencher::LockBenchInfo, Record};
 
 pub fn subversion_benchmark(info: LockBenchInfo<u64>) {
-    println!("Start Subversion for {}", info.lock_type.lock_name());
+    println!("Start Subversion for {}", info.lock_type);
 
     let mut writer = create_writer(&info.output_path.join("subversion_counter.csv"))
         .expect("Failed to create writer");
@@ -121,6 +121,8 @@ fn thread_job(
             loop_result += 1;
         });
     }
+
+    println!("Thread {} finished", id);
 
     return Record {
         id,
