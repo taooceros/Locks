@@ -4,24 +4,12 @@ use std::{
     path::Path,
 };
 
+use benchmark::benchmark;
 use clap::Parser;
 use command_parser::*;
-use benchmark::benchmark;
 
-
-
-
-
-
-
-
-
-
-
-
-mod command_parser;
 mod benchmark;
-
+mod command_parser;
 
 fn main() {
     let mut app = App::parse();
@@ -56,7 +44,6 @@ fn main() {
             return;
         }
     }
-
 
     for (ncpu, nthread) in app
         .global_opts

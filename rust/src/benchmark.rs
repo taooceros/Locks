@@ -1,30 +1,20 @@
-
 use serde_with::DurationMilliSeconds;
 
 use std::num::NonZeroI64;
 use std::path::Path;
-use std::{
-    time::Duration,
-};
-
-
-
-
-
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_with::serde_as;
-
-
-
 
 use crate::command_parser::*;
 
 use self::bencher::Bencher;
 
+mod bencher;
 mod counter_job;
 mod subversion_job;
-mod bencher;
+mod helper;
 
 pub fn benchmark(
     num_cpu: usize,
@@ -48,9 +38,6 @@ pub fn benchmark(
     bencher.benchmark();
 }
 
-
-
-
 #[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -68,5 +55,3 @@ struct Record {
     locktype: String,
     waiter_type: String,
 }
-
-

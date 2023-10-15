@@ -1,30 +1,86 @@
 use std::{
-    sync::{atomic::*},
+    sync::{atomic::*, Arc},
+    thread,
     time::Duration,
 };
 
-use crate::benchmark::Record;
+use crate::benchmark::{Record, helper::create_writer};
 
+use csv::Writer;
 use libdlock::{
-    dlock::{DLock},
+    dlock::{BenchmarkType, DLock},
     guard::DLockGuard,
 };
 use quanta::Clock;
 
 use super::bencher::LockBenchInfo;
 
-pub fn one_three_benchmark(
-    info: LockBenchInfo<u64>
-) -> Record {
+pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
+    let mut writer = create_writer(&info.output_path.join("one_three_counter.csv")).expect("Failed to create writer");
 
-    let (id, num_thread, num_cpu, stop, lock_type) = (
-        info.id,
-        info.num_thread,
-        info.num_cpu,
-        info.stop,
-        info.lock_type,
+    let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
+
+    static STOP: AtomicBool = AtomicBool::new(false);
+
+    STOP.store(false, Ordering::Release);
+
+    let mut results: Vec<Record> = Vec::new();
+
+    let handles = (0..info.num_thread)
+        .map(|id| {
+            let lock_type = lock_type.clone();
+            thread::Builder::new()
+                .name(format!("Thread {}", id))
+                .spawn(move || thread_job(id, num_thread, num_cpu, &STOP, lock_type))
+                .expect("Failed to spawn thread")
+        })
+        .collect::<Vec<_>>();
+
+    thread::sleep(Duration::from_secs(info.duration));
+
+    STOP.store(true, Ordering::Release);
+
+    let mut i = 0;
+
+    for job in handles {
+        let l = job.join();
+        match l {
+            Ok(l) => {
+                results.push(l);
+                // println!("{}", l);
+            }
+            Err(_e) => eprintln!("Error joining thread: {}", i),
+        }
+        i += 1;
+    }
+
+    for result in results.iter() {
+        writer.serialize(result).unwrap();
+    }
+
+    let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+
+    lock_type.lock(|guard: DLockGuard<u64>| {
+        assert_eq!(
+            *guard, total_count,
+            "Total counter is not matched with lock value {}, but thread local loop sum {}",
+            *guard, total_count
+        );
+    });
+
+    println!(
+        "Finish Benchmark for {}: Total Counter {}",
+        lock_type, total_count
     );
+}
 
+fn thread_job(
+    id: usize,
+    num_thread: usize,
+    num_cpu: usize,
+    stop: &'static AtomicBool,
+    lock_type: Arc<BenchmarkType<u64>>,
+) -> Record {
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let single_iter_duration: Duration = Duration::from_micros({
         if id % 2 == 0 {
