@@ -1,4 +1,4 @@
-use crossbeam::{utils::Backoff};
+use crossbeam::utils::Backoff;
 use linux_futex::{Futex, Private, TimedWaitError, WaitError::Interrupted};
 use std::{sync::atomic::Ordering::*, time::Duration};
 

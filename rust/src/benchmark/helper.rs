@@ -1,4 +1,4 @@
-use std::{path::Path, fs::File, os::unix::prelude::PermissionsExt};
+use std::{fs::File, os::unix::prelude::PermissionsExt, path::Path};
 
 use csv::Writer;
 

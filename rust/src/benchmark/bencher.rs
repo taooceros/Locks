@@ -1,10 +1,4 @@
-use std::{
-    path::Path,
-    sync::{
-        Arc,
-    },
-};
-
+use std::{path::Path, sync::Arc};
 
 use itertools::Itertools;
 use libdlock::{
@@ -83,8 +77,12 @@ impl Bencher {
                 Some(LockTarget::DLock(DLockTarget::RCL)) | None
             ) {
                 match self.waiter {
-                    WaiterType::Spin => self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job),
-                    WaiterType::Block => self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job),
+                    WaiterType::Spin => {
+                        self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job)
+                    }
+                    WaiterType::Block => {
+                        self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
+                    }
                     WaiterType::All => {
                         self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job);
                         self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
@@ -95,15 +93,11 @@ impl Bencher {
         }
     }
 
-    fn bench_rcl<T, P>(
-        &self,
-        experiment: Experiment,
-        output_path: &Path,
-        job: fn(LockBenchInfo<T>),
-    ) where
+    fn bench_rcl<T, P>(&self, experiment: Experiment, output_path: &Path, job: fn(LockBenchInfo<T>))
+    where
         T: Send + Sync + 'static + Default,
         P: Parker + 'static,
-        BenchmarkType<T>: From<DLockType<T, P>>
+        BenchmarkType<T>: From<DLockType<T, P>>,
     {
         let mut server = RclServer::new();
         server.start(self.num_cpu - 1);

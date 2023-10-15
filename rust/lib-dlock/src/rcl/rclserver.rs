@@ -1,7 +1,7 @@
 use crossbeam::queue::ArrayQueue;
 
 use std::{
-    cell::{SyncUnsafeCell},
+    cell::SyncUnsafeCell,
     collections::LinkedList,
     ptr::null,
     sync::atomic::{Ordering::*, *},
@@ -87,8 +87,10 @@ impl<P: Parker> RclServer<P> {
 
         let server_ptr = self as *mut RclServer<P>;
 
-        self.threads
-            .push_back(SyncUnsafeCell::new(RclThread::new(server_ptr.into(), cpuid)));
+        self.threads.push_back(SyncUnsafeCell::new(RclThread::new(
+            server_ptr.into(),
+            cpuid,
+        )));
 
         let thread = self.threads.back_mut().unwrap();
         RclThread::run(thread, cpuid);

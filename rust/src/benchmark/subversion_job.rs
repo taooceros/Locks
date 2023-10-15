@@ -1,7 +1,16 @@
-use std::{sync::{atomic::{Ordering, AtomicBool}, Arc}, time::Duration, thread};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
-
-use libdlock::{dlock::{DLock, BenchmarkType}, guard::DLockGuard};
+use libdlock::{
+    dlock::{BenchmarkType, DLock},
+    guard::DLockGuard,
+};
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
 use crate::benchmark::helper::create_writer;
@@ -9,8 +18,11 @@ use crate::benchmark::helper::create_writer;
 use super::{bencher::LockBenchInfo, Record};
 
 pub fn subversion_benchmark(info: LockBenchInfo<u64>) {
-    let mut writer = create_writer(&info.output_path.join("subversion_counter.csv")).expect("Failed to create writer");
-    
+    println!("Start Subversion for {}", info.lock_type.lock_name());
+
+    let mut writer = create_writer(&info.output_path.join("subversion_counter.csv"))
+        .expect("Failed to create writer");
+
     let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
 
     static STOP: AtomicBool = AtomicBool::new(false);
@@ -62,7 +74,7 @@ pub fn subversion_benchmark(info: LockBenchInfo<u64>) {
     });
 
     println!(
-        "Finish Benchmark for {}: Total Counter {}",
+        "Finish Subversion for {}: Total Counter {}",
         lock_type, total_count
     );
 }
@@ -74,7 +86,6 @@ fn thread_job(
     stop: &'static AtomicBool,
     lock_type: Arc<BenchmarkType<u64>>,
 ) -> Record {
-
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let mut loop_result = 0u64;
     let mut num_acquire = 0u64;

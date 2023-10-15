@@ -3,7 +3,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(atomic_from_ptr)]
 #![feature(thread_id_value)]
-
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -16,19 +15,17 @@ pub mod fc_fair_ban;
 pub mod fc_fair_ban_slice;
 pub mod fc_fair_skiplist;
 pub mod guard;
-pub mod rcl;
 pub mod parker;
+pub mod rcl;
 
 mod mutex_extension;
+pub mod spin_lock;
 mod syncptr;
+pub mod u_scl;
 #[cfg(test)]
 mod unit_test;
-pub mod spin_lock;
-pub mod u_scl;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
-
 
 pub unsafe trait RawSimpleLock {
     fn new() -> Self;

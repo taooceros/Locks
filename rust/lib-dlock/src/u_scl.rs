@@ -1,7 +1,4 @@
-use std::{
-    cell::{SyncUnsafeCell},
-    mem::MaybeUninit,
-};
+use std::{cell::SyncUnsafeCell, mem::MaybeUninit};
 
 use crate::{
     dlock::{DLock, DLockDelegate},

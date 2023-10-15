@@ -4,8 +4,7 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::{Record, helper::create_writer};
-
+use crate::benchmark::{helper::create_writer, Record};
 
 use libdlock::{
     dlock::{BenchmarkType, DLock},
@@ -16,7 +15,10 @@ use quanta::Clock;
 use super::bencher::LockBenchInfo;
 
 pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
-    let mut writer = create_writer(&info.output_path.join("one_three_counter.csv")).expect("Failed to create writer");
+    println!("Start OneThreeCounter for {}", info.lock_type.lock_name());
+
+    let mut writer = create_writer(&info.output_path.join("one_three_counter.csv"))
+        .expect("Failed to create writer");
 
     let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
 
@@ -69,7 +71,7 @@ pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
     });
 
     println!(
-        "Finish Benchmark for {}: Total Counter {}",
+        "Finish OneThreeCounter for {}: Total Counter {}",
         lock_type, total_count
     );
 }

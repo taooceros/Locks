@@ -2,7 +2,6 @@ use std::sync::atomic::AtomicBool;
 
 use crossbeam::utils::CachePadded;
 
-
 use crate::{dlock::DLockDelegate, parker::Parker};
 
 pub struct Node<T, P>

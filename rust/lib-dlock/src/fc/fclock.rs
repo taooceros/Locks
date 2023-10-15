@@ -4,10 +4,7 @@ use std::{
     sync::atomic::*, time::Duration,
 };
 
-use crossbeam::{
-    atomic::AtomicConsume,
-    utils::CachePadded,
-};
+use crossbeam::{atomic::AtomicConsume, utils::CachePadded};
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -138,12 +135,9 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
 
 impl<T, P: Parker> DLock<T> for FcLock<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
-        let node = self.local_node.get_or(|| {
-            SyncUnsafeCell::new(Node::new())
-        });
+        let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
         let node = unsafe { &mut *(node).get() };
-
 
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
         node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
@@ -167,7 +161,7 @@ impl<T, P: Parker> DLock<T> for FcLock<T, RawSpinLock, P> {
                 self.combiner_lock.unlock();
             }
 
-            match node.parker.wait_timeout(Duration::from_micros(1)){
+            match node.parker.wait_timeout(Duration::from_micros(1)) {
                 Ok(_) => return,
                 Err(_) => continue,
             };

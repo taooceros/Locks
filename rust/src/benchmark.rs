@@ -13,8 +13,8 @@ use self::bencher::Bencher;
 
 mod bencher;
 mod counter_job;
-mod subversion_job;
 mod helper;
+mod subversion_job;
 
 pub fn benchmark(
     num_cpu: usize,
