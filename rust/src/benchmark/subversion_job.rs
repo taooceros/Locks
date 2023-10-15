@@ -1,6 +1,6 @@
 use std::{sync::{atomic::{Ordering, AtomicBool}, Arc}, time::Duration, thread};
 
-use csv::Writer;
+
 use libdlock::{dlock::{DLock, BenchmarkType}, guard::DLockGuard};
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 

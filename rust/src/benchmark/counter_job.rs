@@ -6,7 +6,7 @@ use std::{
 
 use crate::benchmark::{Record, helper::create_writer};
 
-use csv::Writer;
+
 use libdlock::{
     dlock::{BenchmarkType, DLock},
     guard::DLockGuard,
