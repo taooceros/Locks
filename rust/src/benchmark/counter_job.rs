@@ -64,12 +64,16 @@ pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
 
-    let mut histogram = Histogram::with_buckets(5);
-    for result in results.iter() {
-        histogram.add(result.loop_count);
-    }
+    if info.verbose {
+        let mut histogram = Histogram::with_buckets(5);
+        for result in results.iter() {
+            histogram.add(result.loop_count);
+        }
 
-    println!("{}", histogram);
+        println!("{}", histogram);
+    } else {
+        results.iter().for_each(|r| println!("{}", r.loop_count));
+    }
 
     lock_type.lock(|guard: DLockGuard<u64>| {
         assert_eq!(

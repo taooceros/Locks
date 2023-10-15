@@ -1,6 +1,7 @@
 use std::{
-    fs::{create_dir, remove_dir_all},
+    fs::{self, create_dir, remove_dir_all, DirBuilder, Permissions},
     iter::repeat,
+    os::unix::{fs::DirBuilderExt, prelude::PermissionsExt},
     path::Path,
 };
 
@@ -28,29 +29,22 @@ fn main() {
 
     if output_path.is_dir() {
         // remove the dir
-        match remove_dir_all(output_path) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Error removing output dir: {}", e);
-                return;
-            }
-        }
+        remove_dir_all(output_path).expect("Failed to remove output dir");
     }
 
-    match create_dir(output_path) {
-        Ok(_) => {}
-        Err(e) => {
-            println!("Error creating output dir: {}", e);
-            return;
-        }
-    }
+    DirBuilder::new()
+        .mode(0o777)
+        .create(output_path)
+        .expect("Failed to create output dir");
 
-    for (ncpu, nthread) in app
-        .global_opts
-        .cpus
-        .iter()
-        .zip(&app.global_opts.threads)
-    {
+    fs::set_permissions(output_path, Permissions::from_mode(0o777)).unwrap();
+
+    println!(
+        "{:o}",
+        fs::metadata(output_path).unwrap().permissions().mode()
+    );
+
+    for (ncpu, nthread) in app.global_opts.cpus.iter().zip(&app.global_opts.threads) {
         benchmark(*ncpu, *nthread, app.lock_target, &app.global_opts)
     }
 }

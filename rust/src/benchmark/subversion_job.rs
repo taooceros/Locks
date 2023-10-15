@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use histo::Histogram;
 use libdlock::{
     dlock::{BenchmarkType, DLock},
     guard::DLockGuard,
@@ -63,6 +64,17 @@ pub fn subversion_benchmark(info: LockBenchInfo<u64>) {
         writer.serialize(result).unwrap();
     }
 
+    if info.verbose {
+        let mut histogram = Histogram::with_buckets(5);
+        for result in results.iter() {
+            histogram.add(result.loop_count);
+        }
+
+        println!("{}", histogram);
+    } else {
+        results.iter().for_each(|r| println!("{}", r.loop_count));
+    }
+
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
     lock_type.lock(|guard: DLockGuard<u64>| {
@@ -109,7 +121,6 @@ fn thread_job(
             loop_result += 1;
         });
     }
-    println!("Thread {} finished with result {}", id, loop_result);
 
     return Record {
         id,
