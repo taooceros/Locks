@@ -1,7 +1,8 @@
 use serde_with::DurationMilliSeconds;
 
 use std::num::NonZeroI64;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::thread::LocalKey;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -19,20 +20,20 @@ mod subversion_job;
 pub fn benchmark(
     num_cpu: usize,
     num_thread: usize,
-    experiment: Option<Experiment>,
-    target: Option<LockTarget>,
-    output_path: &Path,
-    waiter: WaiterType,
-    duration: u64,
+    lock_target: Option<LockTarget>,
+    options: &GlobalOpts,
 ) {
     let bencher = Bencher::new(
         num_cpu,
         num_thread,
-        experiment,
-        target,
-        output_path.to_path_buf().into_boxed_path(),
-        waiter,
-        duration,
+        options.experiment,
+        lock_target,
+        Path::new(&options.output_path)
+            .to_path_buf()
+            .into_boxed_path(),
+        options.waiter,
+        options.duration,
+        options.verbose,
     );
 
     bencher.benchmark();

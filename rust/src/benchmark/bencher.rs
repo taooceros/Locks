@@ -22,6 +22,7 @@ pub struct Bencher {
     output_path: Box<Path>,
     waiter: WaiterType,
     duration: u64,
+    verbose: bool,
 }
 
 impl Bencher {
@@ -33,6 +34,7 @@ impl Bencher {
         output_path: Box<Path>,
         waiter: WaiterType,
         duration: u64,
+        verbose: bool,
     ) -> Self {
         Self {
             num_cpu,
@@ -42,6 +44,7 @@ impl Bencher {
             output_path,
             waiter,
             duration,
+            verbose,
         }
     }
 
@@ -68,6 +71,7 @@ impl Bencher {
                         experiment,
                         duration: self.duration,
                         output_path: &self.output_path,
+                        verbose: self.verbose,
                     });
                 }
             }
@@ -110,6 +114,7 @@ impl Bencher {
             experiment,
             duration: self.duration,
             output_path,
+            verbose: self.verbose,
         });
     }
 }
@@ -124,6 +129,7 @@ where
     pub experiment: Experiment,
     pub duration: u64,
     pub output_path: &'a Path,
+    pub verbose: bool,
 }
 
 fn extract_targets(

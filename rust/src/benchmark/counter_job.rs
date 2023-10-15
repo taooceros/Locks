@@ -6,6 +6,7 @@ use std::{
 
 use crate::benchmark::{helper::create_writer, Record};
 
+use histo::Histogram;
 use libdlock::{
     dlock::{BenchmarkType, DLock},
     guard::DLockGuard,
@@ -62,6 +63,14 @@ pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
 
     let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
+
+    let mut histogram = Histogram::with_buckets(5);
+    for result in results.iter() {
+        histogram.add(result.loop_count);
+    }
+
+    println!("{}", histogram);
+
     lock_type.lock(|guard: DLockGuard<u64>| {
         assert_eq!(
             *guard, total_count,
@@ -111,7 +120,6 @@ fn thread_job(
             hold_time += timer.now().duration_since(begin);
         });
     }
-    println!("Thread {} finished with result {}", id, loop_result);
 
     return Record {
         id,

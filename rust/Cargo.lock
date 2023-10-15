@@ -480,6 +480,7 @@ dependencies = [
  "criterion",
  "csv",
  "debug_print",
+ "histo",
  "itertools 0.11.0",
  "libdlock",
  "quanta 0.12.0",
@@ -587,6 +588,15 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "histo"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6a96a1c8acf372eefef3b065d800986a6d11abdc2c27cc61255513646b3df6c"
+dependencies = [
+ "streaming-stats",
+]
 
 [[package]]
 name = "home"
@@ -1113,6 +1123,15 @@ name = "shlex"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7cee0529a6d40f580e7a5e6c495c8fbfe21b7b52795ed4bb5e62cdf92bc6380"
+
+[[package]]
+name = "streaming-stats"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc32bf233385fb1ae0c4cf13a8dfd11efec71f6a9de95feac8c870788bc8b25"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "strsim"

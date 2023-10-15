@@ -48,17 +48,9 @@ fn main() {
     for (ncpu, nthread) in app
         .global_opts
         .cpus
-        .into_iter()
-        .zip(app.global_opts.threads)
+        .iter()
+        .zip(&app.global_opts.threads)
     {
-        benchmark(
-            ncpu,
-            nthread,
-            app.global_opts.experiment,
-            app.lock_target,
-            output_path,
-            app.global_opts.waiter,
-            app.global_opts.duration,
-        )
+        benchmark(*ncpu, *nthread, app.lock_target, &app.global_opts)
     }
 }

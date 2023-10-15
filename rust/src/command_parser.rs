@@ -167,4 +167,6 @@ pub struct GlobalOpts {
     pub duration: u64,
     #[arg(global = true, long, short)]
     pub experiment: Option<Experiment>,
+    #[arg(global = true, long, short)]
+    pub verbose: bool,
 }
