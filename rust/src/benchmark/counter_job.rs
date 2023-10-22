@@ -3,6 +3,9 @@ use std::{
     thread,
     time::Duration,
 };
+use std::cell::{OnceCell, RefCell};
+use std::fs::File;
+use csv::Writer;
 
 use crate::benchmark::{helper::create_writer, Record};
 
@@ -15,11 +18,16 @@ use quanta::Clock;
 
 use super::bencher::LockBenchInfo;
 
+static WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+
 pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
     println!("Start OneThreeCounter for {}", info.lock_type.lock_name());
 
-    let mut writer = create_writer(&info.output_path.join("one_three_counter.csv"))
-        .expect("Failed to create writer");
+    let mut writer = WRITER.get_or_init(|| {
+        RefCell::new(create_writer(&info.output_path.join("one_three_counter.csv"))
+            .expect("Failed to create writer"))
+    }).borrow_mut();
+
 
     let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
 
