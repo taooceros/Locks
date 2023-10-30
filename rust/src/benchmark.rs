@@ -16,6 +16,7 @@ mod bencher;
 mod counter_job;
 mod helper;
 mod subversion_job;
+mod response_time;
 
 pub fn benchmark(
     num_cpu: usize,

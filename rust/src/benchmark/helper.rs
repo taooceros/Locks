@@ -6,7 +6,11 @@ use std::{
 
 use csv::Writer;
 
-pub fn create_writer(path: &Path) -> Result<Writer<File>, std::io::Error> {
+pub fn create_writer(path: &Path) -> Result<File, std::io::Error> {
+    if !path.parent().expect("Failed to get parent").exists() {
+        std::fs::create_dir_all(path.parent().expect("Failed to get parent"))?;
+    }
+
     let f = OpenOptions::new()
         .append(true)
         .create(true)
@@ -20,5 +24,5 @@ pub fn create_writer(path: &Path) -> Result<Writer<File>, std::io::Error> {
 
     f.set_permissions(permissions)?;
 
-    Ok(Writer::from_writer(f))
+    Ok(f)
 }
