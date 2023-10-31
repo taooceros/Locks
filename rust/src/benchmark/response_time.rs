@@ -7,6 +7,7 @@ use libdlock::guard::DLockGuard;
 use quanta::Clock;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use serde_with::BoolFromInt;
 use serde_with::DurationNanoSeconds;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
@@ -14,7 +15,7 @@ use std::iter::Once;
 use std::num::{NonZeroI64, NonZeroU64};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::thread;
+use std::thread::{self, current};
 use std::time::Duration;
 
 static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
@@ -75,7 +76,7 @@ pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
     if info.verbose {
         let mut histogram = Histogram::with_buckets(5);
         for result in results.into_iter().flat_map(|r| r.response_times) {
-            histogram.add(result.as_micros() as u64);
+            histogram.add(result.as_nanos() as u64);
         }
 
         println!("{}", histogram);
@@ -105,12 +106,17 @@ fn thread_job(
     let mut num_acquire = 0u64;
     let mut hold_time = Duration::ZERO;
 
-    let mut response_times = Vec::new();
+    let mut response_times = vec![];
+    let mut is_combiners = vec![];
+
+    let thread_id = current().id();
 
     while !stop.load(Ordering::Acquire) {
         // critical section
 
         let begin = timer.now();
+
+        let mut is_combiner = false;
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             num_acquire += 1;
@@ -120,9 +126,13 @@ fn thread_job(
                 (*guard) += 1;
                 loop_result += 1;
             }
+
+            is_combiner = current().id() == thread_id;
+
             hold_time += timer.now().duration_since(begin);
         });
 
+        is_combiners.push(is_combiner);
         response_times.push(timer.now().duration_since(begin));
     }
 
@@ -132,6 +142,7 @@ fn thread_job(
         thread_num: num_thread,
         cpu_num: num_cpu,
         hold_time,
+        is_combiner: is_combiners,
         response_times,
         #[cfg(feature = "combiner_stat")]
         combine_time: lock_type.get_current_thread_combining_time(),
@@ -147,7 +158,8 @@ pub struct Record {
     pub cpu_id: usize,
     pub thread_num: usize,
     pub cpu_num: usize,
-    #[serde_as(as = "Vec<DurationNanoSeconds<u64>>")]
+    pub is_combiner: Vec<bool>,
+    #[serde_as(as = "Vec<DurationNanoSeconds>")]
     pub response_times: Vec<Duration>,
     pub hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
