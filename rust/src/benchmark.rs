@@ -1,63 +1,44 @@
-
 use serde_with::DurationMilliSeconds;
 
 use std::num::NonZeroI64;
-use std::path::Path;
-use std::{
-    fs::File,
-    sync::{atomic::*, Arc},
-    thread::{self, JoinHandle},
-    time::Duration,
-};
-
-
-use csv::Writer;
-use itertools::Itertools;
-use libdlock::{
-    dlock::{BenchmarkType, DLock, DLockType},
-    guard::DLockGuard,
-    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
-    rcl::{rcllock::RclLock, rclserver::RclServer},
-};
+use std::path::{Path, PathBuf};
+use std::thread::LocalKey;
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_with::serde_as;
-use strum::IntoEnumIterator;
 
-use crate::benchmark::counter_job::one_three_benchmark;
-use crate::benchmark::subversion_job::subversion_benchmark;
 use crate::command_parser::*;
 
 use self::bencher::Bencher;
 
-mod counter_job;
-mod subversion_job;
 mod bencher;
+mod counter_job;
+mod helper;
+mod subversion_job;
+mod response_time;
 
 pub fn benchmark(
     num_cpu: usize,
     num_thread: usize,
-    experiment: Option<Experiment>,
-    target: Option<LockTarget>,
-    output_path: &Path,
-    waiter: WaiterType,
-    duration: u64,
+    lock_target: Option<LockTarget>,
+    options: &GlobalOpts,
 ) {
     let bencher = Bencher::new(
         num_cpu,
         num_thread,
-        experiment,
-        target,
-        output_path.to_path_buf().into_boxed_path(),
-        waiter,
-        duration,
+        options.experiment,
+        lock_target,
+        Path::new(&options.output_path)
+            .to_path_buf()
+            .into_boxed_path(),
+        options.waiter,
+        options.duration,
+        options.verbose,
     );
 
     bencher.benchmark();
 }
-
-
-
 
 #[serde_as]
 #[derive(Debug, Serialize)]
@@ -76,5 +57,3 @@ struct Record {
     locktype: String,
     waiter_type: String,
 }
-
-

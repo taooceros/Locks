@@ -3,10 +3,7 @@ use std::{
     sync::atomic::*, time::Duration,
 };
 
-use crossbeam::{
-    atomic::AtomicConsume,
-    utils::{CachePadded},
-};
+use crossbeam::{atomic::AtomicConsume, utils::CachePadded};
 use thread_local::ThreadLocal;
 
 use crate::{

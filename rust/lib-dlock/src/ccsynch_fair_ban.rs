@@ -1,8 +1,4 @@
-
-use crossbeam::{
-    atomic::AtomicConsume,
-    utils::{Backoff},
-};
+use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -12,8 +8,6 @@ use std::{
     sync::atomic::{AtomicI32, AtomicI64, AtomicPtr, Ordering::*},
 };
 use thread_local::ThreadLocal;
-
-
 
 use crate::{dlock::DLock, guard::DLockGuard};
 use crate::{dlock::DLockDelegate, parker::Parker};
@@ -130,7 +124,7 @@ impl<T, P: Parker> CCBan<T, P> {
         let next_node = unsafe { &mut *(*thread_data.get()).node.load_consume() };
 
         next_node.next.store(null_mut(), Release);
-        
+
         // no need for reset as we didn't use wait_timeout
         next_node.wait.reset();
         next_node.completed.store(false, Release);

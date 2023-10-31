@@ -1,5 +1,5 @@
-use std::time::Duration;
 use std::fmt::Debug;
+use std::time::Duration;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum State {

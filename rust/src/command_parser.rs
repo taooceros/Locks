@@ -30,6 +30,7 @@ pub struct App {
 pub enum Experiment {
     RatioOneThree,
     Subversion,
+    ResponseTime,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Display, Serialize)]
@@ -167,4 +168,6 @@ pub struct GlobalOpts {
     pub duration: u64,
     #[arg(global = true, long, short)]
     pub experiment: Option<Experiment>,
+    #[arg(global = true, long, short)]
+    pub verbose: bool,
 }

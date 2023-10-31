@@ -15,7 +15,8 @@ use crate::{
     guard::DLockGuard,
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::rcllock::RclLock,
-    spin_lock::{RawSpinLock, SpinLock}, u_scl::USCL,
+    spin_lock::{RawSpinLock, SpinLock},
+    u_scl::USCL,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -125,7 +126,7 @@ impl<T> fmt::Display for ThirdPartyLock<T> {
         match self {
             ThirdPartyLock::Mutex(_) => write!(f, "Mutex"),
             ThirdPartyLock::SpinLock(_) => write!(f, "SpinLock"),
-            ThirdPartyLock::USCL(_) => write!(f, "U-SCL")
+            ThirdPartyLock::USCL(_) => write!(f, "U-SCL"),
         }
     }
 }

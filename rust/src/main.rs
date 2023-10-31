@@ -1,27 +1,16 @@
 use std::{
-    fs::{create_dir, remove_dir_all},
+    fs::{self, create_dir, remove_dir_all, DirBuilder, Permissions},
     iter::repeat,
+    os::unix::{fs::DirBuilderExt, prelude::PermissionsExt},
     path::Path,
 };
 
+use benchmark::benchmark;
 use clap::Parser;
 use command_parser::*;
-use benchmark::benchmark;
 
-
-
-
-
-
-
-
-
-
-
-
-mod command_parser;
 mod benchmark;
-
+mod command_parser;
 
 fn main() {
     let mut app = App::parse();
@@ -40,38 +29,18 @@ fn main() {
 
     if output_path.is_dir() {
         // remove the dir
-        match remove_dir_all(output_path) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Error removing output dir: {}", e);
-                return;
-            }
-        }
+        remove_dir_all(output_path).expect("Failed to remove output dir");
     }
 
-    match create_dir(output_path) {
-        Ok(_) => {}
-        Err(e) => {
-            println!("Error creating output dir: {}", e);
-            return;
-        }
-    }
+    DirBuilder::new()
+        .mode(0o777)
+        .create(output_path)
+        .expect("Failed to create output dir");
+
+    fs::set_permissions(output_path, Permissions::from_mode(0o777)).unwrap();
 
 
-    for (ncpu, nthread) in app
-        .global_opts
-        .cpus
-        .into_iter()
-        .zip(app.global_opts.threads)
-    {
-        benchmark(
-            ncpu,
-            nthread,
-            app.global_opts.experiment,
-            app.lock_target,
-            output_path,
-            app.global_opts.waiter,
-            app.global_opts.duration,
-        )
+    for (ncpu, nthread) in app.global_opts.cpus.iter().zip(&app.global_opts.threads) {
+        benchmark(*ncpu, *nthread, app.lock_target, &app.global_opts)
     }
 }

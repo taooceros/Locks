@@ -1,29 +1,16 @@
-use std::{
-    fs::File,
-    marker::PhantomData,
-    mem::take,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread::{self, JoinHandle, Scope, ScopedJoinHandle},
-    time::Duration,
-};
+use std::{path::Path, sync::Arc};
 
-use csv::Writer;
 use itertools::Itertools;
 use libdlock::{
-    dlock::{BenchmarkType, DLock, DLockType},
-    guard::DLockGuard,
+    dlock::{BenchmarkType, DLockType},
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::{rcllock::RclLock, rclserver::RclServer},
 };
-use serde::Serialize;
+
 use strum::IntoEnumIterator;
 
 use crate::{
-    benchmark::{counter_job::one_three_benchmark, subversion_job::subversion_benchmark},
+    benchmark::{counter_job::one_three_benchmark, subversion_job::subversion_benchmark, response_time::benchmark_response_time},
     command_parser::{DLockTarget, Experiment, LockTarget, WaiterType},
 };
 
@@ -35,6 +22,7 @@ pub struct Bencher {
     output_path: Box<Path>,
     waiter: WaiterType,
     duration: u64,
+    verbose: bool,
 }
 
 impl Bencher {
@@ -46,6 +34,7 @@ impl Bencher {
         output_path: Box<Path>,
         waiter: WaiterType,
         duration: u64,
+        verbose: bool,
     ) -> Self {
         Self {
             num_cpu,
@@ -55,6 +44,7 @@ impl Bencher {
             output_path,
             waiter,
             duration,
+            verbose,
         }
     }
 
@@ -65,20 +55,25 @@ impl Bencher {
         };
 
         for experiment in experiments {
-            let writer =
-                &mut Writer::from_path(self.output_path.join(format!("{}.csv", experiment)))
-                    .unwrap();
-
             let job = match experiment {
                 Experiment::RatioOneThree => one_three_benchmark,
                 Experiment::Subversion => subversion_benchmark,
+                Experiment::ResponseTime => benchmark_response_time,
             };
 
             let targets = extract_targets(self.waiter, self.target);
 
             for target in targets {
                 if let Some(lock) = target {
-                    self.inner_benchmark(lock.into(), experiment, writer, job);
+                    job(LockBenchInfo {
+                        lock_type: Arc::new(lock),
+                        num_thread: self.num_thread,
+                        num_cpu: self.num_cpu,
+                        experiment,
+                        duration: self.duration,
+                        output_path: &self.output_path,
+                        verbose: self.verbose,
+                    });
                 }
             }
 
@@ -87,11 +82,15 @@ impl Bencher {
                 Some(LockTarget::DLock(DLockTarget::RCL)) | None
             ) {
                 match self.waiter {
-                    WaiterType::Spin => self.bench_rcl::<_, SpinParker>(experiment, writer, job),
-                    WaiterType::Block => self.bench_rcl::<_, BlockParker>(experiment, writer, job),
+                    WaiterType::Spin => {
+                        self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job)
+                    }
+                    WaiterType::Block => {
+                        self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
+                    }
                     WaiterType::All => {
-                        self.bench_rcl::<_, SpinParker>(experiment, writer, job);
-                        self.bench_rcl::<_, BlockParker>(experiment, writer, job)
+                        self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job);
+                        self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
                     }
                 }
             }
@@ -99,94 +98,24 @@ impl Bencher {
         }
     }
 
-    fn bench_rcl<R: Serialize, P>(
-        &self,
-        experiment: Experiment,
-        writer: &mut Writer<File>,
-        job: fn(LockBenchInfo<u64>) -> R,
-    ) where
+    fn bench_rcl<T, P>(&self, experiment: Experiment, output_path: &Path, job: fn(LockBenchInfo<T>))
+    where
+        T: Send + Sync + 'static + Default,
         P: Parker + 'static,
-        R: Serialize + Send + Sync + 'static,
-        BenchmarkType<u64>: From<DLockType<u64, P>>,
+        BenchmarkType<T>: From<DLockType<T, P>>,
     {
         let mut server = RclServer::new();
         server.start(self.num_cpu - 1);
-        let lock = RclLock::<u64, P>::new(&mut server, 0u64);
+        let lock = DLockType::RCL(RclLock::<T, P>::new(&mut server, T::default()));
 
-        self.inner_benchmark(
-            Arc::new(DLockType::RCL(lock).into()),
+        job(LockBenchInfo {
+            lock_type: Arc::new(lock.into()),
+            num_thread: self.num_thread,
+            num_cpu: self.num_cpu,
             experiment,
-            writer,
-            job,
-        );
-    }
-
-    fn inner_benchmark<T: Send + Sync + 'static, R: Serialize + Send + Sync + 'static>(
-        &self,
-        lock_type: Arc<BenchmarkType<T>>,
-        experiment: Experiment,
-        writer: &mut Writer<File>,
-        job: fn(LockBenchInfo<T>) -> R,
-    ) where
-        R: Serialize,
-    {
-        static STOP: AtomicBool = AtomicBool::new(false);
-
-        STOP.store(false, Ordering::Release);
-
-        thread::scope(|s| {
-            let mut results: Vec<R> = Vec::new();
-
-            {
-                let mut threads = (0..self.num_thread)
-                    .map(|id| BenchJob::new(self, lock_type.clone(), &STOP, id, s))
-                    .collect::<Vec<_>>();
-
-                println!("Starting {} for {}|{}", experiment, lock_type.lock_name(), lock_type.parker_name());
-
-                for thread in threads.iter_mut() {
-                    thread.start_benchmark(job);
-                }
-
-                thread::sleep(Duration::from_secs(self.duration));
-
-                STOP.store(true, Ordering::Release);
-
-                let mut i = 0;
-
-                for job in threads.iter_mut() {
-                    let l = std::mem::take(&mut job.handle)
-                        .expect("Unexpected None Handle")
-                        .join();
-                    match l {
-                        Ok(l) => {
-                            results.push(l);
-                            // println!("{}", l);
-                        }
-                        Err(_e) => eprintln!("Error joining thread: {}", i),
-                    }
-                    i += 1;
-                }
-            }
-
-            for result in results.iter() {
-                writer.serialize(result).unwrap();
-            }
-
-            // let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
-
-            // lock_type.lock(|guard: DLockGuard<u64>| {
-            //     assert_eq!(
-            //         *guard, total_count,
-            //         "Total counter is not matched with lock value {}, but thread local loop sum {}",
-            //         *guard, total_count
-            //     );
-            // });
-
-            // println!(
-            //     "Finish Benchmark for {}: Total Counter {}",
-            //     lock_type, total_count
-            // );
+            duration: self.duration,
+            output_path,
+            verbose: self.verbose,
         });
     }
 }
@@ -198,55 +127,10 @@ where
     pub lock_type: Arc<BenchmarkType<T>>,
     pub num_thread: usize,
     pub num_cpu: usize,
-    pub stop: &'a AtomicBool,
-    pub id: usize,
-}
-
-pub struct BenchJob<'scope, 'env, T, R>
-where
-    T: Send + Sync + 'static,
-    R: Serialize,
-{
-    info: Option<LockBenchInfo<'scope, T>>,
-    handle: Option<ScopedJoinHandle<'scope, R>>,
-    scope: &'scope Scope<'scope, 'env>,
-    _photom_r: PhantomData<R>,
-}
-
-impl<'scope, 'env, T, R> BenchJob<'scope, 'env, T, R>
-where
-    T: Send + Sync + 'static,
-    R: Serialize + Send + Sync + 'static,
-{
-    pub fn new(
-        bencher: &'env Bencher,
-        lock_type: Arc<BenchmarkType<T>>,
-        stop: &'env AtomicBool,
-        id: usize,
-        scope: &'scope Scope<'scope, 'env>,
-    ) -> BenchJob<'scope, 'env, T, R> {
-        Self {
-            info: Some(LockBenchInfo {
-                lock_type,
-                num_thread: bencher.num_thread,
-                num_cpu: bencher.num_cpu,
-                stop,
-                id,
-            }),
-            handle: None,
-            _photom_r: PhantomData,
-            scope,
-        }
-    }
-
-    fn start_benchmark<F>(&mut self, job: F)
-    where
-        F: FnOnce(LockBenchInfo<T>) -> R + Send + Sync + 'static,
-    {
-        let info = self.info.take().expect("Unexpected None Info");
-
-        self.handle = Some(self.scope.spawn(move || job(info)));
-    }
+    pub experiment: Experiment,
+    pub duration: u64,
+    pub output_path: &'a Path,
+    pub verbose: bool,
 }
 
 fn extract_targets(

@@ -5,7 +5,7 @@ use crossbeam::utils::CachePadded;
 use crate::{dlock::DLockDelegate, parker::Parker};
 
 #[derive(Default)]
-pub(crate) struct Node<T, P : Parker> {
+pub(crate) struct Node<T, P: Parker> {
     pub(super) f: CachePadded<Option<*mut dyn DLockDelegate<T>>>,
     pub(super) wait: P,
     pub(super) completed: AtomicBool,
