@@ -1,5 +1,5 @@
-sudo apt update
-sudo apt install clang mold
+sudo apt-get update
+sudo apt-get install clang mold -y
 
 git clone https://github.com/taooceros/Locks.git
 cd Locks
