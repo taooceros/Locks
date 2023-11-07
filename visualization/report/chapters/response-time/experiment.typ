@@ -33,14 +33,21 @@ In the center of the graph, we can see the behavior of various variants of Flat 
 
 The behavior of #fc-ban (*Flat Combining Fair* in the graph at the left bottom) has a similar distribution regardless whether a thread is combining, which is kindly interesting. Note that the _x-axis_ scale of blocking version is different from the one of spinning version (and also different from #fc). Theoredically, I anticipate to see similar result as #fc, but since the critical section is too short, the calculation of usage might get errored, causing some thread got banned unexpectedly. 
 
-The _kink_ is interesting, but I cannot think of a reasonable explanation for it. This _kink_ also appears for #ccsynch-ban, so I believe might be caused by the huristic algorithm of banning.
+The _kink_ is interesting, but I cannot think of a reasonable explanation for it. This _kink_ also appears for #ccsynch-ban, so I believe might be caused by the huristic algorithm of banning or that the experiment is running in a 2-core system, which has _NUMA_ behavior. Though since other locks doesn't have that behavior I would doubt the huristic algorithm is more like the cause.
 
 ==== #ccsynch
 
-On the top of the graph, we can see that #ccsynch is providing a more concentrated distribution of response time, both combining or not.
+On the top of the graph, we can see that #ccsynch is providing a more concentrated distribution of response time, both combining or not. The panalty of combining is smaller than expected, but probably due to the fact that the critical section is too short.
+
+The _kink_ is also presented in #ccsynch-ban, and we can see that some small number of combiner will have very long waiting time. This is because the job limit is setted based on volunteering time as #fc-skiplist, but surprisingly much less combiner is combining to the limit, which differs significantly from #fc-skiplist. This might be due to the banning policy, which reduces the number of waiters.
 
 ==== #fc-skiplist
 
 At the rightest of the second row, we can see the behavior of #fc-skiplist shows some expected pattern. The non-combining threads are having a seemingly short response time, and the combining threads are having a relatively large waiting time. The promise of #fc-skiplist is to provide a *CFS*-like scheduling policy, with a bound of volunteering time as combiner. Even though the combiner may experience long waiting time, it is bounded by the maximum servicing time of the lock.
 
+== Future Work
 
+The experiment is pretty rough, and is conducted for a very short critical sections. The following is a list of future work that I would like to do.
+
++ One that has variable length of critical section, and see how the response time changes. Maybe this time more than just 1 vs 3 ratio.
++ One that has slightly longer critical section with similar critical section length.
