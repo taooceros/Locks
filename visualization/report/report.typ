@@ -14,21 +14,16 @@
 
 #pagebreak()
 
-#let ccsynch = smallcaps([CC-Synch])
-#let fc = smallcaps[Flat-Combining]
-#let ffwd = smallcaps[ffwd]
-
-#let fc-ban = [#fc (Banning)]
-#let ccsynch-ban = [#ccsynch (Banning)]
+#import "shortcut.typ": *
 
 = Introduction
 
 Delegation locking adapts the request-response style of
 communication to minimize shared data movement.
 Specifically, the waiter delegates their critical section to
-a combiner ( #fc/ #ccsynch) #cite("flatcombining_ref", "ccsynch_ref")
+a combiner ( #fc/ #ccsynch) @flatcombining_ref@ccsynch_ref
 
-, or a dedicated server thread #cite("rcl_ref", "ffwd_ref")
+, or a dedicated server thread @rcl_ref@ffwd_ref
 
 . We will describe some implementation details of #fc
 , #ccsynch, and RCL in @impl.
@@ -228,101 +223,15 @@ its variants (@ccsynch).
 
 === #fc <flatcombining>
 
-#import "flatcombining.typ": flatcombining
-
-#flatcombining
+#include "chapters/flatcombining.typ"
 
 === Remote Core Locking <rcl>
 
-Similar to #fc, RCL also maintains a list of nodes owned by
-each thread. The primary distinction is that RCL designates
-a specific thread to act as the server (combiner).
-Consequently, it's akin to a remote procedure call, as
-proposed in the original paper. Notably, RCL utilizes an
-array of nodes, whereas #fc
-uses a linked list of nodes. This design difference in RCL
-should yield improved performance when the number of
-inactive threads is relatively small.
-
-One of the primary goals of RCL is to facilitate easy
-migration of legacy code. To achieve this, RCL employs a
-complex algorithm to ensure that the server thread won't be
-blocked or engaged in active spinning, which could
-negatively impact performance. Additionally, RCL's design
-enables the server to handle multiple locks, allowing for
-straightforward porting of legacy code. While our
-implementation doesn't cover the complete version of RCL and
-thus won't delve into these aspects, one core goal of
-enabling one server to manage various types of locks is
-retained. Achieving this presents a significant challenge
-within the Rust type system, as we aim to statically
-dispatch type information to prevent performance regression.
-Further implementation details can be found in the appendix
-labeled @rcl_detail_impl.
+#include "chapters/rcl.typ"
 
 === #smallcaps[CC-Synch/H-Synch] <ccsynch>
 
-#smallcaps[CC-Synch] maintains a first-in, first-out (FIFO)
-queue of jobs. Unlike #fc, where each node corresponds to a
-thread, in #smallcaps[CC-Synch]
-
-each node signifies a job. Additionally, the selection of
-the combiner is achieved without involving a lock; rather,
-it's accomplished in a lock-free manner, relying on the
-position of the job queue.
-
-Intuitively, a thread will be elected as a combiner if one
-of the following conditions is satisfied: 1. Its job is
-positioned at the end of the queue. 2. Previous Combiner has
-reached the execution limit.
-
-In contrast to FlatCombining, it's important to note that an
-execution limit is necessary to ensure that the combiner
-does not execute an excessive number of critical sections.
-The job queue has the potential to extend infinitely,
-thereby causing the combiner to possibly prioritize jobs
-from the queue indefinitely, potentially neglecting its own
-task. In contrast, the maximum number of jobs performed by
-FlatCombining's combiner is constrained by the number of
-threads, which we can assume to be finite.
-
-The algorithms can be outlined as follows:
-
-+ Each thread maintains a mutable thread-local pointer to a
-  node. Note that, unlike in FlatCombining where the node
-  always belongs to the creating thread, in this scheme, nodes
-  can be accessed and modified by different threads.
-+ When a thread intends to execute a critical section:
-  + It swaps its pointer storage with the current head node.
-  + The task is then assigned to the old head node that was just
-    swapped, and this node becomes connected to the previous
-    node (which is now the new head).
-+ To ensure lock-free operation, a somewhat intricate
-  mechanism is employed:
-  + Each node has two properties: `wait` and `completed`
-  + Initially, `wait` and `completed` are set to false.
-  + Before a thread swaps its thread-local node to head, it sets
-    the `wait` property to true. The old-head then becomes the
-    thread-local node of the thread.
-  + Once the task assignment is done, the thread checks the `wait`
-
-    property. If it'
-    s true, the thread waits until it becomes false.
-  + Once wait becomes false, the thread examines the completed
-    property. If the task has not been completed, it assumes the
-    role of the combiner.
-  + The combiner will stop execution at `head` node, which doesn'
-
-    t have children (there will always be an extra dummy node
-    for swapping). Mark its wait as false, and exit.
-
-H-Synch, although not currently implemented, represents a
-NUMA-aware variant of #ccsynch
-. The underlying concept is straightforward: it introduces
-multiple queues based on NUMA nodes, and each combiner
-competes for execution on the queue specific to its cluster.
-This approach takes into account the NUMA architecture to
-optimize task execution.
+#include "chapters/ccsynch.typ"
 
 == Fair delegation-style locks
 
@@ -467,7 +376,6 @@ Following this preparatory phase, job execution follows a
 pattern akin to #fc, utilizing the prioritized data
 structure to facilitate fairness.
 
-#let fc-skiplist = [#fc (Skip-List)]
 
 ==== #fc-skiplist <flatcombining_skiplist>
 
@@ -508,62 +416,7 @@ elect the combiner in a manner similar to #ccsynch.
 
 === Response Time
 
-Delegation-style locks introduce an additional layer of
-unfairness beyond the conventional concern of unfairness
-arising from lock usage. The combiner, responsible for
-executing tasks on behalf of others, becomes subject to a
-significant impact on its own response time. To illustrate,
-consider the case of #fc
-, where the combiner for a lock must endure a wait time that
-can be twice the average response time of the threads it's
-assisting. This situation becomes particularly problematic
-in scenarios where the waiters are blocked, as evidenced in
-the left plot of the @combining_time_box_plot. In this
-specific example, two out of the 32 threads are engaging in
-combining for over 80% of the time. This issue escalates
-further as the thread count increases. (Note: When
-developing the initial version of #fc
-in Rust, it was observed that the blocking variant of #fc
-
-outperformed the spin-wait version, and an analysis of
-combining time offered insights into this phenomenon.) #ccsynch
-
-also suffers from this issue, which is only noticable with
-32 threads.
-
-#figure(
-  caption: [
-    Combining Time Distribution of 32 threads execution (0ns
-    critical section)
-  ],
-)[
-    #image("../graphs/combining_time_box_plot.svg")
-  ]<combining_time_box_plot>
-
-This insight underscores the significance of not only
-optimizing the scheduling of waiters but also addressing the
-scheduling of the combiner itself. Furthermore, it suggests
-that we can mitigate average response times by thoughtfully
-selecting which thread assumes the role of the combiner. A
-potential is the deliberate choice to designate the tail of
-the threads list as the combiner in #fc
-.
-
-Due to the"flat" execution nature, the tail node is
-consistently executed last, implying that its response time
-equates to the cumulative sum of all critical sections
-within the current pass. Consequently, adopting the role of
-a combiner does not impose any penalty on its response time
-(if there's no combiner executing). Conversely, if the head
-node were to become the combiner, its response time would
-experience a significant regression, shifting from its own
-critical section length to the summation of all critical
-sections within the current pass.
-
-#text(
-  green.darken(30%),
-)[Experiments regarding response time hasn't been added, and
-    all these ideas also haven't been implemented.]
+#include "chapters/response-time.typ"
 
 ==== Combiner Slice
 
@@ -917,7 +770,7 @@ CrossBeam @crossbeam_ref. Note that the `PreNotified` state
 greatly complex the code. Without it, a `swap` is enough to
 implement it.
 
-#sourcefile("../../rust/src/parker/spin_parker.rs")
+#sourcefile("../../rust/lib-dlock/src/parker/spin_parker.rs")
 
 == Block Parker Code <blockparker_code>
 
