@@ -55,9 +55,8 @@ arises from the fact that delegation-style locks do not
 provide a standard locking API. In response to this concern,
 RCL has been developed as a solution. RCL offers a code
 migration aid, facilitating the seamless transition of
-legacy code to one that employs RCL'
-
-s locking mechanism @rcl_ref. Moreover, recent research
+legacy code to one that employs RCL's
+locking mechanism @rcl_ref. Moreover, recent research
 efforts have demonstrated the viability of transparent
 delegation to provide delegation-style lock in standard
 locking API @transparent_dlock_ref.
