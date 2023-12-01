@@ -58,13 +58,12 @@ pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-
     static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
     let mut writer = unsafe {
         WRITER
             .get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(&info.output_path.join("one_three_ratio.csv"))
+                    create_writer(&info.output_path.join("response_time_one_three_ratio.csv"))
                         .expect("Failed to create writer"),
                 ))
             })
