@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
 
-pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
+pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
     println!(
         "Start Respone Time Measure for {}",
         info.lock_type.lock_name()
@@ -62,7 +62,7 @@ pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
         &info
             .output_path
             .join("response_times")
-            .join(format!("response_time.csv",)),
+            .join(format!("one_three_ratio.csv",)),
     )
     .expect("Failed to create writer");
 
@@ -150,6 +150,7 @@ fn thread_job(
         thread_num: num_thread,
         cpu_num: num_cpu,
         hold_time,
+        job_length: single_iter_duration,
         is_combiner: is_combiners,
         response_times,
         #[cfg(feature = "combiner_stat")]
@@ -164,6 +165,7 @@ pub struct Records {
     pub cpu_id: usize,
     pub thread_num: usize,
     pub cpu_num: usize,
+    pub job_length: Duration,
     pub is_combiner: Vec<bool>,
     pub response_times: Vec<Duration>,
     pub hold_time: Duration,
@@ -180,6 +182,7 @@ impl Records {
                 cpu_id: self.cpu_id,
                 thread_num: self.thread_num,
                 cpu_num: self.cpu_num,
+                job_length: self.job_length,
                 is_combiner: *is_combiner,
                 response_times: *response_time,
                 hold_time: self.hold_time,
@@ -199,6 +202,8 @@ pub struct Record {
     pub cpu_id: usize,
     pub thread_num: usize,
     pub cpu_num: usize,
+    #[serde_as(as = "DurationNanoSeconds")]
+    pub job_length: Duration,
     pub is_combiner: bool,
     #[serde_as(as = "DurationNanoSeconds")]
     pub response_times: Duration,

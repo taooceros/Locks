@@ -30,7 +30,7 @@ pub struct App {
 pub enum Experiment {
     RatioOneThree,
     Subversion,
-    ResponseTime,
+    ResponseTimeSingleAddition,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Display, Serialize)]
