@@ -77,7 +77,7 @@ Some remarks for now:
 
 Personally I've had the idea of using _async/await_ to build a lock that enable faster switching for a long time. My initial motivation toward delegation-style locks comes from the UI-dispatcher of WPF that acts as a locks. Though, this type of usage of _async/await_ is newly stemmed when I was thinking about solving the response time issue of the combiner. Even though in our earlier experiment the response time of the combiner is not worse too much, but my gut tells me that is likely due to the fact that the experiment is running in a short critical section, where the switching is expensive. The idea of using _async/await_ is also inspired by the work of @transparent_dlock_ref, where they has shown that what we really cares is the context, rather than the critical section itself. Thus _async/await_ is a very nice fit (as a user-level thread) to modify the scheduling policy of the OS scheduler.
 
-Further part of the idea stemed from Yuvraj's idea of switching the CPU when switching the owner of the lock. I propose that instead of switching the CPU, we can switch the thread, which might save us a little from handling the assembly? Nonetheless, I believe the spirit of delegation-style lock is that lock provides additional locality. Owning a locks mean we are sharing some resource, which might be expensive to move.
+Further part of the idea stemed from Yuvraj's idea of switching the CPU when switching the owner of the lock. I propose that instead of switching the CPU, we can switch the thread, which might or might not be better? Nonetheless, I believe the spirit of delegation-style lock is that lock provides additional locality. Owning a locks mean we are sharing some resource, which might be expensive to move.
 
 
 
