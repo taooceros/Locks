@@ -1,8 +1,8 @@
 use serde_with::DurationMilliSeconds;
 
 use std::num::NonZeroI64;
-use std::path::{Path, PathBuf};
-use std::thread::LocalKey;
+use std::path::{Path};
+
 use std::time::Duration;
 
 use serde::Serialize;
@@ -16,7 +16,8 @@ mod bencher;
 mod counter_job;
 mod helper;
 mod subversion_job;
-mod response_time;
+mod response_time_single_addition;
+mod response_time_variable;
 
 pub fn benchmark(
     num_cpu: usize,

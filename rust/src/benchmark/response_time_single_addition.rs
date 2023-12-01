@@ -7,20 +7,16 @@ use libdlock::guard::DLockGuard;
 use quanta::Clock;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::BoolFromInt;
 use serde_with::DurationNanoSeconds;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
-use std::iter::Once;
-use std::num::{NonZeroI64, NonZeroU64};
+use std::num::NonZeroI64;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
 
-static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
-
-pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
+pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     println!(
         "Start Respone Time Measure for {}",
         info.lock_type.lock_name()
@@ -32,7 +28,7 @@ pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
 
     STOP.store(false, Ordering::Release);
 
-    let mut results: Vec<Record> = Vec::new();
+    let mut results: Vec<Records> = Vec::new();
 
     let handles = (0..info.num_thread)
         .map(|id| {
@@ -62,21 +58,26 @@ pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-    let file = create_writer(&info.output_path.join("response_times").join(format!(
-        "{}-{}-{}-{}.json",
-        lock_type.lock_name(),
-        lock_type.parker_name(),
-        num_cpu,
-        num_thread
-    )))
-    .expect("Failed to create writer");
 
-    serde_json::to_writer(file, &results).unwrap();
+    static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+    let mut writer = unsafe {
+        WRITER
+            .get_or_init(|| {
+                RefCell::new(Writer::from_writer(
+                    create_writer(&info.output_path.join("single_addition.csv"))
+                        .expect("Failed to create writer"),
+                ))
+            })
+            .borrow_mut()
+    };
+    for result in results.iter().flat_map(|r| r.to_records()) {
+        writer.serialize(result).unwrap();
+    }
 
     if info.verbose {
         let mut histogram = Histogram::with_buckets(5);
         for result in results.into_iter().flat_map(|r| r.response_times) {
-            histogram.add(result.as_nanos() as u64);
+            histogram.add(result.as_nanos().try_into().unwrap());
         }
 
         println!("{}", histogram);
@@ -91,18 +92,10 @@ fn thread_job(
     num_cpu: usize,
     stop: &'static AtomicBool,
     lock_type: Arc<BenchmarkType<u64>>,
-) -> Record {
+) -> Records {
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
-    let single_iter_duration: Duration = Duration::from_micros({
-        if id % 2 == 0 {
-            10
-        } else {
-            30
-        }
-    });
     let timer = Clock::new();
 
-    let mut loop_result = 0u64;
     let mut num_acquire = 0u64;
     let mut hold_time = Duration::ZERO;
 
@@ -120,12 +113,7 @@ fn thread_job(
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             num_acquire += 1;
-            let begin = timer.now();
-
-            while timer.now() - begin < single_iter_duration {
-                (*guard) += 1;
-                loop_result += 1;
-            }
+            *guard += 1;
 
             is_combiner = current().id() == thread_id;
 
@@ -136,7 +124,7 @@ fn thread_job(
         response_times.push(timer.now().duration_since(begin));
     }
 
-    return Record {
+    return Records {
         id,
         cpu_id: id % num_cpu,
         thread_num: num_thread,
@@ -151,6 +139,39 @@ fn thread_job(
     };
 }
 
+pub struct Records {
+    pub id: usize,
+    pub cpu_id: usize,
+    pub thread_num: usize,
+    pub cpu_num: usize,
+    pub is_combiner: Vec<bool>,
+    pub response_times: Vec<Duration>,
+    pub hold_time: Duration,
+    pub combine_time: Option<NonZeroI64>,
+    pub locktype: String,
+    pub waiter_type: String,
+}
+
+impl Records {
+    pub fn to_records(&self) -> impl Iterator<Item = Record> + '_ {
+        self.is_combiner.iter().zip(self.response_times.iter()).map(
+            |(is_combiner, response_time)| Record {
+                id: self.id,
+                cpu_id: self.cpu_id,
+                thread_num: self.thread_num,
+                cpu_num: self.cpu_num,
+                is_combiner: *is_combiner,
+                response_times: *response_time,
+                hold_time: self.hold_time,
+                #[cfg(feature = "combiner_stat")]
+                combine_time: self.combine_time,
+                locktype: self.locktype.clone(),
+                waiter_type: self.waiter_type.clone(),
+            },
+        )
+    }
+}
+
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct Record {
@@ -158,9 +179,10 @@ pub struct Record {
     pub cpu_id: usize,
     pub thread_num: usize,
     pub cpu_num: usize,
-    pub is_combiner: Vec<bool>,
-    #[serde_as(as = "Vec<DurationNanoSeconds>")]
-    pub response_times: Vec<Duration>,
+    pub is_combiner: bool,
+    #[serde_as(as = "DurationNanoSeconds")]
+    pub response_times: Duration,
+    #[serde_as(as = "DurationNanoSeconds")]
     pub hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
     pub combine_time: Option<NonZeroI64>,
