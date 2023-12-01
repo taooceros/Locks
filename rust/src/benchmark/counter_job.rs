@@ -1,9 +1,9 @@
 use csv::Writer;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
-use std::iter::Once;
+
 use std::{
-    sync::{atomic::*, Arc, OnceLock},
+    sync::{atomic::*, Arc},
     thread,
     time::Duration,
 };
@@ -21,7 +21,7 @@ use super::bencher::LockBenchInfo;
 
 static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
 
-pub fn one_three_benchmark(info: LockBenchInfo<u64>) {
+pub fn counter_one_three_benchmark(info: LockBenchInfo<u64>) {
     println!("Start OneThreeCounter for {}", info.lock_type.lock_name());
 
     let mut writer = unsafe {
