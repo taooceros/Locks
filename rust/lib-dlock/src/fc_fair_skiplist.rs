@@ -3,11 +3,8 @@ use std::{
     sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
 };
 
-use crossbeam::{
-    epoch::{default_collector, pin, Guard},
-    utils::CachePadded,
-};
-use crossbeam_skiplist::SkipList;
+use crossbeam::utils::CachePadded;
+use crossbeam_skiplist::SkipMap;
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -40,7 +37,7 @@ where
     combiner_lock: CachePadded<L>,
     data: SyncUnsafeCell<T>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
-    jobs: SkipList<Usage, AtomicPtr<Node<T, P>>>,
+    jobs: SkipMap<Usage, AtomicPtr<Node<T, P>>>,
 }
 
 impl<T, P> FcSL<T, RawSpinLock, P>
@@ -53,22 +50,22 @@ where
             combiner_lock: CachePadded::new(RawSpinLock::new()),
             data: SyncUnsafeCell::new(data),
             local_node: ThreadLocal::new(),
-            jobs: SkipList::new(default_collector().clone()),
+            jobs: SkipMap::new(),
         }
     }
 
-    fn push_node(&self, node: *mut Node<T, P>, guard: &Guard) {
+    fn push_node(&self, node: *mut Node<T, P>) {
         unsafe {
             let key = Usage {
                 usage: (*node).usage,
                 thread_id: current().id().as_u64(),
             };
 
-            self.jobs.insert(key, AtomicPtr::new(node), guard);
+            self.jobs.insert(key, AtomicPtr::new(node));
         }
     }
 
-    fn combine(&self, guard: &Guard) {
+    fn combine(&self) {
         let mut aux = 0;
         let combiner_begin = unsafe { __rdtscp(&mut aux) };
         let mut slice: u64 = 0;
@@ -76,7 +73,7 @@ where
         while slice < COMBINER_SLICE {
             let begin = unsafe { __rdtscp(&mut aux) };
 
-            let front_entry = self.jobs.pop_front(guard);
+            let front_entry = self.jobs.pop_front();
 
             match front_entry {
                 Some(entry) => {
@@ -124,19 +121,17 @@ impl<T: 'static, P: Parker> DLock<T> for FcSL<T, RawSpinLock, P> {
 
         let node = unsafe { &mut *(node_cell).get() };
 
-        let guard = &pin();
-
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
         node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
         node.parker.reset();
 
-        self.push_node(node, guard);
+        self.push_node(node);
 
         loop {
             if self.combiner_lock.try_lock() {
                 // combiner
-                self.combine(guard);
+                self.combine();
 
                 self.combiner_lock.unlock();
             }
