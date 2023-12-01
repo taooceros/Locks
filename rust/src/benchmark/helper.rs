@@ -11,10 +11,7 @@ pub fn create_writer(path: &Path) -> Result<File, std::io::Error> {
         std::fs::create_dir_all(path.parent().expect("Failed to get parent"))?;
     }
 
-    let f = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(path)?;
+    let f = OpenOptions::new().append(true).create(true).open(path)?;
 
     let metadata = f.metadata()?;
     let mut permissions = metadata.permissions();
