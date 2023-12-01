@@ -10,7 +10,12 @@ use libdlock::{
 use strum::IntoEnumIterator;
 
 use crate::{
-    benchmark::{counter_job::one_three_benchmark, subversion_job::subversion_benchmark, response_time_single_addition::benchmark_response_time_single_addition},
+    benchmark::{
+        counter_job::counter_one_three_benchmark,
+        response_time_single_addition::benchmark_response_time_single_addition,
+        response_time_variable::benchmark_response_time_one_three_ratio,
+        subversion_job::counter_subversion_benchmark,
+    },
     command_parser::{DLockTarget, Experiment, LockTarget, WaiterType},
 };
 
@@ -56,9 +61,10 @@ impl Bencher {
 
         for experiment in experiments {
             let job = match experiment {
-                Experiment::RatioOneThree => one_three_benchmark,
-                Experiment::Subversion => subversion_benchmark,
+                Experiment::CounterRatioOneThree => counter_one_three_benchmark,
+                Experiment::CounterSubversion => counter_subversion_benchmark,
                 Experiment::ResponseTimeSingleAddition => benchmark_response_time_single_addition,
+                Experiment::ResponseTimeRatioOneThree => benchmark_response_time_one_three_ratio,
             };
 
             let targets = extract_targets(self.waiter, self.target);

@@ -23,7 +23,7 @@ use super::{bencher::LockBenchInfo, Record};
 
 static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
 
-pub fn subversion_benchmark(info: LockBenchInfo<u64>) {
+pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
     println!("Start Subversion for {}", info.lock_type);
 
     let mut writer = unsafe {
