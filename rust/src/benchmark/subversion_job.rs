@@ -4,7 +4,7 @@ use std::fs::File;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     thread,
     time::Duration,

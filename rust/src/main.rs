@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, create_dir, remove_dir_all, DirBuilder, Permissions},
+    fs::{self, remove_dir_all, DirBuilder, Permissions},
     iter::repeat,
     os::unix::{fs::DirBuilderExt, prelude::PermissionsExt},
     path::Path,

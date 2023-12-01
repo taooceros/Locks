@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use csv::Writer;
+
 
 pub fn create_writer(path: &Path) -> Result<File, std::io::Error> {
     if !path.parent().expect("Failed to get parent").exists() {

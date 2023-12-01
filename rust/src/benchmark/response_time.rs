@@ -10,9 +10,9 @@ use serde_with::serde_as;
 use serde_with::DurationNanoSeconds;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
-use std::num::{NonZeroI64, NonZeroU64};
+use std::num::NonZeroI64;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
 
@@ -58,7 +58,7 @@ pub fn benchmark_response_time(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-    let mut file = create_writer(
+    let _file = create_writer(
         &info
             .output_path
             .join("response_times")
