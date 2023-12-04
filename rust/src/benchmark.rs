@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 
 use crate::command_parser::*;
+use crate::command_parser::lock_target::LockTarget;
 
 use self::bencher::Bencher;
 

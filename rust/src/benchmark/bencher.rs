@@ -17,7 +17,7 @@ use crate::{
         response_time_variable::benchmark_response_time_one_three_ratio,
         subversion_job::counter_subversion_benchmark,
     },
-    command_parser::{DLockTarget, Experiment, LockTarget, WaiterType},
+    command_parser::{experiment::Experiment, lock_target::*},
 };
 
 pub struct Bencher {
