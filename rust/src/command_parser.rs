@@ -15,7 +15,7 @@ pub mod lock_target;
 /// Benchmark Utility
 pub struct App {
     #[command(subcommand)]
-    pub lock_target: Option<LockTarget>,
+    pub lock_target: Option<Experiment>,
     #[command(flatten)]
     pub global_opts: GlobalOpts,
 }
@@ -33,7 +33,7 @@ pub struct GlobalOpts {
     #[arg(global = true, long, short, default_value = "5")]
     pub duration: u64,
     #[arg(global = true, long, short)]
-    pub experiment: Option<Experiment>,
+    pub lock_target: Option<Vec<LockTarget>>,
     #[arg(global = true, long, short)]
     pub verbose: bool,
 }

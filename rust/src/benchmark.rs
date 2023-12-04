@@ -1,37 +1,42 @@
 use serde_with::DurationMilliSeconds;
+use strum::IntoEnumIterator;
 
 use std::num::NonZeroI64;
-use std::path::{Path};
+use std::path::Path;
 
 use std::time::Duration;
 
 use serde::Serialize;
 use serde_with::serde_as;
 
-use crate::command_parser::*;
+use crate::command_parser::experiment::Experiment;
 use crate::command_parser::lock_target::LockTarget;
+use crate::command_parser::*;
 
 use self::bencher::Bencher;
 
 mod bencher;
-mod one_three_ratio_counter;
 mod helper;
-mod subversion_job;
+mod non_cs_counter;
+mod one_three_ratio_counter;
 mod response_time_single_addition;
 mod response_time_variable;
-mod non_cs_counter;
+mod subversion_job;
 
 pub fn benchmark(
     num_cpu: usize,
     num_thread: usize,
-    lock_target: Option<LockTarget>,
+    experiment: Option<Experiment>,
     options: &GlobalOpts,
 ) {
     let bencher = Bencher::new(
         num_cpu,
         num_thread,
-        options.experiment,
-        lock_target,
+        experiment,
+        match &options.lock_target {
+            Some(t) => t.clone(),
+            None => LockTarget::iter().collect(),
+        },
         Path::new(&options.output_path)
             .to_path_buf()
             .into_boxed_path(),

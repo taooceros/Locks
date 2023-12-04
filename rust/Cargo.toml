@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-bindgen = "0.68.1"
+bindgen = "0.69.1"
 
 [features]
 default = ["combiner_stat"]
@@ -14,10 +14,10 @@ combiner_stat = []
 
 
 [dependencies]
-clap = { version = "4.3.12", features = ["derive"] }
+clap = { version = "4.4.10", features = ["derive"] }
 strum = { version = "0.25", features = ["derive"] }
 csv = "1.2.1"
-itertools = "0.11.0"
+itertools = "0.12.0"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_with = { version = "3.0.0" }
 libdlock = {path = "./lib-dlock"}

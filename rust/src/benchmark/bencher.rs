@@ -24,7 +24,7 @@ pub struct Bencher {
     num_cpu: usize,
     num_thread: usize,
     experiment: Option<Experiment>,
-    target: Option<LockTarget>,
+    targets: Vec<LockTarget>,
     output_path: Box<Path>,
     waiter: WaiterType,
     duration: u64,
@@ -36,7 +36,7 @@ impl Bencher {
         num_cpu: usize,
         num_thread: usize,
         experiment: Option<Experiment>,
-        target: Option<LockTarget>,
+        target: Vec<LockTarget>,
         output_path: Box<Path>,
         waiter: WaiterType,
         duration: u64,
@@ -46,7 +46,7 @@ impl Bencher {
             num_cpu,
             num_thread,
             experiment,
-            target,
+            targets: target,
             output_path,
             waiter,
             duration,
@@ -69,7 +69,7 @@ impl Bencher {
                 Experiment::ResponseTimeRatioOneThree => benchmark_response_time_one_three_ratio,
             };
 
-            let targets = extract_targets(self.waiter, self.target);
+            let targets = extract_targets(self.waiter, self.targets.iter());
 
             for target in targets {
                 if let Some(lock) = target {
@@ -85,10 +85,7 @@ impl Bencher {
                 }
             }
 
-            if matches!(
-                self.target,
-                Some(LockTarget::DLock(DLockTarget::RCL)) | None
-            ) {
+            if self.targets.contains(&LockTarget::RCL) {
                 match self.waiter {
                     WaiterType::Spin => {
                         self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job)
@@ -141,35 +138,25 @@ where
     pub verbose: bool,
 }
 
-fn extract_targets(
+fn extract_targets<'a>(
     waiter: WaiterType,
-    target: Option<LockTarget>,
+    targets: impl Iterator<Item = &'a LockTarget>,
 ) -> Vec<Option<BenchmarkType<u64>>> {
     let targets: Vec<Option<BenchmarkType<u64>>> = match waiter {
-        WaiterType::Spin => match target {
-            Some(target) => vec![target.to_locktype::<SpinParker>()],
-            None => (LockTarget::iter().map(|t| t.to_locktype::<SpinParker>())).collect(),
-        },
-        WaiterType::Block => match target {
-            Some(target) => vec![target.to_locktype::<BlockParker>()],
-            None => (LockTarget::iter().map(|t| t.to_locktype::<BlockParker>())).collect(),
-        },
-        WaiterType::All => match target {
-            Some(target) => {
-                let mut locks = vec![target.to_locktype::<SpinParker>()];
-                if matches!(target, LockTarget::DLock(_)) {
-                    locks.push(target.to_locktype::<BlockParker>());
+        WaiterType::Spin => targets.map(|t| t.to_locktype::<SpinParker>()).collect(),
+        WaiterType::Block => targets.map(|t| t.to_locktype::<BlockParker>()).collect(),
+        WaiterType::All => targets
+            .flat_map(|t| {
+                if t.is_dlock() {
+                    vec![
+                        t.to_locktype::<SpinParker>(),
+                        t.to_locktype::<BlockParker>(),
+                    ]
+                } else {
+                    vec![t.to_locktype::<SpinParker>()]
                 }
-                locks
-            }
-            None => (LockTarget::iter().map(|t| t.to_locktype::<SpinParker>()))
-                .interleave(
-                    LockTarget::iter()
-                        .filter(|x| matches!(x, LockTarget::DLock(_)))
-                        .map(|t| t.to_locktype::<BlockParker>()),
-                )
-                .collect(),
-        },
+            })
+            .collect(),
     };
     targets
 }

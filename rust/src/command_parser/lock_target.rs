@@ -22,9 +22,8 @@ pub enum WaiterType {
     Block,
     All,
 }
-
-#[derive(Debug, Subcommand, EnumIter, Clone, Copy)]
-pub enum DLockTarget {
+#[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq)]
+pub enum LockTarget {
     /// Benchmark Flat-Combining Skiplist
     FcSL,
     /// Benchmark Flat-Combining Lock
@@ -40,12 +39,6 @@ pub enum DLockTarget {
     CCBan,
     /// Benchmark Remote Core Locking
     RCL,
-}
-
-#[derive(Debug, Subcommand, Clone, Copy)]
-pub enum LockTarget {
-    #[command(flatten)]
-    DLock(DLockTarget),
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
@@ -54,78 +47,34 @@ pub enum LockTarget {
     USCL,
 }
 
-pub enum LockTargetIterState {
-    DLock(DLockTargetIter),
-    Mutex,
-    SpinLock,
-    USCL,
-    Stop,
-}
-
-pub struct LockTargetIter {
-    state: LockTargetIterState,
-}
-
-impl Iterator for LockTargetIter {
-    type Item = LockTarget;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.state {
-            LockTargetIterState::DLock(iter) => {
-                if let Some(dlock) = iter.next() {
-                    return Some(LockTarget::DLock(dlock));
-                } else {
-                    self.state = LockTargetIterState::Mutex;
-                    return self.next();
-                }
-            }
-            LockTargetIterState::Mutex => {
-                self.state = LockTargetIterState::SpinLock;
-                return Some(LockTarget::Mutex);
-            }
-            LockTargetIterState::SpinLock => {
-                self.state = LockTargetIterState::USCL;
-                return Some(LockTarget::SpinLock);
-            }
-            LockTargetIterState::USCL => {
-                self.state = LockTargetIterState::Stop;
-                return Some(LockTarget::USCL);
-            }
-            LockTargetIterState::Stop => {
-                self.state = LockTargetIterState::DLock(DLockTarget::iter());
-                return None;
-            }
-        }
-    }
-}
-
-impl IntoEnumIterator for LockTarget {
-    type Iterator = LockTargetIter;
-
-    fn iter() -> Self::Iterator {
-        LockTargetIter {
-            state: LockTargetIterState::DLock(DLockTarget::iter()),
-        }
-    }
-}
-
 impl LockTarget {
+    pub fn is_dlock(&self) -> bool {
+        match self {
+            LockTarget::FcSL
+            | LockTarget::FcLock
+            | LockTarget::FcFairBanLock
+            | LockTarget::FcFairBanSliceLock
+            | LockTarget::CCSynch
+            | LockTarget::CCBan
+            | LockTarget::RCL => true,
+            LockTarget::Mutex | LockTarget::SpinLock | LockTarget::USCL => false,
+        }
+    }
+
     pub fn to_locktype<P>(&self) -> Option<BenchmarkType<u64>>
     where
         P: Parker + 'static,
         BenchmarkType<u64>: From<DLockType<u64, P>>,
     {
         let locktype: DLockType<u64, P> = match self {
-            LockTarget::DLock(DLockTarget::FcSL) => FcSL::new(0u64).into(),
-            LockTarget::DLock(DLockTarget::FcLock) => FcLock::new(0u64).into(),
-            LockTarget::DLock(DLockTarget::FcFairBanLock) => FcFairBanLock::new(0u64).into(),
-            LockTarget::DLock(DLockTarget::FcFairBanSliceLock) => {
-                FcFairBanSliceLock::new(0u64).into()
-            }
-            LockTarget::DLock(DLockTarget::CCSynch) => CCSynch::new(0u64).into(),
-            LockTarget::DLock(DLockTarget::CCBan) => CCBan::new(0u64).into(),
+            LockTarget::FcSL => FcSL::new(0u64).into(),
+            LockTarget::FcLock => FcLock::new(0u64).into(),
+            LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
+            LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
+            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::CCBan => CCBan::new(0u64).into(),
             // RCL requires special treatment
-            LockTarget::DLock(DLockTarget::RCL) => return None,
+            LockTarget::RCL => return None,
             LockTarget::SpinLock => {
                 return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
             }
