@@ -81,7 +81,7 @@ pub fn counter_one_three_benchmark(info: LockBenchInfo<u64>) {
 
         println!("{}", histogram);
     } else {
-        results.iter().for_each(|r| println!("{}", r.loop_count));
+        // results.iter().for_each(|r| println!("{}", r.loop_count));
     }
 
     lock_type.lock(|guard: DLockGuard<u64>| {
@@ -108,9 +108,9 @@ fn thread_job(
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let single_iter_duration: Duration = Duration::from_micros({
         if id % 2 == 0 {
-            10
+            1
         } else {
-            30
+            3
         }
     });
     let timer = Clock::new();

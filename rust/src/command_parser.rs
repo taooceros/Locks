@@ -30,6 +30,7 @@ pub struct App {
 pub enum Experiment {
     CounterRatioOneThree,
     CounterSubversion,
+    CounterNonCS,
     ResponseTimeSingleAddition,
     ResponseTimeRatioOneThree,
 }

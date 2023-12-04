@@ -13,11 +13,12 @@ use crate::command_parser::*;
 use self::bencher::Bencher;
 
 mod bencher;
-mod counter_job;
+mod one_three_ratio_counter;
 mod helper;
 mod subversion_job;
 mod response_time_single_addition;
 mod response_time_variable;
+mod non_cs_counter;
 
 pub fn benchmark(
     num_cpu: usize,

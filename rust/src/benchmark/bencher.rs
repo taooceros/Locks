@@ -11,7 +11,8 @@ use strum::IntoEnumIterator;
 
 use crate::{
     benchmark::{
-        counter_job::counter_one_three_benchmark,
+        non_cs_counter::counter_one_three_non_cs_one,
+        one_three_ratio_counter::counter_one_three_benchmark,
         response_time_single_addition::benchmark_response_time_single_addition,
         response_time_variable::benchmark_response_time_one_three_ratio,
         subversion_job::counter_subversion_benchmark,
@@ -63,6 +64,7 @@ impl Bencher {
             let job = match experiment {
                 Experiment::CounterRatioOneThree => counter_one_three_benchmark,
                 Experiment::CounterSubversion => counter_subversion_benchmark,
+                Experiment::CounterNonCS => counter_one_three_non_cs_one,
                 Experiment::ResponseTimeSingleAddition => benchmark_response_time_single_addition,
                 Experiment::ResponseTimeRatioOneThree => benchmark_response_time_one_three_ratio,
             };
@@ -117,7 +119,7 @@ impl Bencher {
         job(LockBenchInfo {
             lock_type: Arc::new(lock.into()),
             num_thread: self.num_thread,
-            num_cpu: self.num_cpu,
+            num_cpu: self.num_cpu - 1,
             experiment,
             duration: self.duration,
             output_path,
