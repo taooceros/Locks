@@ -22,7 +22,7 @@ use super::bencher::LockBenchInfo;
 static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
 
 pub fn counter_one_three_non_cs_one(info: LockBenchInfo<u64>) {
-    println!("Start OneThreeCounter for {}", info.lock_type.lock_name());
+    println!("Start OneThreeCounter with Non-CS for {}", info.lock_type.lock_name());
 
     let mut writer = unsafe {
         WRITER
