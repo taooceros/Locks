@@ -15,6 +15,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
+use zstd::stream::AutoFinishEncoder;
+use zstd::Encoder;
+
+static mut WRITER: OnceCell<
+    RefCell<
+        Writer<AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>,
+    >,
+> = OnceCell::new();
 
 pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
     println!(
@@ -58,12 +66,19 @@ pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-    static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+    static mut WRITER: OnceCell<
+        RefCell<
+            Writer<
+                AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>,
+            >,
+        >,
+    > = OnceCell::new();
+    
     let mut writer = unsafe {
         WRITER
             .get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(&info.output_path.join("response_time_one_three_ratio.csv"))
+                    create_writer(info.output_path.join("response_time_one_three_ratio.csv"))
                         .expect("Failed to create writer"),
                 ))
             })

@@ -1,6 +1,8 @@
 use csv::Writer;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
+use zstd::stream::AutoFinishEncoder;
+use zstd::Encoder;
 
 use std::{
     sync::{atomic::*, Arc},
@@ -20,96 +22,104 @@ use quanta::{Clock, Instant};
 use super::bencher::LockBenchInfo;
 use super::Records;
 
-static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+thread_local! {
+    static WRITER: OnceCell<
+        RefCell<
+            Writer<AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>,
+        >,
+        > = OnceCell::new();
+}
 
 pub fn counter_proportional(info: LockBenchInfo<u64>) {
-    println!("Start Proposional Counter for {}", info.lock_type);
+    WRITER.with(|cell| {
+        println!("Start Proposional Counter for {}", info.lock_type);
 
-    let mut writer = unsafe {
-        WRITER
-            .get_or_init(|| {
+        let mut writer = unsafe {
+            cell.get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(&info.output_path.join("one_three_counter.csv"))
+                    create_writer(info.output_path.join("proposion_counter.csv.zst"))
                         .expect("Failed to create writer"),
                 ))
             })
             .borrow_mut()
-    };
+        };
 
-    let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
+        let (num_thread, num_cpu, lock_type) =
+            (info.num_thread, info.num_cpu, info.lock_type.clone());
 
-    static STOP: AtomicBool = AtomicBool::new(false);
+        static STOP: AtomicBool = AtomicBool::new(false);
 
-    STOP.store(false, Ordering::Release);
+        STOP.store(false, Ordering::Release);
 
-    let mut results: Vec<Records> = Vec::new();
+        let mut results: Vec<Records> = Vec::new();
 
-    let handles = (0..info.num_thread)
-        .map(|id| {
-            let lock_type = lock_type.clone();
-            thread::Builder::new()
-                .name(format!("Thread {}", id))
-                .spawn(move || {
-                    thread_job(
-                        id,
-                        num_thread,
-                        num_cpu,
-                        &STOP,
-                        info.stat_response_time,
-                        lock_type,
-                    )
-                })
-                .expect("Failed to spawn thread")
-        })
-        .collect::<Vec<_>>();
+        let handles = (0..info.num_thread)
+            .map(|id| {
+                let lock_type = lock_type.clone();
+                thread::Builder::new()
+                    .name(format!("Thread {}", id))
+                    .spawn(move || {
+                        thread_job(
+                            id,
+                            num_thread,
+                            num_cpu,
+                            &STOP,
+                            info.stat_response_time,
+                            lock_type,
+                        )
+                    })
+                    .expect("Failed to spawn thread")
+            })
+            .collect::<Vec<_>>();
 
-    thread::sleep(Duration::from_secs(info.duration));
+        thread::sleep(Duration::from_secs(info.duration));
 
-    STOP.store(true, Ordering::Release);
+        STOP.store(true, Ordering::Release);
 
-    let mut i = 0;
+        let mut i = 0;
 
-    for job in handles {
-        let l = job.join();
-        match l {
-            Ok(l) => {
-                results.push(l);
-                // println!("{}", l);
+        for job in handles {
+            let l = job.join();
+            match l {
+                Ok(l) => {
+                    results.push(l);
+                    // println!("{}", l);
+                }
+                Err(_e) => eprintln!("Error joining thread: {}", i),
             }
-            Err(_e) => eprintln!("Error joining thread: {}", i),
-        }
-        i += 1;
-    }
-
-    for result in results.iter().flat_map(|r| r.to_records()) {
-        writer.serialize(result).unwrap();
-    }
-
-    let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
-
-    if info.verbose {
-        let mut histogram = Histogram::with_buckets(5);
-        for result in results.iter() {
-            histogram.add(result.loop_count);
+            i += 1;
         }
 
-        println!("{}", histogram);
-    } else {
-        results.iter().for_each(|r| println!("{}", r.loop_count));
-    }
+        for result in results.iter().flat_map(|r| r.to_records()) {
+            writer.serialize(result).unwrap();
+        }
 
-    lock_type.lock(|guard: DLockGuard<u64>| {
-        assert_eq!(
-            *guard, total_count,
-            "Total counter is not matched with lock value {}, but thread local loop sum {}",
-            *guard, total_count
+        let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+
+        if info.verbose {
+            let mut histogram = Histogram::with_buckets(5);
+            for result in results.iter() {
+                histogram.add(result.loop_count);
+            }
+
+            println!("{}", histogram);
+        } else {
+            results.iter().for_each(|r| println!("{}", r.loop_count));
+        }
+
+        lock_type.lock(|guard: DLockGuard<u64>| {
+            assert_eq!(
+                *guard, total_count,
+                "Total counter is not matched with lock value {}, but thread local loop sum {}",
+                *guard, total_count
+            );
+        });
+
+        println!(
+            "Finish OneThreeCounter for {}: Total Counter {}",
+            lock_type, total_count
         );
-    });
-
-    println!(
-        "Finish OneThreeCounter for {}: Total Counter {}",
-        lock_type, total_count
-    );
+    })
 }
 
 fn thread_job(

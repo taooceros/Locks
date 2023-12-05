@@ -1,17 +1,21 @@
 use std::{
     fs::{File, OpenOptions},
+    io::Write,
     os::unix::prelude::PermissionsExt,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
+use zstd::{Encoder, stream::AutoFinishEncoder};
 
-
-pub fn create_writer(path: &Path) -> Result<File, std::io::Error> {
+pub fn create_writer(path: PathBuf) -> Result<AutoFinishEncoder<'static, File>, std::io::Error> {
     if !path.parent().expect("Failed to get parent").exists() {
         std::fs::create_dir_all(path.parent().expect("Failed to get parent"))?;
     }
 
-    let f = OpenOptions::new().create(true).write(true).open(path)?;
+    let f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(path.to_owned())?;
 
     let metadata = f.metadata()?;
     let mut permissions = metadata.permissions();
@@ -21,5 +25,7 @@ pub fn create_writer(path: &Path) -> Result<File, std::io::Error> {
 
     f.set_permissions(permissions)?;
 
-    Ok(f)
+    let encoder = Encoder::new(f, 3)?;
+
+    Ok(encoder.auto_finish())
 }

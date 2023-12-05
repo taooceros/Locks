@@ -1,6 +1,8 @@
 use csv::Writer;
+use zstd::stream::AutoFinishEncoder;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
+use zstd::Encoder;
 
 use std::{
     sync::{atomic::*, Arc},
@@ -19,16 +21,24 @@ use quanta::Clock;
 
 use super::bencher::LockBenchInfo;
 
-static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+static mut WRITER: OnceCell<
+    RefCell<
+        Writer<AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>,
+    >,
+> = OnceCell::new();
 
 pub fn counter_one_three_benchmark(info: LockBenchInfo<u64>) {
     println!("Start OneThreeCounter for {}", info.lock_type);
 
     let mut writer = unsafe {
-        WRITER.get_or_init(|| {
-            RefCell::new(Writer::from_writer(create_writer(&info.output_path.join("one_three_counter.csv"))
-                .expect("Failed to create writer")))
-        }).borrow_mut()
+        WRITER
+            .get_or_init(|| {
+                RefCell::new(Writer::from_writer(
+                    create_writer(info.output_path.join("one_three_counter.csv"))
+                        .expect("Failed to create writer"),
+                ))
+            })
+            .borrow_mut()
     };
 
     let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());

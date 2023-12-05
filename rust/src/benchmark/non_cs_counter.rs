@@ -1,7 +1,10 @@
 use csv::Writer;
+use zstd::Encoder;
+use zstd::stream::AutoFinishEncoder;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
 
+use std::io::Write;
 use std::{
     sync::{atomic::*, Arc},
     thread,
@@ -19,7 +22,11 @@ use quanta::Clock;
 
 use super::bencher::LockBenchInfo;
 
-static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+static mut WRITER: OnceCell<
+    RefCell<
+        Writer<AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>,
+    >,
+> = OnceCell::new();
 
 pub fn counter_one_three_non_cs_one(info: LockBenchInfo<u64>) {
     println!(
@@ -31,7 +38,7 @@ pub fn counter_one_three_non_cs_one(info: LockBenchInfo<u64>) {
         WRITER
             .get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(&info.output_path.join("one_three_counter.csv"))
+                    create_writer(info.output_path.join("one_three_counter.csv"))
                         .expect("Failed to create writer"),
                 ))
             })

@@ -10,6 +10,8 @@ use std::{
     thread,
     time::Duration,
 };
+use zstd::stream::AutoFinishEncoder;
+use zstd::Encoder;
 
 use histo::Histogram;
 use libdlock::{
@@ -22,94 +24,100 @@ use crate::benchmark::helper::create_writer;
 
 use super::{bencher::LockBenchInfo, Record};
 
-static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
+thread_local! {
+    static WRITER: OnceCell<RefCell<Writer<AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>>> = OnceCell::new();
+}
 
 pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
-    unsafe {
-        if getuid() != 0 {
-            eprintln!("This benchmark requires root privilege");
-            return;
-        }
-    }
-
-    println!("Start Subversion for {}", info.lock_type);
-
-    let mut writer = unsafe {
-        WRITER
-            .get_or_init(|| {
-                RefCell::new(Writer::from_writer(
-                    create_writer(&info.output_path.join("subversion_benchmark.csv"))
-                        .expect("Failed to create writer"),
-                ))
-            })
-            .borrow_mut()
-    };
-
-    let (num_thread, num_cpu, lock_type) = (info.num_thread, info.num_cpu, info.lock_type.clone());
-
-    static STOP: AtomicBool = AtomicBool::new(false);
-
-    STOP.store(false, Ordering::Release);
-
-    let mut results: Vec<Record> = Vec::new();
-
-    let handles = (0..info.num_thread)
-        .map(|id| {
-            let lock_type = lock_type.clone();
-            thread::Builder::new()
-                .name(format!("Thread {}", id))
-                .spawn(move || thread_job(id, num_thread, num_cpu, &STOP, lock_type))
-                .expect("Failed to spawn thread")
-        })
-        .collect::<Vec<_>>();
-
-    thread::sleep(Duration::from_secs(info.duration));
-
-    STOP.store(true, Ordering::Release);
-
-    let mut i = 0;
-
-    for job in handles {
-        let l = job.join();
-        match l {
-            Ok(l) => {
-                results.push(l);
-                // println!("{}", l);
+    WRITER
+        .try_with(|cell| {
+            unsafe {
+                if getuid() != 0 {
+                    eprintln!("This benchmark requires root privilege");
+                    return;
+                }
             }
-            Err(_e) => eprintln!("Error joining thread: {}", i),
-        }
-        i += 1;
-    }
 
-    for result in results.iter() {
-        writer.serialize(result).unwrap();
-    }
+            println!("Start Subversion for {}", info.lock_type);
 
-    if info.verbose {
-        let mut histogram = Histogram::with_buckets(5);
-        for result in results.iter() {
-            histogram.add(result.loop_count);
-        }
+            let mut writer = unsafe {
+                cell.get_or_init(|| {
+                    RefCell::new(Writer::from_writer(
+                        create_writer(info.output_path.join("subversion_benchmark.csv"))
+                            .expect("Failed to create writer"),
+                    ))
+                })
+                .borrow_mut()
+            };
 
-        println!("{}", histogram);
-    } else {
-        results.iter().for_each(|r| println!("{}", r.loop_count));
-    }
+            let (num_thread, num_cpu, lock_type) =
+                (info.num_thread, info.num_cpu, info.lock_type.clone());
 
-    let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+            static STOP: AtomicBool = AtomicBool::new(false);
 
-    lock_type.lock(|guard: DLockGuard<u64>| {
-        assert_eq!(
-            *guard, total_count,
-            "Total counter is not matched with lock value {}, but thread local loop sum {}",
-            *guard, total_count
-        );
-    });
+            STOP.store(false, Ordering::Release);
 
-    println!(
-        "Finish Subversion for {}: Total Counter {}",
-        lock_type, total_count
-    );
+            let mut results: Vec<Record> = Vec::new();
+
+            let handles = (0..info.num_thread)
+                .map(|id| {
+                    let lock_type = lock_type.clone();
+                    thread::Builder::new()
+                        .name(format!("Thread {}", id))
+                        .spawn(move || thread_job(id, num_thread, num_cpu, &STOP, lock_type))
+                        .expect("Failed to spawn thread")
+                })
+                .collect::<Vec<_>>();
+
+            thread::sleep(Duration::from_secs(info.duration));
+
+            STOP.store(true, Ordering::Release);
+
+            let mut i = 0;
+
+            for job in handles {
+                let l = job.join();
+                match l {
+                    Ok(l) => {
+                        results.push(l);
+                        // println!("{}", l);
+                    }
+                    Err(_e) => eprintln!("Error joining thread: {}", i),
+                }
+                i += 1;
+            }
+
+            for result in results.iter() {
+                writer.serialize(result).unwrap();
+            }
+
+            if info.verbose {
+                let mut histogram = Histogram::with_buckets(5);
+                for result in results.iter() {
+                    histogram.add(result.loop_count);
+                }
+
+                println!("{}", histogram);
+            } else {
+                results.iter().for_each(|r| println!("{}", r.loop_count));
+            }
+
+            let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
+
+            lock_type.lock(|guard: DLockGuard<u64>| {
+                assert_eq!(
+                    *guard, total_count,
+                    "Total counter is not matched with lock value {}, but thread local loop sum {}",
+                    *guard, total_count
+                );
+            });
+
+            println!(
+                "Finish Subversion for {}: Total Counter {}",
+                lock_type, total_count
+            );
+        })
+        .unwrap()
 }
 
 fn thread_job(
