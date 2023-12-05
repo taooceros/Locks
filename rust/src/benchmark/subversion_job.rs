@@ -1,4 +1,5 @@
 use csv::Writer;
+use nix::libc::getuid;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
 use std::{
@@ -24,6 +25,13 @@ use super::{bencher::LockBenchInfo, Record};
 static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
 
 pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
+    unsafe {
+        if getuid() != 0 {
+            eprintln!("This benchmark requires root privilege");
+            return;
+        }
+    }
+
     println!("Start Subversion for {}", info.lock_type);
 
     let mut writer = unsafe {
@@ -149,5 +157,6 @@ fn thread_job(
         combine_time: lock_type.get_current_thread_combining_time(),
         locktype: lock_type.lock_name(),
         waiter_type: lock_type.parker_name().to_string(),
+        ..Default::default()
     };
 }

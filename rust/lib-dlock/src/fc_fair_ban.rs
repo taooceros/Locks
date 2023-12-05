@@ -137,6 +137,11 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
     unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T, P>>, pass: u32) {
         let mut previous_ptr = head.load(Ordering::Relaxed);
         debug_assert!(!previous_ptr.is_null());
+        previous_ptr = (*previous_ptr).next;
+
+        if previous_ptr.is_null() {
+            return;
+        }
 
         let mut current_ptr = (*previous_ptr).next;
 
