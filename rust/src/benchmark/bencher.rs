@@ -13,6 +13,7 @@ use crate::{
     benchmark::{
         non_cs_counter::counter_one_three_non_cs_one,
         one_three_ratio_counter::counter_one_three_benchmark,
+        proposion_counter::counter_proportional,
         response_time_single_addition::benchmark_response_time_single_addition,
         response_time_variable::benchmark_response_time_one_three_ratio,
         subversion_job::counter_subversion_benchmark,
@@ -27,6 +28,7 @@ pub struct Bencher {
     targets: Vec<LockTarget>,
     output_path: Box<Path>,
     waiter: WaiterType,
+    stat_response_time: bool,
     duration: u64,
     verbose: bool,
 }
@@ -39,6 +41,7 @@ impl Bencher {
         target: Vec<LockTarget>,
         output_path: Box<Path>,
         waiter: WaiterType,
+        stat_response_time: bool,
         duration: u64,
         verbose: bool,
     ) -> Self {
@@ -49,6 +52,7 @@ impl Bencher {
             targets: target,
             output_path,
             waiter,
+            stat_response_time,
             duration,
             verbose,
         }
@@ -65,6 +69,7 @@ impl Bencher {
                 Experiment::CounterRatioOneThree => counter_one_three_benchmark,
                 Experiment::CounterSubversion => counter_subversion_benchmark,
                 Experiment::CounterNonCS => counter_one_three_non_cs_one,
+                Experiment::CounterProportional => counter_proportional,
                 Experiment::ResponseTimeSingleAddition => benchmark_response_time_single_addition,
                 Experiment::ResponseTimeRatioOneThree => benchmark_response_time_one_three_ratio,
             };
@@ -79,6 +84,7 @@ impl Bencher {
                         num_cpu: self.num_cpu,
                         experiment,
                         duration: self.duration,
+                        stat_response_time: self.stat_response_time,
                         output_path: &self.output_path,
                         verbose: self.verbose,
                     });
@@ -119,6 +125,7 @@ impl Bencher {
             num_cpu: self.num_cpu - 1,
             experiment,
             duration: self.duration,
+            stat_response_time: self.stat_response_time,
             output_path,
             verbose: self.verbose,
         });
@@ -134,6 +141,7 @@ where
     pub num_cpu: usize,
     pub experiment: Experiment,
     pub duration: u64,
+    pub stat_response_time: bool,
     pub output_path: &'a Path,
     pub verbose: bool,
 }

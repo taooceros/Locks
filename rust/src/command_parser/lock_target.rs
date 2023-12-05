@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use clap::{Subcommand, ValueEnum};
+use clap::{ValueEnum};
 use libdlock::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
@@ -14,7 +14,7 @@ use libdlock::{
     u_scl::USCL,
 };
 use serde::Serialize;
-use strum::{Display, EnumIter, IntoEnumIterator};
+use strum::{Display, EnumIter};
 
 #[derive(Debug, Clone, Copy, ValueEnum, Display, Serialize)]
 pub enum WaiterType {

@@ -30,6 +30,8 @@ pub struct GlobalOpts {
     pub output_path: String,
     #[arg(global = true, long, short, default_value = "all")]
     pub waiter: WaiterType,
+    #[arg(global = true, long, short)]
+    pub stat_response_time: bool,
     #[arg(global = true, long, short, default_value = "5")]
     pub duration: u64,
     #[arg(global = true, long, short)]

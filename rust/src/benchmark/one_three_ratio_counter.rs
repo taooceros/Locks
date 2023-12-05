@@ -108,9 +108,9 @@ fn thread_job(
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let single_iter_duration: Duration = Duration::from_micros({
         if id % 2 == 0 {
-            1
+            10
         } else {
-            3
+            30
         }
     });
     let timer = Clock::new();
@@ -146,5 +146,6 @@ fn thread_job(
         combine_time: lock_type.get_current_thread_combining_time(),
         locktype: lock_type.lock_name(),
         waiter_type: lock_type.parker_name().to_string(),
+        ..Default::default()
     };
 }

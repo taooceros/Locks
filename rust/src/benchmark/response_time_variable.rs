@@ -114,11 +114,13 @@ fn thread_job(
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        let begin = timer.now();
+        let wait_begin = timer.now();
 
         let mut is_combiner = false;
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
+            response_times.push(timer.now().duration_since(wait_begin));
+
             num_acquire += 1;
             let begin = timer.now();
 
@@ -133,7 +135,6 @@ fn thread_job(
         });
 
         is_combiners.push(is_combiner);
-        response_times.push(timer.now().duration_since(begin));
     }
 
     return Records {

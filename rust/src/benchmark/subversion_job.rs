@@ -157,5 +157,6 @@ fn thread_job(
         combine_time: lock_type.get_current_thread_combining_time(),
         locktype: lock_type.lock_name(),
         waiter_type: lock_type.parker_name().to_string(),
+        ..Default::default()
     };
 }

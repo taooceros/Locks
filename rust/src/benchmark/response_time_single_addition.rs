@@ -58,7 +58,6 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-
     static mut WRITER: OnceCell<RefCell<Writer<File>>> = OnceCell::new();
     let mut writer = unsafe {
         WRITER
@@ -112,6 +111,8 @@ fn thread_job(
         let mut is_combiner = false;
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
+            let begin = timer.now();
+            response_times.push(begin.duration_since(begin));
             num_acquire += 1;
             *guard += 1;
 
@@ -121,7 +122,6 @@ fn thread_job(
         });
 
         is_combiners.push(is_combiner);
-        response_times.push(timer.now().duration_since(begin));
     }
 
     return Records {
