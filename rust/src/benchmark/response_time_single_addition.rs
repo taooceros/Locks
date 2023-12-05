@@ -60,27 +60,30 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-    static mut WRITER: OnceCell<
+    thread_local! {
+        static WRITER: OnceCell<
         RefCell<
-            Writer<
-                AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>,
+                Writer<
+                    AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>,
+                >,
             >,
-        >,
-    > = OnceCell::new();
+        > = OnceCell::new();
+    }
 
-    let mut writer = unsafe {
-        WRITER
-            .get_or_init(|| {
+    WRITER.with(|cell| {
+        let mut writer = unsafe {
+            cell.get_or_init(|| {
                 RefCell::new(Writer::from_writer(
                     create_writer(info.output_path.join("response_time_single_addition.csv"))
                         .expect("Failed to create writer"),
                 ))
             })
             .borrow_mut()
-    };
-    for result in results.iter().flat_map(|r| r.to_records()) {
-        writer.serialize(result).unwrap();
-    }
+        };
+        for result in results.iter().flat_map(|r| r.to_records()) {
+            writer.serialize(result).unwrap();
+        }
+    });
 
     if info.verbose {
         let mut histogram = Histogram::with_buckets(5);
