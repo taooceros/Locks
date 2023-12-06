@@ -74,7 +74,7 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
         let mut writer = unsafe {
             cell.get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("response_time_single_addition.zst"))
+                    create_writer(info.output_path.join("response_time_single_addition.csv.zst"))
                         .expect("Failed to create writer"),
                 ))
             })
@@ -143,7 +143,7 @@ fn thread_job(
         cpu_num: num_cpu,
         hold_time,
         is_combiner: is_combiners,
-        response_times,
+        response_times: response_times,
         #[cfg(feature = "combiner_stat")]
         combine_time: lock_type.get_current_thread_combining_time(),
         locktype: lock_type.lock_name(),
