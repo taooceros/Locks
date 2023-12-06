@@ -172,6 +172,7 @@ fn thread_job(
         thread_num: num_thread,
         cpu_num: num_cpu,
         loop_count: loop_result,
+        job_length: single_iter_duration,
         num_acquire,
         hold_time,
         response_times: if record_response_time {

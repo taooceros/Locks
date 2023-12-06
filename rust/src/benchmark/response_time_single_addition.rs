@@ -74,7 +74,7 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
         let mut writer = unsafe {
             cell.get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("response_time_single_addition.csv"))
+                    create_writer(info.output_path.join("response_time_single_addition.zst"))
                         .expect("Failed to create writer"),
                 ))
             })
