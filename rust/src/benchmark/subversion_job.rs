@@ -20,7 +20,7 @@ use libdlock::{
 };
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
-use crate::benchmark::helper::create_writer;
+use crate::benchmark::helper::create_zstd_writer;
 
 use super::{bencher::LockBenchInfo, Record};
 
@@ -43,7 +43,7 @@ pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
             let mut writer = unsafe {
                 cell.get_or_init(|| {
                     RefCell::new(Writer::from_writer(
-                        create_writer(info.output_path.join("subversion_benchmark.csv"))
+                        create_zstd_writer(info.output_path.join("subversion_benchmark.csv"))
                             .expect("Failed to create writer"),
                     ))
                 })

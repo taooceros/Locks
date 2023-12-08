@@ -1,7 +1,13 @@
 use crate::benchmark::bencher::LockBenchInfo;
-use crate::benchmark::helper::create_writer;
+use crate::benchmark::helper::{create_plain_writer, create_zstd_writer};
+use crate::benchmark::RecordsBuilder;
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
+use arrow::ipc::CompressionType;
+use arrow::json::ReaderBuilder;
 use csv::Writer;
 use histo::Histogram;
+use itertools::Itertools;
 use libdlock::dlock::{BenchmarkType, DLock};
 use libdlock::guard::DLockGuard;
 use quanta::Clock;
@@ -17,6 +23,8 @@ use std::thread::{self, current};
 use std::time::Duration;
 use zstd::stream::AutoFinishEncoder;
 use zstd::Encoder;
+
+use super::Records;
 
 pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     println!(
@@ -61,34 +69,49 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     }
 
     thread_local! {
-        static WRITER: OnceCell<
-        RefCell<
-                Writer<
-                    AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>,
-                >,
-            >,
-        > = OnceCell::new();
+        static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
     }
 
+    
+
     WRITER.with(|cell| {
-        let mut writer = unsafe {
-            cell.get_or_init(|| {
-                RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("response_time_single_addition.csv.zst"))
+        let mut writer = cell
+            .get_or_init(|| {
+                let option = IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5)
+                    .unwrap()
+                    .try_with_compression(Some(CompressionType::ZSTD))
+                    .expect("Failed to create compression option");
+
+                RefCell::new(
+                    FileWriter::try_new_with_options(
+                        create_plain_writer(
+                            info.output_path.join("response_time_single_addition.arrow"),
+                        )
                         .expect("Failed to create writer"),
-                ))
+                        RecordsBuilder::get_schema(),
+                        option,
+                    )
+                    .unwrap(),
+                )
             })
-            .borrow_mut()
-        };
-        for result in results.iter().flat_map(|r| r.to_records()) {
-            writer.serialize(result).unwrap();
-        }
+            .borrow_mut();
+
+        let mut record_builder = RecordsBuilder::default();
+
+        record_builder.extend(results.iter());
+
+        writer
+            .write(&record_builder.finish().into())
+            .expect("Failed to write");
     });
 
     if info.verbose {
         let mut histogram = Histogram::with_buckets(5);
-        for result in results.into_iter().flat_map(|r| r.response_times) {
-            histogram.add(result.as_nanos().try_into().unwrap());
+        for result in results
+            .iter()
+            .flat_map(|r| r.response_times.as_ref().unwrap())
+        {
+            histogram.add(result.as_ref().unwrap().as_nanos().try_into().unwrap());
         }
 
         println!("{}", histogram);
@@ -124,7 +147,7 @@ fn thread_job(
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             let begin = timer.now();
-            response_times.push(begin.duration_since(begin));
+            response_times.push(Some(begin.duration_since(begin)));
             num_acquire += 1;
             *guard += 1;
 
@@ -133,7 +156,7 @@ fn thread_job(
             hold_time += timer.now().duration_since(begin);
         });
 
-        is_combiners.push(is_combiner);
+        is_combiners.push(Some(is_combiner));
     }
 
     return Records {
@@ -142,62 +165,12 @@ fn thread_job(
         thread_num: num_thread,
         cpu_num: num_cpu,
         hold_time,
-        is_combiner: is_combiners,
-        response_times: response_times,
+        is_combiner: Some(is_combiners),
+        response_times: Some(response_times),
         #[cfg(feature = "combiner_stat")]
         combine_time: lock_type.get_current_thread_combining_time(),
         locktype: lock_type.lock_name(),
         waiter_type: lock_type.parker_name().to_string(),
+        ..Default::default()
     };
-}
-
-pub struct Records {
-    pub id: usize,
-    pub cpu_id: usize,
-    pub thread_num: usize,
-    pub cpu_num: usize,
-    pub is_combiner: Vec<bool>,
-    pub response_times: Vec<Duration>,
-    pub hold_time: Duration,
-    pub combine_time: Option<NonZeroI64>,
-    pub locktype: String,
-    pub waiter_type: String,
-}
-
-impl Records {
-    pub fn to_records(&self) -> impl Iterator<Item = Record> + '_ {
-        self.is_combiner.iter().zip(self.response_times.iter()).map(
-            |(is_combiner, response_time)| Record {
-                id: self.id,
-                cpu_id: self.cpu_id,
-                thread_num: self.thread_num,
-                cpu_num: self.cpu_num,
-                is_combiner: *is_combiner,
-                response_times: *response_time,
-                hold_time: self.hold_time,
-                #[cfg(feature = "combiner_stat")]
-                combine_time: self.combine_time,
-                locktype: self.locktype.clone(),
-                waiter_type: self.waiter_type.clone(),
-            },
-        )
-    }
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize)]
-pub struct Record {
-    pub id: usize,
-    pub cpu_id: usize,
-    pub thread_num: usize,
-    pub cpu_num: usize,
-    pub is_combiner: bool,
-    #[serde_as(as = "DurationNanoSeconds")]
-    pub response_times: Duration,
-    #[serde_as(as = "DurationNanoSeconds")]
-    pub hold_time: Duration,
-    #[cfg(feature = "combiner_stat")]
-    pub combine_time: Option<NonZeroI64>,
-    pub locktype: String,
-    pub waiter_type: String,
 }

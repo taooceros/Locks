@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::{helper::create_writer, Record};
+use crate::benchmark::{helper::create_zstd_writer, Record};
 
 use histo::Histogram;
 use libdlock::{
@@ -37,7 +37,7 @@ pub fn counter_proportional(info: LockBenchInfo<u64>) {
         let mut writer = unsafe {
             cell.get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("proposion_counter.csv.zst"))
+                    create_zstd_writer(info.output_path.join("proposion_counter.csv.zst"))
                         .expect("Failed to create writer"),
                 ))
             })
@@ -152,7 +152,7 @@ fn thread_job(
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             if record_response_time {
                 let respone_time = timer.now().duration_since(respone_time_start);
-                response_times.push(respone_time);
+                response_times.push(Some(respone_time));
             }
 
             num_acquire += 1;

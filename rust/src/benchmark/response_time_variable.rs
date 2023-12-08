@@ -1,5 +1,5 @@
 use crate::benchmark::bencher::LockBenchInfo;
-use crate::benchmark::helper::create_writer;
+use crate::benchmark::helper::create_zstd_writer;
 use csv::Writer;
 use histo::Histogram;
 use libdlock::dlock::{BenchmarkType, DLock};
@@ -78,7 +78,7 @@ pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
         WRITER
             .get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("response_time_one_three_ratio.csv"))
+                    create_zstd_writer(info.output_path.join("response_time_one_three_ratio.csv"))
                         .expect("Failed to create writer"),
                 ))
             })

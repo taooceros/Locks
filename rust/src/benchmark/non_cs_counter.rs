@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::{helper::create_writer, Record};
+use crate::benchmark::{helper::create_zstd_writer, Record};
 
 use histo::Histogram;
 use libdlock::{
@@ -38,7 +38,7 @@ pub fn counter_one_three_non_cs_one(info: LockBenchInfo<u64>) {
         WRITER
             .get_or_init(|| {
                 RefCell::new(Writer::from_writer(
-                    create_writer(info.output_path.join("one_three_counter.csv"))
+                    create_zstd_writer(info.output_path.join("one_three_counter.csv"))
                         .expect("Failed to create writer"),
                 ))
             })
