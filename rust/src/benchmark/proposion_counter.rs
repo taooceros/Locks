@@ -10,7 +10,8 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::{helper::create_zstd_writer, Record};
+use crate::benchmark::records::Records;
+use crate::benchmark::{helper::create_zstd_writer, records};
 
 use histo::Histogram;
 use libdlock::{
@@ -20,7 +21,6 @@ use libdlock::{
 use quanta::{Clock, Instant};
 
 use super::bencher::LockBenchInfo;
-use super::Records;
 
 thread_local! {
     static WRITER: OnceCell<

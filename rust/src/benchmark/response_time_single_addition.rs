@@ -1,6 +1,6 @@
 use crate::benchmark::bencher::LockBenchInfo;
 use crate::benchmark::helper::{create_plain_writer, create_zstd_writer};
-use crate::benchmark::RecordsBuilder;
+use crate::benchmark::records::{Records, RecordsBuilder};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
@@ -23,8 +23,6 @@ use std::thread::{self, current};
 use std::time::Duration;
 use zstd::stream::AutoFinishEncoder;
 use zstd::Encoder;
-
-use super::Records;
 
 pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     println!(
@@ -71,8 +69,6 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     thread_local! {
         static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
     }
-
-    
 
     WRITER.with(|cell| {
         let mut writer = cell
