@@ -2,7 +2,7 @@ use csv::Writer;
 use zstd::stream::AutoFinishEncoder;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
-use zstd::Encoder;
+
 
 use std::{
     sync::{atomic::*, Arc},
@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::benchmark::records::Record;
-use crate::benchmark::{helper::create_zstd_writer, records};
+use crate::benchmark::{helper::create_zstd_writer};
 
 use histo::Histogram;
 use libdlock::{

@@ -1,28 +1,28 @@
 use crate::benchmark::bencher::LockBenchInfo;
-use crate::benchmark::helper::{create_plain_writer, create_zstd_writer};
+use crate::benchmark::helper::{create_plain_writer};
 use crate::benchmark::records::{Records, RecordsBuilder};
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+
 use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
-use arrow::json::ReaderBuilder;
-use csv::Writer;
+
+
 use histo::Histogram;
 use itertools::Itertools;
 use libdlock::dlock::{BenchmarkType, DLock};
 use libdlock::guard::DLockGuard;
 use quanta::Clock;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-use serde_with::DurationNanoSeconds;
+
+
+
 use std::cell::{OnceCell, RefCell};
-use std::fs::File;
-use std::num::NonZeroI64;
+
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
-use zstd::stream::AutoFinishEncoder;
-use zstd::Encoder;
+
+
 
 pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     println!(
@@ -137,7 +137,7 @@ fn thread_job(
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        let begin = timer.now();
+        let _begin = timer.now();
 
         let mut is_combiner = false;
 

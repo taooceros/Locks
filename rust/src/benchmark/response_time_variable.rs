@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
 use zstd::stream::AutoFinishEncoder;
-use zstd::Encoder;
+
 
 static mut WRITER: OnceCell<
     RefCell<
