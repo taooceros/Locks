@@ -11,7 +11,7 @@ function join_by {
   fi
 }
 
-base_duration=1000000
+base_duration=50000
 cs=$(join_by , $(seq $base_duration $base_duration $((8 * $base_duration))))
 
 echo $cs
