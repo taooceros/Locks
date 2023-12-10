@@ -13,7 +13,8 @@ pub struct Records {
     pub cpu_num: usize,
     pub loop_count: u64,
     pub num_acquire: u64,
-    pub job_length: Duration,
+    pub cs_length: Duration,
+    pub non_cs_length: Option<Duration>,
     pub is_combiner: Option<Vec<Option<bool>>>,
     pub response_times: Option<Vec<Option<Duration>>>,
     pub hold_time: Duration,
@@ -29,7 +30,8 @@ impl Records {
             cpu_id: self.cpu_id,
             thread_num: self.thread_num,
             cpu_num: self.cpu_num,
-            job_length: self.job_length,
+            cs_length: self.cs_length,
+            non_cs_length: self.non_cs_length,
             is_combiner: None,
             loop_count: self.loop_count,
             num_acquire: self.num_acquire,
@@ -75,7 +77,9 @@ pub struct Record {
     pub loop_count: u64,
     pub num_acquire: u64,
     #[serde_as(as = "DurationNanoSeconds")]
-    pub job_length: Duration,
+    pub cs_length: Duration,
+    #[serde_as(as = "Option<DurationNanoSeconds>")]
+    pub non_cs_length: Option<Duration>,
     pub is_combiner: Option<Option<bool>>,
     #[serde_as(as = "Option<DurationNanoSeconds>")]
     pub response_time: Option<Duration>,
@@ -113,7 +117,7 @@ impl RecordsBuilder {
         self.loop_count.append_value(row.loop_count as u64);
         self.num_acquire.append_value(row.num_acquire as u64);
         self.job_length
-            .append_value(row.job_length.as_nanos() as u64);
+            .append_value(row.cs_length.as_nanos() as u64);
         self.is_combiner
             .append_option(row.is_combiner.as_ref().map(|v| v.iter().copied()));
         self.response_time.append_option(

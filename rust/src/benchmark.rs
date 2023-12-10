@@ -35,7 +35,7 @@ mod subversion_job;
 pub fn benchmark(
     num_cpu: usize,
     num_thread: usize,
-    experiment: Option<Experiment>,
+    experiment: Option<&Experiment>,
     options: &GlobalOpts,
 ) {
     let bencher = Bencher::new(

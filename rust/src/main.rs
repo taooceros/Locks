@@ -37,6 +37,6 @@ fn main() {
     fs::set_permissions(output_path, Permissions::from_mode(0o777)).unwrap();
 
     for (ncpu, nthread) in app.global_opts.cpus.iter().zip(&app.global_opts.threads) {
-        benchmark(*ncpu, *nthread, app.lock_target, &app.global_opts)
+        benchmark(*ncpu, *nthread, app.lock_target.as_ref(), &app.global_opts)
     }
 }
