@@ -72,7 +72,7 @@ impl<'a> Bencher<'a> {
                 } => counter_proportional(cs_duration.clone(), non_cs_duration.clone()),
                 Experiment::CounterRatioOneThree => counter_one_three_benchmark(),
                 Experiment::CounterSubversion => to_dyn(counter_subversion_benchmark),
-                Experiment::CounterNonCS => counter_one_three_non_cs_one(),
+                Experiment::CounterRatioOneThreeNonCS => counter_one_three_non_cs_one(),
                 Experiment::ResponseTimeSingleAddition => {
                     to_dyn(benchmark_response_time_single_addition)
                 }

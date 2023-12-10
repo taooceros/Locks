@@ -38,7 +38,10 @@ pub fn counter_proportional(
     non_cs_durations: Vec<Duration>,
 ) -> Box<dyn Fn(LockBenchInfo<u64>)> {
     Box::new(move |info| {
-        println!("Start Proposional Counter for {}", info.lock_type);
+        println!(
+            "Start Proposional Counter [CS: {:?} NonCS: {:?}] for {}",
+            cs_durations, non_cs_durations, info.lock_type
+        );
 
         let (num_thread, num_cpu, lock_type) =
             (info.num_thread, info.num_cpu, info.lock_type.clone());
@@ -53,7 +56,11 @@ pub fn counter_proportional(
             .map(|id| {
                 let lock_type = lock_type.clone();
                 let cs_duration = cs_durations[id % cs_durations.len()];
-                let non_cs_duration = non_cs_durations[id % non_cs_durations.len()];
+                let non_cs_duration = if non_cs_durations.len() > 0 {
+                    non_cs_durations[id % non_cs_durations.len()]
+                } else {
+                    Duration::ZERO
+                };
                 thread::Builder::new()
                     .name(format!("Thread {}", id))
                     .spawn(move || {

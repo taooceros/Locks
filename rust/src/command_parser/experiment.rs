@@ -7,7 +7,7 @@ use strum::{Display, EnumIter, IntoEnumIterator};
 pub enum Experiment {
     CounterRatioOneThree,
     CounterSubversion,
-    CounterNonCS,
+    CounterRatioOneThreeNonCS,
     CounterProportional {
         #[arg(value_parser = parse_duration, long = "cs", default_value = "100000", value_delimiter = ',')]
         cs_durations: Vec<Duration>,
