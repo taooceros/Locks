@@ -21,10 +21,10 @@ use crate::{
     command_parser::{experiment::Experiment, lock_target::*},
 };
 
-pub struct Bencher {
+pub struct Bencher<'a> {
     num_cpu: usize,
     num_thread: usize,
-    experiment: Option<Experiment>,
+    experiment: Option<&'a Experiment>,
     targets: Vec<LockTarget>,
     output_path: Box<Path>,
     waiter: WaiterType,
@@ -33,11 +33,11 @@ pub struct Bencher {
     verbose: bool,
 }
 
-impl Bencher {
+impl<'a> Bencher<'a> {
     pub fn new(
         num_cpu: usize,
         num_thread: usize,
-        experiment: Option<Experiment>,
+        experiment: Option<&'a Experiment>,
         target: Vec<LockTarget>,
         output_path: Box<Path>,
         waiter: WaiterType,
@@ -59,19 +59,29 @@ impl Bencher {
     }
 
     pub fn benchmark(&self) {
-        let experiments = match self.experiment {
+        let experiments = match self.experiment.clone() {
             Some(e) => vec![e],
-            None => Experiment::iter().collect(),
+            None => Experiment::to_vec_ref(),
         };
 
         for experiment in experiments {
-            let job = match experiment {
-                Experiment::CounterRatioOneThree => counter_one_three_benchmark,
-                Experiment::CounterSubversion => counter_subversion_benchmark,
-                Experiment::CounterNonCS => counter_one_three_non_cs_one,
-                Experiment::CounterProportional => counter_proportional,
-                Experiment::ResponseTimeSingleAddition => benchmark_response_time_single_addition,
-                Experiment::ResponseTimeRatioOneThree => benchmark_response_time_one_three_ratio,
+            let job = &match experiment {
+                Experiment::CounterProportional {
+                    cs_durations,
+                    non_cs_durations,
+                    file_name,
+                } => {
+                    counter_proportional(cs_durations.clone(), non_cs_durations.clone(), file_name)
+                }
+                Experiment::CounterRatioOneThree => counter_one_three_benchmark(),
+                Experiment::CounterSubversion => to_dyn(counter_subversion_benchmark),
+                Experiment::CounterRatioOneThreeNonCS => counter_one_three_non_cs_one(),
+                Experiment::ResponseTimeSingleAddition => {
+                    to_dyn(benchmark_response_time_single_addition)
+                }
+                Experiment::ResponseTimeRatioOneThree => {
+                    to_dyn(benchmark_response_time_one_three_ratio)
+                }
             };
 
             let targets = extract_targets(self.waiter, self.targets.iter());
@@ -94,14 +104,14 @@ impl Bencher {
             if self.targets.contains(&LockTarget::RCL) {
                 match self.waiter {
                     WaiterType::Spin => {
-                        self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job)
+                        self.bench_rcl::<_, SpinParker, _>(experiment, &self.output_path, job)
                     }
                     WaiterType::Block => {
-                        self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
+                        self.bench_rcl::<_, BlockParker, _>(experiment, &self.output_path, job)
                     }
                     WaiterType::All => {
-                        self.bench_rcl::<_, SpinParker>(experiment, &self.output_path, job);
-                        self.bench_rcl::<_, BlockParker>(experiment, &self.output_path, job)
+                        self.bench_rcl::<_, SpinParker, _>(experiment, &self.output_path, job);
+                        self.bench_rcl::<_, BlockParker, _>(experiment, &self.output_path, job)
                     }
                 }
             }
@@ -109,11 +119,12 @@ impl Bencher {
         }
     }
 
-    fn bench_rcl<T, P>(&self, experiment: Experiment, output_path: &Path, job: fn(LockBenchInfo<T>))
+    fn bench_rcl<T, P, F>(&self, experiment: &Experiment, output_path: &Path, job: F)
     where
         T: Send + Sync + 'static + Default,
         P: Parker + 'static,
         BenchmarkType<T>: From<DLockType<T, P>>,
+        F: Fn(LockBenchInfo<T>),
     {
         let mut server = RclServer::new();
         server.start(self.num_cpu - 1);
@@ -139,7 +150,7 @@ where
     pub lock_type: Arc<BenchmarkType<T>>,
     pub num_thread: usize,
     pub num_cpu: usize,
-    pub experiment: Experiment,
+    pub experiment: &'a Experiment,
     pub duration: u64,
     pub stat_response_time: bool,
     pub output_path: &'a Path,
@@ -167,4 +178,11 @@ fn extract_targets<'a>(
             .collect(),
     };
     targets
+}
+
+pub fn to_dyn<'a, F>(f: F) -> Box<dyn Fn(LockBenchInfo<u64>) + 'a>
+where
+    F: Fn(LockBenchInfo<u64>) + 'a,
+{
+    Box::new(f)
 }

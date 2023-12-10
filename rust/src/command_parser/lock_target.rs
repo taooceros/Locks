@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use clap::{ValueEnum};
+use clap::ValueEnum;
 use libdlock::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,

@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 use zstd::stream::AutoFinishEncoder;
-use zstd::Encoder;
 
 use histo::Histogram;
 use libdlock::{
@@ -20,9 +19,10 @@ use libdlock::{
 };
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
-use crate::benchmark::helper::create_writer;
+use crate::benchmark::helper::create_zstd_writer;
+use crate::benchmark::records::Record;
 
-use super::{bencher::LockBenchInfo, Record};
+use super::bencher::LockBenchInfo;
 
 thread_local! {
     static WRITER: OnceCell<RefCell<Writer<AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>>> = OnceCell::new();
@@ -43,7 +43,7 @@ pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
             let mut writer = unsafe {
                 cell.get_or_init(|| {
                     RefCell::new(Writer::from_writer(
-                        create_writer(info.output_path.join("subversion_benchmark.csv"))
+                        create_zstd_writer(info.output_path.join("subversion_benchmark.csv"))
                             .expect("Failed to create writer"),
                     ))
                 })
