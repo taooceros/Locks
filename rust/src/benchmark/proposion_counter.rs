@@ -211,11 +211,11 @@ fn thread_job(
                 loop_result += 1;
             }
             hold_time += timer.now().duration_since(begin);
-
-            if non_cs_duration > Duration::ZERO {
-                spin_sleep::sleep(non_cs_duration);
-            }
         });
+
+        if non_cs_duration > Duration::ZERO {
+            spin_sleep::sleep(non_cs_duration);
+        }
 
         response_times.push(current_response_time);
         is_combiners.push(is_combiner);
