@@ -1,10 +1,9 @@
 use crate::benchmark::bencher::LockBenchInfo;
-use crate::benchmark::helper::{create_plain_writer};
+use crate::benchmark::helper::create_plain_writer;
 use crate::benchmark::records::{Records, RecordsBuilder};
 
 use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
-
 
 use histo::Histogram;
 use itertools::Itertools;
@@ -12,17 +11,12 @@ use libdlock::dlock::{BenchmarkType, DLock};
 use libdlock::guard::DLockGuard;
 use quanta::Clock;
 
-
-
 use std::cell::{OnceCell, RefCell};
-
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, current};
 use std::time::Duration;
-
-
 
 pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
     println!(

@@ -1,11 +1,13 @@
-use std::{thread::available_parallelism};
+use std::thread::available_parallelism;
 
 use clap::*;
 
+use strum::IntoEnumIterator;
 
-use strum::{IntoEnumIterator};
-
-use self::{lock_target::{LockTarget, WaiterType}, experiment::Experiment};
+use self::{
+    experiment::Experiment,
+    lock_target::{LockTarget, WaiterType},
+};
 
 pub mod experiment;
 pub mod lock_target;

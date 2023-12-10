@@ -3,7 +3,7 @@ use arrow_ipc::CompressionType;
 use csv::Writer;
 use std::cell::{OnceCell, RefCell};
 use std::fs::File;
-use std::iter::empty;
+
 use std::path::Path;
 use zstd::stream::AutoFinishEncoder;
 
@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::helper::{create_plain_writer, create_zstd_writer};
+use crate::benchmark::helper::create_plain_writer;
 use crate::benchmark::records::{Records, RecordsBuilder};
 
 use histo::Histogram;
@@ -33,10 +33,10 @@ thread_local! {
         > = OnceCell::new();
 }
 
-pub fn counter_proportional<'a>(
-    cs_durations: &'a Vec<Duration>,
-    non_cs_durations: &'a Vec<Duration>,
-) -> Box<dyn Fn(LockBenchInfo<u64>) + 'a> {
+pub fn counter_proportional(
+    cs_durations: Vec<Duration>,
+    non_cs_durations: Vec<Duration>,
+) -> Box<dyn Fn(LockBenchInfo<u64>)> {
     Box::new(move |info| {
         println!("Start Proposional Counter for {}", info.lock_type);
 

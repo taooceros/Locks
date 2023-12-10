@@ -1,20 +1,6 @@
-
-
-
-
 use strum::IntoEnumIterator;
 
-
-
-
 use std::path::Path;
-
-
-
-
-
-
-
 
 use crate::command_parser::experiment::Experiment;
 use crate::command_parser::lock_target::LockTarget;
@@ -24,10 +10,10 @@ use self::bencher::Bencher;
 
 mod bencher;
 mod helper;
-mod records;
 mod non_cs_counter;
 mod one_three_ratio_counter;
 mod proposion_counter;
+mod records;
 mod response_time_single_addition;
 mod response_time_variable;
 mod subversion_job;
@@ -57,4 +43,3 @@ pub fn benchmark(
 
     bencher.benchmark();
 }
-

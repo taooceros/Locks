@@ -1,6 +1,10 @@
 use arrow::{array::*, datatypes::*};
 use serde_with::DurationNanoSeconds;
-use std::{num::NonZeroI64, time::Duration, sync::{Arc, OnceLock}};
+use std::{
+    num::NonZeroI64,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;

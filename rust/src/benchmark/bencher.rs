@@ -13,7 +13,7 @@ use crate::{
     benchmark::{
         non_cs_counter::counter_one_three_non_cs_one,
         one_three_ratio_counter::counter_one_three_benchmark,
-        proposion_counter::{self, counter_proportional},
+        proposion_counter::counter_proportional,
         response_time_single_addition::benchmark_response_time_single_addition,
         response_time_variable::benchmark_response_time_one_three_ratio,
         subversion_job::counter_subversion_benchmark,
@@ -65,15 +65,14 @@ impl<'a> Bencher<'a> {
         };
 
         for experiment in experiments {
-
             let job = &match experiment {
                 Experiment::CounterProportional {
                     cs_durations: cs_duration,
                     non_cs_durations: non_cs_duration,
-                } => counter_proportional(cs_duration, non_cs_duration),
-                Experiment::CounterRatioOneThree => to_dyn(counter_one_three_benchmark),
+                } => counter_proportional(cs_duration.clone(), non_cs_duration.clone()),
+                Experiment::CounterRatioOneThree => counter_one_three_benchmark(),
                 Experiment::CounterSubversion => to_dyn(counter_subversion_benchmark),
-                Experiment::CounterNonCS => to_dyn(counter_one_three_non_cs_one),
+                Experiment::CounterNonCS => counter_one_three_non_cs_one(),
                 Experiment::ResponseTimeSingleAddition => {
                     to_dyn(benchmark_response_time_single_addition)
                 }

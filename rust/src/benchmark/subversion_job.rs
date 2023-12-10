@@ -12,7 +12,6 @@ use std::{
 };
 use zstd::stream::AutoFinishEncoder;
 
-
 use histo::Histogram;
 use libdlock::{
     dlock::{BenchmarkType, DLock},
@@ -23,7 +22,7 @@ use thread_priority::{ThreadPriority, ThreadPriorityValue};
 use crate::benchmark::helper::create_zstd_writer;
 use crate::benchmark::records::Record;
 
-use super::{bencher::LockBenchInfo};
+use super::bencher::LockBenchInfo;
 
 thread_local! {
     static WRITER: OnceCell<RefCell<Writer<AutoFinishEncoder<'static, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>>> = OnceCell::new();

@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, num::ParseIntError, sync::OnceLock, time::Duration};
+use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 
 use clap::Subcommand;
 use strum::{Display, EnumIter, IntoEnumIterator};
