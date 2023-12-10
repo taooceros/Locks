@@ -194,11 +194,13 @@ fn thread_job(
             respone_time_start = timer.now();
         }
 
+        let mut current_response_time = None;
+        let mut is_combiner = None;
+
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             if record_response_time {
-                let respone_time = timer.now().duration_since(respone_time_start);
-                response_times.push(Some(respone_time));
-                is_combiners.push(Some(current().id() == thread_id));
+                current_response_time = Some(timer.now().duration_since(respone_time_start));
+                is_combiner = Some(current().id() == thread_id);
             }
 
             num_acquire += 1;
@@ -214,6 +216,9 @@ fn thread_job(
                 spin_sleep::sleep(non_cs_duration);
             }
         });
+
+        response_times.push(current_response_time);
+        is_combiners.push(is_combiner);
     }
 
     return Records {
