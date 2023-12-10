@@ -16,9 +16,9 @@ cs=$(join_by , $(seq $base_duration $base_duration $((8 * $base_duration))))
 
 echo $cs
 
-target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 1 --file-name counter-proportional-one-to-eight.csv
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 15 --file-name counter-proportional-one-to-eight.csv
 
 noncs=$base_duration
-target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 1 --file-name counter-proportional-cs-onetoeight-noncs-one.csv
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 15 --file-name counter-proportional-cs-onetoeight-noncs-one.csv
 
 target/release/dlock response-time-single-addition -t 32 64 --stat-response-time
