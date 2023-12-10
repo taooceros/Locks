@@ -5,6 +5,7 @@ use std::cell::{OnceCell, RefCell};
 use std::fs::File;
 
 use std::path::Path;
+use std::thread::current;
 use zstd::stream::AutoFinishEncoder;
 
 use std::{
@@ -183,6 +184,8 @@ fn thread_job(
     let mut respone_time_start = timer.now();
 
     let mut response_times = Vec::new();
+    let mut is_combiners = Vec::new();
+    let thread_id = current().id();
 
     while !stop.load(Ordering::Acquire) {
         // critical section
@@ -195,6 +198,7 @@ fn thread_job(
             if record_response_time {
                 let respone_time = timer.now().duration_since(respone_time_start);
                 response_times.push(Some(respone_time));
+                is_combiners.push(Some(current().id() == thread_id));
             }
 
             num_acquire += 1;
@@ -222,6 +226,11 @@ fn thread_job(
         non_cs_length: (non_cs_duration > Duration::ZERO).then(|| non_cs_duration),
         num_acquire,
         hold_time,
+        is_combiner: if record_response_time {
+            Some(is_combiners)
+        } else {
+            None
+        },
         response_times: if record_response_time {
             Some(response_times)
         } else {

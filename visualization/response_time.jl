@@ -1,4 +1,4 @@
-using CodecZstd, DataFrames, CSVFiles, FileIO, CSV, DataFramesMeta, StatsBase
+using Arrow, DataFrames, CSVFiles, FileIO, CSV, DataFramesMeta, StatsBase
 
 # Load the compressed data
 
@@ -12,7 +12,9 @@ using AlgebraOfGraphics: density
 
 CairoMakie.activate!(type="svg")
 
-data1 = CSV.read("output/proposion_counter.csv", DataFrame)
+data1 = Arrow.Table("output/counter-proportional-cs-onetoeight-noncs-one.csv.arrow")
+
+df1 = DataFrame(data1)
 
 function draw_plot(dataset, filename, link_x=false)
     plt = data(dataset) * mapping(:response_time, color=(:job_length, :is_combiner) => ((x, y) -> begin
