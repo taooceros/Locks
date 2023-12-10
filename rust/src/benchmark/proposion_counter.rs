@@ -33,10 +33,11 @@ thread_local! {
         > = OnceCell::new();
 }
 
-pub fn counter_proportional(
+pub fn counter_proportional<'a>(
     cs_durations: Vec<Duration>,
     non_cs_durations: Vec<Duration>,
-) -> Box<dyn Fn(LockBenchInfo<u64>)> {
+    file_name: &'a str,
+) -> Box<dyn Fn(LockBenchInfo<u64>) + 'a> {
     Box::new(move |info| {
         println!(
             "Start Proposional Counter [CS: {:?} NonCS: {:?}] for {}",
@@ -97,7 +98,7 @@ pub fn counter_proportional(
             i += 1;
         }
 
-        write_results(&info.output_path, &results);
+        write_results(&info.output_path, file_name, &results);
 
         let total_count: u64 = results.iter().map(|r| r.loop_count).sum();
 
@@ -127,7 +128,7 @@ pub fn counter_proportional(
     })
 }
 
-fn write_results(output_path: &Path, results: &Vec<Records>) {
+fn write_results(output_path: &Path, file_name: &str, results: &Vec<Records>) {
     thread_local! {
         static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
     }
@@ -142,10 +143,8 @@ fn write_results(output_path: &Path, results: &Vec<Records>) {
 
                 RefCell::new(
                     FileWriter::try_new_with_options(
-                        create_plain_writer(
-                            output_path.join("response_time_single_addition.arrow"),
-                        )
-                        .expect("Failed to create writer"),
+                        create_plain_writer(output_path.join(format!("{file_name}.arrow")))
+                            .expect("Failed to create writer"),
                         RecordsBuilder::get_schema(),
                         option,
                     )

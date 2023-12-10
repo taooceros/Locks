@@ -13,6 +13,8 @@ pub enum Experiment {
         cs_durations: Vec<Duration>,
         #[arg(value_parser = parse_duration, long = "non-cs", default_value = "0", value_delimiter = ',')]
         non_cs_durations: Vec<Duration>,
+        #[arg(long = "file-name", default_value = "proposition_counter")]
+        file_name: String,
     },
     ResponseTimeSingleAddition,
     ResponseTimeRatioOneThree,

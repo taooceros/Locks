@@ -67,9 +67,12 @@ impl<'a> Bencher<'a> {
         for experiment in experiments {
             let job = &match experiment {
                 Experiment::CounterProportional {
-                    cs_durations: cs_duration,
-                    non_cs_durations: non_cs_duration,
-                } => counter_proportional(cs_duration.clone(), non_cs_duration.clone()),
+                    cs_durations,
+                    non_cs_durations,
+                    file_name,
+                } => {
+                    counter_proportional(cs_durations.clone(), non_cs_durations.clone(), file_name)
+                }
                 Experiment::CounterRatioOneThree => counter_one_three_benchmark(),
                 Experiment::CounterSubversion => to_dyn(counter_subversion_benchmark),
                 Experiment::CounterRatioOneThreeNonCS => counter_one_three_non_cs_one(),
