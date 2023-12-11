@@ -36,7 +36,7 @@ pub struct GlobalOpts {
     pub stat_response_time: bool,
     #[arg(global = true, long, short, default_value = "5")]
     pub duration: u64,
-    #[arg(global = true, long, short)]
+    #[arg(global = true, long, short, value_delimiter = ',')]
     pub lock_target: Option<Vec<LockTarget>>,
     #[arg(global = true, long, short)]
     pub verbose: bool,
