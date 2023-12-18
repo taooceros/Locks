@@ -72,7 +72,6 @@ where
     }
 
     fn combine(&self) {
-
         // println!("{} is combining", current().id().as_u64());
 
         let mut aux = 0;
@@ -156,8 +155,14 @@ impl<T: 'static, P: Parker> DLock<T> for FCSL<T, RawSpinLock, P> {
 
         loop {
             if node.should_combine.load(Acquire) || self.combiner_lock.try_lock() {
-                node.should_combine.store(false, Release);
-                self.combine();
+                loop {
+                    node.should_combine.store(false, Release);
+                    self.combine();
+
+                    if !node.should_combine.load(Acquire) {
+                        break;
+                    }
+                }
             }
 
             if node.finish.load(Acquire) {
