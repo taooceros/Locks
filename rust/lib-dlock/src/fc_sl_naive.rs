@@ -20,7 +20,7 @@ use self::node::Node;
 mod node;
 
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
-const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
+const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_micros() as u64) * 2400;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Usage {
@@ -66,6 +66,8 @@ where
     }
 
     fn combine(&self) {
+        // println!("{} is combining", current().name().unwrap());
+
         let mut aux = 0;
         let combiner_begin = unsafe { __rdtscp(&mut aux) };
         let mut slice: u64 = 0;

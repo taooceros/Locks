@@ -26,7 +26,7 @@ use self::node::Node;
 mod node;
 
 const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
-const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_nanos() as u64) * 2400;
+const COMBINER_SLICE: u64 = (COMBINER_SLICE_MS.as_micros() as u64) * 2400;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Usage {
@@ -71,14 +71,14 @@ where
         }
     }
 
-    fn combine(&self) {
-        // println!("{} is combining", current().id().as_u64());
+    fn combine(&self, combiner_node: &mut Node<T, P>) {
+        // println!("{} is combining", current().name().unwrap());
 
         let mut aux = 0;
         let combiner_begin = unsafe { __rdtscp(&mut aux) };
         let mut slice: u64 = 0;
 
-        while slice < COMBINER_SLICE {
+        while slice < COMBINER_SLICE || !combiner_node.finish.load(Acquire) {
             let begin = unsafe { __rdtscp(&mut aux) };
 
             let front_entry = self.jobs.pop_front();
@@ -87,7 +87,7 @@ where
                 Some(entry) => {
                     let node_ptr = entry.value();
 
-                    let node = unsafe { node_ptr.load(Acquire).as_mut().unwrap() };
+                    let node = unsafe { &mut *node_ptr.load(Acquire) };
 
                     unsafe {
                         node.parker.prewake();
@@ -157,7 +157,7 @@ impl<T: 'static, P: Parker> DLock<T> for FCSL<T, RawSpinLock, P> {
             if node.should_combine.load(Acquire) || self.combiner_lock.try_lock() {
                 loop {
                     node.should_combine.store(false, Release);
-                    self.combine();
+                    self.combine(node);
 
                     if !node.should_combine.load(Acquire) {
                         break;
