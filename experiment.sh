@@ -12,7 +12,7 @@ function join_by {
 }
 
 base_duration=50000
-cs=$(join_by , $(seq $base_duration $((3 * $base_duration)) $((3 * $base_duration))))
+cs=$(join_by , $(seq $base_duration $((3 * $base_duration)) $((3 * $base_duration + 1))))
 
 echo $cs
 
