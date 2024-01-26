@@ -1,9 +1,12 @@
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow_ipc::CompressionType;
 use csv::Writer;
+use itertools::Itertools;
 use std::cell::{OnceCell, RefCell};
+use std::fmt::Display;
 use std::fs::File;
 
+use std::ops::DispatchFromDyn;
 use std::path::Path;
 use std::thread::current;
 use zstd::stream::AutoFinishEncoder;
@@ -41,8 +44,10 @@ pub fn counter_proportional<'a>(
 ) -> Box<dyn Fn(LockBenchInfo<u64>) + 'a> {
     Box::new(move |info| {
         println!(
-            "Start Proposional Counter [CS: {:?} NonCS: {:?}] for {}",
-            cs_durations, non_cs_durations, info.lock_type
+            "Start Proposional Counter [CS: ({:?}) NonCS: ({:?})] for {}",
+            cs_durations.iter().format(","),
+            non_cs_durations.iter().format(","),
+            info.lock_type
         );
 
         let (num_thread, num_cpu, lock_type) =
