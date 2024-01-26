@@ -141,14 +141,15 @@ fn thread_job(
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        let _begin = timer.now();
+        let begin = timer.now();
+        let mut diff = None;
 
         let mut is_combiner = false;
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
             if stat_response_time {
-                let begin = timer.now();
-                response_times.push(Some(begin.duration_since(begin)));
+                let now = timer.now();
+                diff = Some(now - begin);
             }
             num_acquire += 1;
             *guard += 1;
@@ -156,6 +157,7 @@ fn thread_job(
             is_combiner = current().id() == thread_id;
         });
 
+        response_times.push(diff);
         is_combiners.push(Some(is_combiner));
     }
 
