@@ -19,6 +19,6 @@ echo $cs
 target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 15 --file-name counter-proportional-one-three -l fcsl-naive,fcsl
 
 noncs=$base_duration
-target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 15 --file-name counter-proportional-cs-one-three-noncs-one
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 15 --file-name counter-proportional-cs-one-three-noncs-one -l fcsl-naive,fcsl
 
 target/release/dlock response-time-single-addition -t 32 64 --stat-response-time
