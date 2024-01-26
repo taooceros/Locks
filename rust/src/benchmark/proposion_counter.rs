@@ -5,8 +5,6 @@ use itertools::Itertools;
 use std::cell::{OnceCell, RefCell};
 use std::fmt::Display;
 use std::fs::File;
-
-use std::ops::DispatchFromDyn;
 use std::path::Path;
 use std::thread::current;
 use zstd::stream::AutoFinishEncoder;
