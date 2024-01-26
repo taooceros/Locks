@@ -16,9 +16,12 @@ cs=$(join_by , $(seq $base_duration $((2 * $base_duration)) $((3 * $base_duratio
 
 echo $cs
 
-target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 15 --file-name counter-proportional-one-three -l fcsl-naive,fcsl
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 15 --file-name counter-proportional-one-three
+
+cs=$(join_by , $(seq $base_duration $(($base_duration)) $((8 * $base_duration + 1))))
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --stat-response-time -d 15 --file-name counter-proportional-one-to-eight
 
 noncs=$base_duration
-target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 15 --file-name counter-proportional-cs-one-three-noncs-one -l fcsl-naive,fcsl
+target/release/dlock counter-proportional -t 16,32,64 --cs $cs --non-cs $noncs --stat-response-time -d 15 --file-name counter-proportional-one-to-eight
 
 target/release/dlock response-time-single-addition -t 32 64 --stat-response-time
