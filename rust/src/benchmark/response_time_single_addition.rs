@@ -37,7 +37,16 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
             let lock_type = lock_type.clone();
             thread::Builder::new()
                 .name(format!("Thread {}", id))
-                .spawn(move || thread_job(id, num_thread, num_cpu, &STOP, lock_type))
+                .spawn(move || {
+                    thread_job(
+                        id,
+                        num_thread,
+                        num_cpu,
+                        &STOP,
+                        lock_type,
+                        info.stat_response_time,
+                    )
+                })
                 .expect("Failed to spawn thread")
         })
         .collect::<Vec<_>>();
@@ -116,6 +125,7 @@ fn thread_job(
     num_cpu: usize,
     stop: &'static AtomicBool,
     lock_type: Arc<BenchmarkType<u64>>,
+    stat_response_time: bool,
 ) -> Records {
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let timer = Clock::new();
@@ -136,14 +146,14 @@ fn thread_job(
         let mut is_combiner = false;
 
         lock_type.lock(|mut guard: DLockGuard<u64>| {
-            let begin = timer.now();
-            response_times.push(Some(begin.duration_since(begin)));
+            if stat_response_time {
+                let begin = timer.now();
+                response_times.push(Some(begin.duration_since(begin)));
+            }
             num_acquire += 1;
             *guard += 1;
 
             is_combiner = current().id() == thread_id;
-
-            hold_time += timer.now().duration_since(begin);
         });
 
         is_combiners.push(Some(is_combiner));
