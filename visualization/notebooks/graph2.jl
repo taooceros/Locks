@@ -62,7 +62,7 @@ locknames = @distinct(df_origin, :locktype)[!, :locktype];
 
 # ╔═╡ b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
 md"""
-Lock Types: $(@bind locktypes MultiCheckBox(locknames, default=locknames))
+Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
 
 Wait Type: $(@bind waiter_type Select(["Spin Parker", "BlockParker"]))
 
