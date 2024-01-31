@@ -8,7 +8,8 @@ use libdlock::{
     fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_fair_skiplist::FcSL,
+    fc_sl::FCSL,
+    fc_sl_naive::FCSLNaive,
     parker::Parker,
     spin_lock::SpinLock,
     u_scl::USCL,
@@ -24,17 +25,19 @@ pub enum WaiterType {
 }
 #[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq)]
 pub enum LockTarget {
+    /// Benchmark Flat-Combining Skiplist Naive
+    FCSLNaive,
     /// Benchmark Flat-Combining Skiplist
-    FcSL,
+    FCSL,
     /// Benchmark Flat-Combining Lock
-    FcLock,
+    FC,
     /// Benchmark Flat-Combining Fair (Banning) Lock
-    FcFairBanLock,
+    FCBan,
     /// Benchmark Flat-Combining Fair (Banning & Combiner Slice) Lock
-    FcFairBanSliceLock,
+    FCBanSlice,
 
     /// Benchmark CCSynch
-    CCSynch,
+    CC,
     /// Benchmark CCSynch (Ban)
     CCBan,
     /// Benchmark Remote Core Locking
@@ -50,11 +53,12 @@ pub enum LockTarget {
 impl LockTarget {
     pub fn is_dlock(&self) -> bool {
         match self {
-            LockTarget::FcSL
-            | LockTarget::FcLock
-            | LockTarget::FcFairBanLock
-            | LockTarget::FcFairBanSliceLock
-            | LockTarget::CCSynch
+            LockTarget::FCSLNaive
+            | LockTarget::FCSL
+            | LockTarget::FC
+            | LockTarget::FCBan
+            | LockTarget::FCBanSlice
+            | LockTarget::CC
             | LockTarget::CCBan
             | LockTarget::RCL => true,
             LockTarget::Mutex | LockTarget::SpinLock | LockTarget::USCL => false,
@@ -67,11 +71,12 @@ impl LockTarget {
         BenchmarkType<u64>: From<DLockType<u64, P>>,
     {
         let locktype: DLockType<u64, P> = match self {
-            LockTarget::FcSL => FcSL::new(0u64).into(),
-            LockTarget::FcLock => FcLock::new(0u64).into(),
-            LockTarget::FcFairBanLock => FcFairBanLock::new(0u64).into(),
-            LockTarget::FcFairBanSliceLock => FcFairBanSliceLock::new(0u64).into(),
-            LockTarget::CCSynch => CCSynch::new(0u64).into(),
+            LockTarget::FCSLNaive => FCSLNaive::new(0u64).into(),
+            LockTarget::FCSL => FCSL::new(0u64).into(),
+            LockTarget::FC => FcLock::new(0u64).into(),
+            LockTarget::FCBan => FcFairBanLock::new(0u64).into(),
+            LockTarget::FCBanSlice => FcFairBanSliceLock::new(0u64).into(),
+            LockTarget::CC => CCSynch::new(0u64).into(),
             LockTarget::CCBan => CCBan::new(0u64).into(),
             // RCL requires special treatment
             LockTarget::RCL => return None,

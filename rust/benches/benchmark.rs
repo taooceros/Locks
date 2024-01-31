@@ -52,7 +52,7 @@ pub fn fcbench<P: Parker + 'static>(
     cpu_count: usize,
     thread_count: usize,
 ) {
-    let lock = Arc::new(DLockType::<u64, P>::FlatCombining(FcLock::new(0u64)));
+    let lock = Arc::new(DLockType::<u64, P>::FC(FcLock::new(0u64)));
 
     bench_inner(
         lock.clone(),

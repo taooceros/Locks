@@ -11,12 +11,12 @@ use crate::{
     fc::fclock::FcLock,
     fc_fair_ban::FcFairBanLock,
     fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_fair_skiplist::FcSL,
+    fc_sl_naive::FCSLNaive,
     guard::DLockGuard,
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::rcllock::RclLock,
     spin_lock::{RawSpinLock, SpinLock},
-    u_scl::USCL,
+    u_scl::USCL, fc_sl::FCSL,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -98,10 +98,11 @@ where
     T: 'static,
     P: Parker + 'static,
 {
-    FlatCombining(FcLock<T, RawSpinLock, P>),
-    FlatCombiningFair(FcFairBanLock<T, RawSpinLock, P>),
-    FlatCombiningFairSlice(FcFairBanSliceLock<T, RawSpinLock, P>),
-    FlatCombiningFairSL(FcSL<T, RawSpinLock, P>),
+    FC(FcLock<T, RawSpinLock, P>),
+    FCBan(FcFairBanLock<T, RawSpinLock, P>),
+    FCBanSlice(FcFairBanSliceLock<T, RawSpinLock, P>),
+    FCSLNaive(FCSLNaive<T, RawSpinLock, P>),
+    FCSL(FCSL<T, RawSpinLock, P>),
     CCSynch(CCSynch<T, P>),
     CCBan(CCBan<T, P>),
     RCL(RclLock<T, P>),
@@ -110,12 +111,13 @@ where
 impl<T, P: Parker> fmt::Display for DLockType<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FlatCombining(_) => write!(f, "Flat Combining"),
-            Self::FlatCombiningFair(_) => write!(f, "Flat Combining Fair"),
-            Self::FlatCombiningFairSlice(_) => write!(f, "Flat Combining Fair With Combiner Slice"),
-            Self::FlatCombiningFairSL(_) => write!(f, "Flat Combining (SkipList)"),
-            Self::CCSynch(_) => write!(f, "CCSynch"),
-            Self::CCBan(_) => write!(f, "CCSynch (Ban)"),
+            Self::FC(_) => write!(f, "FC"),
+            Self::FCBan(_) => write!(f, "FC-Ban"),
+            Self::FCBanSlice(_) => write!(f, "FC-Ban-CSlice"),
+            Self::FCSLNaive(_) => write!(f, "FC-SL Naive"),
+            Self::FCSL(_) => write!(f, "FC-SL"),
+            Self::CCSynch(_) => write!(f, "CC"),
+            Self::CCBan(_) => write!(f, "CC-Ban"),
             Self::RCL(_) => write!(f, "RCL"),
         }
     }
