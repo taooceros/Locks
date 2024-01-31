@@ -7,8 +7,7 @@ use arrow::ipc::CompressionType;
 
 use histo::Histogram;
 use itertools::Itertools;
-use libdlock::dlock::{BenchmarkType, DLock};
-use libdlock::guard::DLockGuard;
+use libdlock::dlock::{guard::DLockGuard, BenchmarkType, DLock};
 use quanta::Clock;
 
 use std::cell::{OnceCell, RefCell};

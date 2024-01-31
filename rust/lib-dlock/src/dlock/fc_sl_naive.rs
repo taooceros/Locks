@@ -1,12 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    mem::transmute,
-    num::*,
-    sync::atomic::*,
-    sync::{atomic::Ordering::*, Mutex},
-    thread::current,
-    time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*,
+    sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
 };
 
 use crossbeam::utils::CachePadded;
@@ -15,7 +9,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     dlock::{DLock, DLockDelegate},
-    guard::DLockGuard,
+    dlock::guard::DLockGuard,
     parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,
@@ -35,7 +29,7 @@ struct Usage {
 }
 
 #[derive(Debug)]
-pub struct FCSL<T, L, P>
+pub struct FCSLNaive<T, L, P>
 where
     L: RawSimpleLock,
     P: Parker + 'static,
@@ -46,7 +40,7 @@ where
     jobs: SkipMap<Usage, AtomicPtr<Node<T, P>>>,
 }
 
-impl<T, P> FCSL<T, RawSpinLock, P>
+impl<T, P> FCSLNaive<T, RawSpinLock, P>
 where
     T: 'static,
     P: Parker,
@@ -71,7 +65,7 @@ where
         }
     }
 
-    fn combine(&self, combiner_node: &mut Node<T, P>) {
+    fn combine(&self) {
         // println!("{} is combining", current().name().unwrap());
 
         let mut aux = 0;
@@ -89,14 +83,12 @@ where
 
                     let node = unsafe { &mut *node_ptr.load(Acquire) };
 
+                    let _state = node.parker.state();
+
                     unsafe {
                         node.parker.prewake();
-
-                        assert!(node.finish.load(Acquire) == false);
-
                         (*node.f.expect("delegate should be found"))
                             .apply(DLockGuard::new(&self.data));
-                        node.finish.store(true, Release);
                         // No need for the following but can be used to test
                         // node.f = None.into();
                     }
@@ -117,19 +109,6 @@ where
         }
         let end = unsafe { __rdtscp(&mut aux) };
 
-        let back = self.jobs.back();
-
-        if let Some(entry) = back {
-            let node_ptr = entry.value();
-
-            let node = unsafe { &mut *node_ptr.load(Acquire) };
-
-            node.should_combine.store(true, Release);
-            node.parker.wake();
-        } else {
-            self.combiner_lock.unlock()
-        }
-
         #[cfg(feature = "combiner_stat")]
         unsafe {
             (*self.local_node.get().unwrap().get()).combiner_time_stat +=
@@ -138,38 +117,38 @@ where
     }
 }
 
-impl<T: 'static, P: Parker> DLock<T> for FCSL<T, RawSpinLock, P> {
+impl<T: 'static, P: Parker> DLock<T> for FCSLNaive<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
         let node_cell = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
         let node = unsafe { &mut *(node_cell).get() };
-        node.should_combine.store(false, Release);
-        node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
-        node.finish.store(false, Release);
 
         // it is supposed to consume the function before return, so it should be safe to erase the lifetime
+        node.f = unsafe { Some(transmute(&mut f as *mut dyn DLockDelegate<T>)).into() };
 
         node.parker.reset();
 
         self.push_node(node);
 
         loop {
-            if node.should_combine.load(Acquire) || self.combiner_lock.try_lock() {
-                loop {
-                    node.should_combine.store(false, Release);
-                    self.combine(node);
+            if self.combiner_lock.try_lock() {
+                // combiner
+                self.combine();
 
-                    if !node.should_combine.load(Acquire) {
-                        break;
-                    }
+                self.combiner_lock.unlock();
+            }
+
+            match node.parker.wait_timeout(Duration::from_micros(10)) {
+                Ok(_) => {
+                    debug_assert!(
+                        node.parker.state() == State::Notified,
+                        "{:?}",
+                        node.parker.state()
+                    );
+                    return;
                 }
+                Err(_) => continue,
             }
-
-            if node.finish.load(Acquire) {
-                break;
-            }
-
-            let _ = node.parker.wait_timeout(Duration::from_micros(100));
         }
     }
 

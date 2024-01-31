@@ -14,8 +14,8 @@ use zstd::stream::AutoFinishEncoder;
 
 use histo::Histogram;
 use libdlock::{
+    dlock::guard::DLockGuard,
     dlock::{BenchmarkType, DLock},
-    guard::DLockGuard,
 };
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 

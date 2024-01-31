@@ -1,7 +1,7 @@
 use std::{cell::SyncUnsafeCell, sync::Mutex};
 
 use crate::dlock::DLockDelegate;
-use crate::{dlock::DLock, guard::DLockGuard};
+use crate::{dlock::DLock, dlock::guard::DLockGuard};
 
 impl<T: Sized> DLock<T> for Mutex<T> {
     fn lock<'a>(&self, mut f: impl DLockDelegate<T> + 'a) {

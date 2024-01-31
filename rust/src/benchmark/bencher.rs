@@ -4,7 +4,7 @@ use itertools::Itertools;
 use libdlock::{
     dlock::{BenchmarkType, DLockType},
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
-    rcl::{rcllock::RclLock, rclserver::RclServer},
+    dlock::rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
 use strum::IntoEnumIterator;

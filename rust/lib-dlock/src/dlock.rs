@@ -3,9 +3,22 @@ use std::{
     sync::Mutex,
 };
 
+pub mod ccsynch;
+pub mod ccsynch_fair_ban;
+pub mod fc;
+pub mod fc_fair_ban;
+pub mod fc_fair_ban_slice;
+pub mod fc_sl_naive;
+pub mod fc_sl;
+pub mod guard;
+pub mod rcl;
+
+pub mod mutex_extension;
+
+
 use enum_dispatch::enum_dispatch;
 
-use crate::{
+use self::{
     ccsynch::CCSynch,
     ccsynch_fair_ban::CCBan,
     fc::fclock::FcLock,
@@ -13,10 +26,14 @@ use crate::{
     fc_fair_ban_slice::FcFairBanSliceLock,
     fc_sl_naive::FCSLNaive,
     guard::DLockGuard,
-    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     rcl::rcllock::RclLock,
+    fc_sl::FCSL,
+};
+
+use crate::{
+    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     spin_lock::{RawSpinLock, SpinLock},
-    u_scl::USCL, fc_sl::FCSL,
+    u_scl::USCL,
 };
 
 impl<T, F> DLockDelegate<T> for F

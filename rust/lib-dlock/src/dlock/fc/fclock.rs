@@ -1,5 +1,6 @@
+use crate::parker::State::*;
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, num::*, ptr::null_mut,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*, ptr::null_mut,
     sync::atomic::*, time::Duration,
 };
 
@@ -8,21 +9,19 @@ use thread_local::ThreadLocal;
 
 use crate::{
     dlock::{DLock, DLockDelegate},
-    guard::DLockGuard,
-    parker::{Parker, State},
+    dlock::guard::DLockGuard,
+    parker::Parker,
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };
 
-use self::node::Node;
-
-mod node;
+use super::node::Node;
 
 const CLEAN_UP_PERIOD: u32 = 50;
 const CLEAN_UP_AGE: u32 = 50;
 
 #[derive(Debug)]
-pub struct FcFairBanLock<T, L, P>
+pub struct FcLock<T, L, P>
 where
     L: RawSimpleLock,
     P: Parker,
@@ -32,12 +31,9 @@ where
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<T, P>>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T, P>>>,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i32>,
-    num_waiting_threads: SyncUnsafeCell<i32>,
 }
 
-impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
+impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
     pub fn new(data: T) -> Self {
         Self {
             pass: AtomicU32::new(0),
@@ -45,9 +41,6 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
-            num_waiting_threads: SyncUnsafeCell::new(0),
         }
     }
 
@@ -79,10 +72,12 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
         let mut current_ptr = self.head.load_consume();
 
         let pass = self.pass.fetch_add(1, Ordering::Relaxed);
-        let mut aux: u32 = 0;
-        let begin: u64;
 
         #[cfg(feature = "combiner_stat")]
+        let mut aux: u32 = 0;
+        #[cfg(feature = "combiner_stat")]
+        let begin: u64;
+
         unsafe {
             begin = __rdtscp(&mut aux);
         }
@@ -90,36 +85,16 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
         while !current_ptr.is_null() {
             let current = unsafe { &mut *(current_ptr) };
 
-            if current.parker.state() == State::Parked {
+            if current.parker.state() == Parked {
                 current.age = pass;
 
-                let begin = unsafe { __rdtscp(&mut aux) };
+                let _begin = unsafe { __rdtscp(&mut aux) };
 
-                if current.banned_until > begin {
-                    current_ptr = current.next;
-                    continue;
-                }
+                let f = current.f.unwrap();
 
                 unsafe {
-                    current.parker.prewake();
-                    let f = current.f.unwrap();
                     (*f).apply(DLockGuard::new(&self.data));
                     current.parker.wake();
-                }
-
-                let end = unsafe { __rdtscp(&mut aux) };
-
-                let cs = (end - begin) as i64;
-
-                unsafe {
-                    let avg_cs = &mut *self.avg_cs.get();
-                    let num_exec = &mut *self.num_exec.get();
-                    let num_waiting_threads = *self.num_waiting_threads.get();
-
-                    *num_exec += 1;
-                    *avg_cs = *avg_cs + ((cs - *avg_cs) / (*num_exec as i64));
-                    current.banned_until =
-                        end + (max((cs * (num_waiting_threads as i64)) - *avg_cs, 0) as u64);
                 }
             }
 
@@ -135,10 +110,7 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
     }
 
     unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T, P>>, pass: u32) {
-        let mut previous_ptr = head.load(Ordering::Relaxed);
-        debug_assert!(!previous_ptr.is_null());
-        previous_ptr = (*previous_ptr).next;
-
+        let mut previous_ptr = (*(head.load(Ordering::Acquire))).next;
         if previous_ptr.is_null() {
             return;
         }
@@ -152,7 +124,7 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
             if pass - current.age > CLEAN_UP_AGE {
                 previous.next = current.next;
                 current.next = null_mut();
-                current.active.store(false, Ordering::SeqCst);
+                current.active.store(false, Ordering::Release);
                 current_ptr = previous.next;
                 continue;
             }
@@ -163,15 +135,9 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
     }
 }
 
-impl<T, P: Parker> DLock<T> for FcFairBanLock<T, RawSpinLock, P> {
+impl<T, P: Parker> DLock<T> for FcLock<T, RawSpinLock, P> {
     fn lock<'a>(&self, mut f: (impl DLockDelegate<T> + 'a)) {
-        let node = self.local_node.get_or(|| {
-            unsafe {
-                (AtomicI32::from_ptr(self.num_waiting_threads.get()))
-                    .fetch_add(1, Ordering::Release);
-            }
-            SyncUnsafeCell::new(Node::new())
-        });
+        let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
         let node = unsafe { &mut *(node).get() };
 

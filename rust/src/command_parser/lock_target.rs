@@ -2,14 +2,14 @@ use std::sync::Mutex;
 
 use clap::ValueEnum;
 use libdlock::{
-    ccsynch::CCSynch,
-    ccsynch_fair_ban::CCBan,
+    dlock::ccsynch::CCSynch,
+    dlock::ccsynch_fair_ban::CCBan,
     dlock::{BenchmarkType, DLockType},
-    fc::fclock::FcLock,
-    fc_fair_ban::FcFairBanLock,
-    fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_sl::FCSL,
-    fc_sl_naive::FCSLNaive,
+    dlock::fc::fclock::FcLock,
+    dlock::fc_fair_ban::FcFairBanLock,
+    dlock::fc_fair_ban_slice::FcFairBanSliceLock,
+    dlock::fc_sl::FCSL,
+    dlock::fc_sl_naive::FCSLNaive,
     parker::Parker,
     spin_lock::SpinLock,
     u_scl::USCL,

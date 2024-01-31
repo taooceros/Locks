@@ -7,24 +7,15 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-pub mod ccsynch;
-pub mod ccsynch_fair_ban;
-pub mod dlock;
-pub mod fc;
-pub mod fc_fair_ban;
-pub mod fc_fair_ban_slice;
-pub mod fc_sl_naive;
-pub mod fc_sl;
-pub mod guard;
-pub mod parker;
-pub mod rcl;
-
-mod mutex_extension;
 pub mod spin_lock;
 mod syncptr;
 pub mod u_scl;
 #[cfg(test)]
 mod unit_test;
+
+pub mod dlock;
+pub mod parker;
+
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 

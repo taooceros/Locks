@@ -3,7 +3,7 @@ use crate::benchmark::helper::create_zstd_writer;
 use csv::Writer;
 use histo::Histogram;
 use libdlock::dlock::{BenchmarkType, DLock};
-use libdlock::guard::DLockGuard;
+use libdlock::dlock::guard::DLockGuard;
 use quanta::Clock;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
