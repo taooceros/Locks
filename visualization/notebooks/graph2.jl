@@ -16,7 +16,7 @@ end
 
 # ╔═╡ 3c5e052c-f11e-4a8a-932f-786bf70aa8de
 begin
-	using Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto
+	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables
 	
 	using AlgebraOfGraphics: density
 	CairoMakie.activate!(type="svg")
@@ -37,140 +37,95 @@ html"""
 </style>
 """
 
+# ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
+datasets = readdir("../output");
+
+# ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
+md"""
+Select Dataset $(@bind dataset_name Select(datasets))
+"""
+
 # ╔═╡ 78545e43-25f8-4b4e-8b37-20be86ac7035
 begin
-	data1 = Arrow.Table("../output/counter-proportional-one-to-eight.arrow")
-	df1 = DataFrame(data1)
+	data1 = Arrow.Table(joinpath("..", "output", dataset_name))
+	df_origin = DataFrame(data1)
 end;
-
-# ╔═╡ aa3deae9-1545-41d1-af82-c7fe46adedad
-md"""
-# Response Time
-"""
-
-# ╔═╡ 411e9e1a-b57f-4976-a90c-4a03a3276f4c
-md"""
-## 32 Thread
-"""
-
-# ╔═╡ 1a159464-fbf5-4269-a7dd-89ca799858c0
-spin_32 = @chain df1 begin
-	@subset(:thread_num .== 32, :waiter_type .== "Spin Parker")
-	flatten([:is_combiner, :response_time])
-	# groupby([:locktype, :waiter_type])
-	# @transform(:response_time = (:response_time ./ maximum(:response_time)))
-end;
-
-# ╔═╡ 95dc2f4d-ed16-464c-88eb-c4a49eba8ad1
-freq_plt_32 = data(spin_32) *
-	            mapping(:response_time => Dates.value,
-	                color=:locktype,
-	                row=:job_length => nonnumeric) * visual(ECDFPlot);
 
 # ╔═╡ b227af86-000c-43c8-b738-1dbada91dc92
 colors = ["#003C96", "#11A69C", "#924AF7", "#D17711", "#0081FE", "#FF5383", "#00AB55", "#400387", "#F2681F", "#005062", "#DE2C62", "#660E00"];
 
-# ╔═╡ 2131caa6-9559-47ae-8a2b-5c39342fd8be
-draw(freq_plt_32; figure=(; size=(1200, 1200)),
-    palettes=(; color=colors))
+# ╔═╡ 071f1e64-9af0-4135-9cc6-d86febcb4d76
+pretty_table(names(df_origin), header = ["Columns"])
 
-# ╔═╡ 2200e74c-2a80-44da-b572-51bfe023abbb
+# ╔═╡ 6b907e00-187a-425a-b4f9-a8b079b7d897
+locknames = @distinct(df_origin, :locktype)[!, :locktype];
+
+# ╔═╡ b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
 md"""
-## 64 Thread Case
+Lock Types: $(@bind locktypes MultiCheckBox(locknames, default=locknames))
+
+Wait Type: $(@bind waiter_type Select(["Spin Parker", "BlockParker"]))
+
+Include Other Lock $(@bind include_other_lock CheckBox(true))
 """
 
-# ╔═╡ 5a60c950-c74d-46ca-a716-3e43bcefe8f9
-md"""
-	The data with 64 threads seem to have very long tail (not sure why) so it's better to adjust the data to remove some long tail
-"""
-
-# ╔═╡ 4e50c0aa-7b28-4085-888c-adeb6921b767
-begin
-	# Define the quantile range for outlier removal
-	lower_quantile = 0.02
-	upper_quantile = 0.98
-	
-	# Define a custom predicate to filter outliers
-	
-	function is_outlier(x)
-		bounds = quantile(x, [lower_quantile, upper_quantile])
-		x .< bounds[1] .|| x .> bounds[2]
-	end
-end
-
-# ╔═╡ 4403050b-98b6-4391-8c52-a48b40cacd93
-begin
-	data_64 = @chain df1 begin
-		@subset(:thread_num .== 64)
-		flatten([:is_combiner, :response_time])
-		groupby([:locktype, :waiter_type])
-		@subset(.!(is_outlier(Dates.value.(:response_time))))
-		# @transform(:response_time = (:response_time ./ maximum(:response_time)))
-	end
-
-	spin_64 = @chain data_64 begin
-		@subset(:waiter_type .== "Spin Parker")
-	end
-
-	block_64 = @chain data_64 begin
-		@subset(:waiter_type .== "BlockParker")
-	end
+# ╔═╡ acb5e252-26e7-4335-9ab0-d30ecba9427a
+df1 = @chain df_origin begin
+	@subset(:locktype .∈ Ref(locktypes), :waiter_type .== waiter_type .|| (include_other_lock .&& :waiter_type .== ""))
 end;
 
-# ╔═╡ f3dac414-91dc-49be-9e44-e1feebc7c7e1
-@bind t64_data Select([spin_64 => "spin", block_64 => "block"])
-
-# ╔═╡ 4af10994-0e75-45d8-b7cd-081be78197c0
-freq_plt_64 = data(t64_data) *
-	            mapping(:response_time => Dates.value,
-	                color=:locktype,
-	                row=:job_length => nonnumeric) * visual(ECDFPlot);
-
-# ╔═╡ 30d98353-cb56-410f-adbf-ba630258c9d0
-draw(freq_plt_64; figure=(; size=(1000, 1000)),
-    palettes=(; color=colors))
-
-# ╔═╡ 658c1927-0f43-41dc-8f9d-4fb070000d04
-combine_time_64 = @chain t64_data begin
-    @distinct(:id, :locktype)
-    dropmissing(:combine_time)
-end;
-
-
-# ╔═╡ e9d29488-ffe4-4427-88ff-d92c692c1d75
-combine_time_plt = data(combine_time_64) * mapping(:job_length, :combine_time, color=:locktype) * (linear() + visual(Scatter));
-
-
-# ╔═╡ cbcd6f2d-bd71-466e-9d3a-f975c9ca31f4
-draw(combine_time_plt; 
-	figure=(; size=(1000, 800)), 
-	palettes=(; color=colors),
-	axis=(xtickformat="{:d}",xticks=0:5e4:4e6))
-
-
-# ╔═╡ 84d41e4d-9b7c-49b9-bc66-452da0a915e6
+# ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
 md"""
-# Loop Performance Comparison
+# Loop Count
 """
 
-# ╔═╡ a2e7f0a0-2c4c-4484-bd24-df5895962ce6
+# ╔═╡ a3f00b89-8ab0-4026-af69-6966947d2fe6
 begin
 	count_df = @chain df1 begin
 		groupby([:thread_num, :locktype, :waiter_type])	
 		@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
 	end
-	
-	count_df_spin = @subset(count_df, :waiter_type .!= "BlockParker")
-	count_df_block = @subset(count_df, :waiter_type .!= "Spin Parker")
-	@bind count_data Select([count_df_spin => "Spin", count_df_block => "Block"])
-end
+end;
 
-# ╔═╡ 061ec564-211b-41e4-a2ae-78d6951e4cf1
-count_plt = data(count_data) * mapping(:thread_num => float, :loop_count => float, color=:locktype, marker=:locktype) * (visual(Scatter) + visual(Lines; alpha = 0.5));
+# ╔═╡ cdf3ef81-fd2d-450d-8e50-8e56fe629163
+count_plt = data(count_df) * mapping(:thread_num => float, :loop_count => float, color=:locktype, marker=:locktype) * (visual(Scatter) + visual(Lines; alpha = 0.5));
 
-# ╔═╡ 5ce94954-7c8a-4185-b5a6-e498814cf06a
+# ╔═╡ 2b20fa2c-bb36-4f60-abce-5eb1c56ea700
 draw(count_plt; figure=(; size=(1000, 600)),
-    palettes=(; color=colors))
+    palettes=(; color=colors), axis=(; xticks=[2,4,8,16,32,64]))
+
+# ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
+md"""
+# Combine Time
+"""
+
+# ╔═╡ 3057df9f-c907-4228-add5-f97213b2c6b5
+@bind thread_num Select([4,8,16,32,64])
+
+# ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
+begin
+	combine_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num)
+		dropmissing(:combine_time)
+	end
+end;
+
+# ╔═╡ 4777ad7f-1dba-4217-b2a9-473a0fbf698a
+combine_time_plt = data(combine_time_df) * mapping(:id => nonnumeric, :combine_time, color=:locktype) * (visual(Lines) + visual(Scatter));
+
+# ╔═╡ 905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
+draw(combine_time_plt, figure=(;size=(1400,600)))
+
+# ╔═╡ c2c4f06a-f723-436e-8e5a-5451924c144b
+md"""
+# Response Time
+Enable Analysis $(@bind analyze_response_time CheckBox(false))
+"""
+
+# ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
+if analyze_response_time
+	
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -185,6 +140,8 @@ Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
@@ -197,6 +154,8 @@ DataFramesMeta = "~0.14.1"
 Makie = "~0.20.5"
 Pluto = "~0.19.37"
 PlutoUI = "~0.7.55"
+PrettyTables = "~2.3.1"
+Revise = "~3.5.13"
 StatsBase = "~0.34.2"
 """
 
@@ -206,7 +165,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.0"
 manifest_format = "2.0"
-project_hash = "1decc8518868038cc31977b6d77edc1436f99ad3"
+project_hash = "57c0b7851154916489b9767d5ff21b5220a69d3c"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -400,6 +359,12 @@ weakdeps = ["SparseArrays"]
 
     [deps.ChainRulesCore.extensions]
     ChainRulesCoreSparseArraysExt = "SparseArrays"
+
+[[deps.CodeTracking]]
+deps = ["InteractiveUtils", "UUIDs"]
+git-tree-sha1 = "c0216e792f518b39b22212127d4a84dc31e4e386"
+uuid = "da1fd8a2-8d9e-5ec2-8556-3022fb5608a2"
+version = "1.3.5"
 
 [[deps.CodecBzip2]]
 deps = ["Bzip2_jll", "Libdl", "TranscodingStreams"]
@@ -1050,6 +1015,12 @@ git-tree-sha1 = "60b1194df0a3298f460063de985eae7b01bc011a"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
 version = "3.0.1+0"
 
+[[deps.JuliaInterpreter]]
+deps = ["CodeTracking", "InteractiveUtils", "Random", "UUIDs"]
+git-tree-sha1 = "04663b9e1eb0d0eabf76a6d0752e0dac83d53b36"
+uuid = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
+version = "0.9.28"
+
 [[deps.KernelDensity]]
 deps = ["Distributions", "DocStringExtensions", "FFTW", "Interpolations", "StatsBase"]
 git-tree-sha1 = "fee018a29b60733876eb557804b5b109dd3dd8a7"
@@ -1208,6 +1179,12 @@ deps = ["Dates", "Logging"]
 git-tree-sha1 = "c1dd6d7978c12545b4179fb6153b9250c96b0075"
 uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 version = "1.0.3"
+
+[[deps.LoweredCodeUtils]]
+deps = ["JuliaInterpreter"]
+git-tree-sha1 = "20ce1091ba18bcdae71ad9b71ee2367796ba6c48"
+uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
+version = "2.4.4"
 
 [[deps.Lz4_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1658,6 +1635,12 @@ deps = ["UUIDs"]
 git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.0"
+
+[[deps.Revise]]
+deps = ["CodeTracking", "Distributed", "FileWatching", "JuliaInterpreter", "LibGit2", "LoweredCodeUtils", "OrderedCollections", "Pkg", "REPL", "Requires", "UUIDs", "Unicode"]
+git-tree-sha1 = "3fe4e5b9cdbb9bbc851c57b149e516acc07f8f72"
+uuid = "295af30f-e4ad-537b-8983-00126c2a3abe"
+version = "3.5.13"
 
 [[deps.RingLists]]
 deps = ["Random"]
@@ -2137,26 +2120,24 @@ version = "3.5.0+0"
 # ╠═3872be19-d39d-4a5f-be9e-5625ca45bf2d
 # ╠═32fe4de7-887b-4f4f-b7b6-6d10d9c5a0b6
 # ╠═3c5e052c-f11e-4a8a-932f-786bf70aa8de
+# ╠═18b61f75-4981-4988-9523-24700ae73a54
+# ╠═4e1ce063-adf1-4b92-941f-90f3d41dbddb
 # ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
-# ╠═aa3deae9-1545-41d1-af82-c7fe46adedad
-# ╠═411e9e1a-b57f-4976-a90c-4a03a3276f4c
-# ╠═1a159464-fbf5-4269-a7dd-89ca799858c0
-# ╠═95dc2f4d-ed16-464c-88eb-c4a49eba8ad1
 # ╠═b227af86-000c-43c8-b738-1dbada91dc92
-# ╠═2131caa6-9559-47ae-8a2b-5c39342fd8be
-# ╠═2200e74c-2a80-44da-b572-51bfe023abbb
-# ╠═5a60c950-c74d-46ca-a716-3e43bcefe8f9
-# ╠═4e50c0aa-7b28-4085-888c-adeb6921b767
-# ╠═4403050b-98b6-4391-8c52-a48b40cacd93
-# ╠═f3dac414-91dc-49be-9e44-e1feebc7c7e1
-# ╠═4af10994-0e75-45d8-b7cd-081be78197c0
-# ╠═30d98353-cb56-410f-adbf-ba630258c9d0
-# ╠═658c1927-0f43-41dc-8f9d-4fb070000d04
-# ╠═e9d29488-ffe4-4427-88ff-d92c692c1d75
-# ╠═cbcd6f2d-bd71-466e-9d3a-f975c9ca31f4
-# ╠═84d41e4d-9b7c-49b9-bc66-452da0a915e6
-# ╠═a2e7f0a0-2c4c-4484-bd24-df5895962ce6
-# ╠═061ec564-211b-41e4-a2ae-78d6951e4cf1
-# ╠═5ce94954-7c8a-4185-b5a6-e498814cf06a
+# ╠═071f1e64-9af0-4135-9cc6-d86febcb4d76
+# ╠═6b907e00-187a-425a-b4f9-a8b079b7d897
+# ╠═b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
+# ╠═acb5e252-26e7-4335-9ab0-d30ecba9427a
+# ╠═6009e94f-5ad1-45ae-bf5c-9d272c900d2c
+# ╠═a3f00b89-8ab0-4026-af69-6966947d2fe6
+# ╠═cdf3ef81-fd2d-450d-8e50-8e56fe629163
+# ╠═2b20fa2c-bb36-4f60-abce-5eb1c56ea700
+# ╠═aa585e86-53f4-4340-80a5-b64ee56cc0bd
+# ╠═3057df9f-c907-4228-add5-f97213b2c6b5
+# ╠═8f0d38dc-3814-48e4-ad99-914a417f228a
+# ╠═4777ad7f-1dba-4217-b2a9-473a0fbf698a
+# ╠═905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
+# ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
+# ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
