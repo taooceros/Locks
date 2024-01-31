@@ -1,9 +1,10 @@
-using Arrow, DataFrames, CSVFiles, FileIO, CSV, DataFramesMeta, StatsBase
+## 
+using Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes
 
 # Load the compressed data
 
 cd("./visualization")
-
+##
 
 # Plot the data
 
@@ -12,51 +13,70 @@ using AlgebraOfGraphics: density
 
 CairoMakie.activate!(type="svg")
 
-data1 = Arrow.Table("output/counter-proportional-cs-onetoeight-noncs-one.csv.arrow")
+data1 = Arrow.Table("output/counter-proportional-one-to-eight.arrow")
 
 df1 = DataFrame(data1)
 
 function draw_plot(dataset, filename, link_x=false)
-    plt = data(dataset) * mapping(:response_time, color=(:job_length, :is_combiner) => ((x, y) -> begin
-                  string.(x, pad=6) * if ismissing(y)
-                      ""
-                  else
-                      " - " * string.(y, pad=6)
-                  end
-              end), layout=(:locktype, :waiter_type) => (
-                  (x, y) -> begin
-                      x * if ismissing(y)
-                          ""
-                      else
-                          " - " * y
-                      end
-                  end
-              )) * visual(ECDFPlot, npoints=1000)
-
-    fg = draw(plt, figure=(; size=(1600, 1200)), facet=(; linkxaxes=if link_x
-        :default
-    else
-        :none
-    end))
+    fg = Figure(size=(1200, 1200))
 
     display(fg)
 
     save("graphs/$filename.svg", fg)
 end
 
-dlock_thread_32 = @chain data1 begin
-    @subset(:thread_num .== 32, :locktype .∉ Ref(["Mutex", "SpinLock", "U-SCL"]))
-    @subset(:response_time .< quantile(:response_time, 0.999))
+##
+df2 = @chain df1 begin
+    @subset(:thread_num .== 64, :waiter_type .== "Spin Parker")
+    flatten([:is_combiner, :response_time])
     # groupby([:locktype, :waiter_type])
     # @transform(:response_time = (:response_time ./ maximum(:response_time)))
 end
 
+freq_plot = data(df2) *
+            mapping(:response_time => Dates.value,
+                color=:locktype,
+                row=:job_length => nonnumeric) * visual(ECDFPlot)
 
-thread_32 = @chain data1 begin
-    @subset(:thread_num .== 32)
-    # groupby([:locktype, :waiter_type])
-    # @transform(:response_time = (:response_time ./ maximum(:response_time)))
+colors = [ColorSchemes.Paired_10[1],
+    ColorSchemes.Paired_10[2],
+    ColorSchemes.Paired_10[3],
+    ColorSchemes.Paired_10[4],
+    ColorSchemes.Paired_10[5],
+    ColorSchemes.Paired_10[6],
+    ColorSchemes.Paired_10[7],
+    ColorSchemes.Paired_10[8]]
+
+draw(freq_plot; figure=(; size=(1200, 1200)),
+    palettes=(; color=colors))
+
+
+##
+
+df3 = @chain df2 begin
+    @distinct(:id, :locktype)
+    dropmissing(:combine_time)
 end
 
-draw_plot(dlock_thread_32, "response_time_proportion_32_dlock", true)
-draw_plot(thread_32, "response_time_proportion_32_all")
+combine_time_plt = data(df3) * mapping(:job_length, :combine_time, color=:locktype) * (linear() + visual(Scatter))
+
+draw(combine_time_plt; figure=(; size=(1200, 1200)), palettes=(; color=colors))
+
+##
+
+
+count_plot = data(df3) * mapping(:job_length, :loop_count, color=:locktype) * (linear() + visual(Scatter))
+draw(count_plot)
+
+
+##
+
+data2 = Arrow.Table("output/response_time_single_addition.arrow")
+
+
+df3 = DataFrame(data2)
+
+df4 = @chain df3 begin
+    dropmissing(:response_time)
+    @transform(@byrow :response_time_ecdf = ecdf(:response_time))
+end

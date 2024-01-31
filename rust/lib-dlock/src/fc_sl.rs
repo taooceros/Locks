@@ -78,7 +78,7 @@ where
         let combiner_begin = unsafe { __rdtscp(&mut aux) };
         let mut slice: u64 = 0;
 
-        while slice < COMBINER_SLICE || !combiner_node.finish.load(Acquire) {
+        while slice < COMBINER_SLICE {
             let begin = unsafe { __rdtscp(&mut aux) };
 
             let front_entry = self.jobs.pop_front();
