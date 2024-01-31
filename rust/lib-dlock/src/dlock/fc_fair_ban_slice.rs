@@ -8,7 +8,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     dlock::{DLock, DLockDelegate},
-    guard::DLockGuard,
+    dlock::guard::DLockGuard,
     parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,

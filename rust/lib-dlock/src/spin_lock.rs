@@ -8,7 +8,7 @@ use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 
 use crate::{
     dlock::{DLock, DLockDelegate},
-    guard::DLockGuard,
+    dlock::guard::DLockGuard,
 };
 
 use super::RawSimpleLock;

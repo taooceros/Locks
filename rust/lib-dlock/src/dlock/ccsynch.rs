@@ -9,7 +9,7 @@ use std::{
 };
 use thread_local::ThreadLocal;
 
-use crate::{dlock::DLock, guard::DLockGuard};
+use crate::{dlock::DLock, dlock::guard::DLockGuard};
 use crate::{dlock::DLockDelegate, parker::Parker};
 
 use self::node::Node;
