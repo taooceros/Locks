@@ -28,8 +28,6 @@ impl<T> Deref for SCL_Guard<'_, T> {
 
 impl<'a, T> Drop for SCL_Guard<'a, T> {
     fn drop(&mut self) {
-        unsafe {
-            self.lock.unlock();
-        }
+        self.lock.unlock();
     }
 }
