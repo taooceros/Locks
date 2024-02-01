@@ -1,5 +1,6 @@
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow_ipc::CompressionType;
+use core_affinity::CoreId;
 use core::num;
 use csv::Writer;
 use itertools::Itertools;
@@ -79,14 +80,23 @@ where
 
     STOP.store(false, Ordering::Release);
 
-    for i in 0..num_thread {
+    for (id, core_id) in core_affinity::get_core_ids()
+        .unwrap()
+        .iter()
+        .cycle()
+        .enumerate()
+        .take(num_thread)
+    {
         let lock = lock.clone();
         let record_response_time = false;
         let cs_duration = Duration::from_nanos(100);
         let non_cs_duration = Duration::from_nanos(0);
+        let id = id;
+        let core_id = *core_id;
         let handle = thread::spawn(move || {
             thread_job(
-                i,
+                id,
+                core_id,
                 num_thread,
                 num_thread,
                 &STOP,
@@ -117,6 +127,7 @@ where
 
 fn thread_job<L, F>(
     id: usize,
+    core_id: CoreId,
     num_thread: usize,
     num_cpu: usize,
     stop: &'static AtomicBool,
@@ -129,7 +140,7 @@ where
     L: DLock2<u64, F>,
     F: Fn(&mut u64, u64) -> u64 + Send + Sync,
 {
-    core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
+    core_affinity::set_for_current(core_id);
     let timer = Clock::new();
 
     let mut loop_result = 0u64;
