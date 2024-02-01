@@ -115,7 +115,11 @@ pub fn benchmark_response_time_single_addition(info: LockBenchInfo<u64>) {
         println!("{}", histogram);
     }
 
-    println!("Finish Response Time benchmark for {}", lock_type);
+    println!(
+        "Finish Response Time benchmark for {} loop {}",
+        lock_type,
+        results.iter().map(|r| r.loop_count).sum::<u64>()
+    );
 }
 
 fn thread_job(
@@ -150,11 +154,11 @@ fn thread_job(
                 let now = timer.now();
                 diff = Some(now - begin);
             }
-            num_acquire += 1;
             *guard += 1;
 
             is_combiner = current().id() == thread_id;
         });
+        num_acquire += 1;
 
         response_times.push(diff);
         is_combiners.push(Some(is_combiner));
@@ -165,6 +169,8 @@ fn thread_job(
         cpu_id: id % num_cpu,
         thread_num: num_thread,
         cpu_num: num_cpu,
+        num_acquire,
+        loop_count: num_acquire,
         hold_time,
         is_combiner: Some(is_combiners),
         response_times: Some(response_times),

@@ -38,7 +38,7 @@ html"""
 """
 
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
-datasets = readdir("../output");
+datasets = readdir("../data");
 
 # ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
 md"""
@@ -47,7 +47,7 @@ Select Dataset $(@bind dataset_name Select(datasets))
 
 # ╔═╡ 78545e43-25f8-4b4e-8b37-20be86ac7035
 begin
-	data1 = Arrow.Table(joinpath("..", "output", dataset_name))
+	data1 = Arrow.Table(joinpath("..", "data", dataset_name))
 	df_origin = DataFrame(data1)
 end;
 

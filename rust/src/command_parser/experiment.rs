@@ -5,6 +5,7 @@ use strum::{Display, EnumIter, IntoEnumIterator};
 
 #[derive(Debug, Clone, Display, Subcommand, EnumIter)]
 pub enum Experiment {
+    DLock2,
     CounterRatioOneThree,
     CounterSubversion,
     CounterRatioOneThreeNonCS,

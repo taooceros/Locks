@@ -11,12 +11,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     benchmark::{
-        non_cs_counter::counter_one_three_non_cs_one,
-        one_three_ratio_counter::counter_one_three_benchmark,
-        proposion_counter::counter_proportional,
-        response_time_single_addition::benchmark_response_time_single_addition,
-        response_time_variable::benchmark_response_time_one_three_ratio,
-        subversion_job::counter_subversion_benchmark,
+        dlock2::benchmark_dlock2, non_cs_counter::counter_one_three_non_cs_one, one_three_ratio_counter::counter_one_three_benchmark, proposion_counter::counter_proportional, response_time_single_addition::benchmark_response_time_single_addition, response_time_variable::benchmark_response_time_one_three_ratio, subversion_job::counter_subversion_benchmark
     },
     command_parser::{experiment::Experiment, lock_target::*},
 };
@@ -82,6 +77,7 @@ impl<'a> Bencher<'a> {
                 Experiment::ResponseTimeRatioOneThree => {
                     to_dyn(benchmark_response_time_one_three_ratio)
                 }
+                Experiment::DLock2 => to_dyn(benchmark_dlock2),
             };
 
             let targets = extract_targets(self.waiter, self.targets.iter());

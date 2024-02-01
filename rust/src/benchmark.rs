@@ -17,6 +17,7 @@ mod records;
 mod response_time_single_addition;
 mod response_time_variable;
 mod subversion_job;
+mod dlock2;
 
 pub fn benchmark(
     num_cpu: usize,
