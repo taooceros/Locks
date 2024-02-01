@@ -6,6 +6,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![feature(trait_alias)]
 
 pub mod spin_lock;
 mod syncptr;
@@ -16,7 +17,6 @@ mod unit_test;
 pub mod dlock;
 pub mod dlock2;
 pub mod parker;
-
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 

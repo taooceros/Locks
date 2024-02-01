@@ -9,7 +9,7 @@ pub enum State {
     Notified,
 }
 
-pub trait Parker: Debug + Default {
+pub trait Parker: Debug + Default + Send + Sync {
     fn wait(&self);
     fn wait_timeout(&self, timeout: Duration) -> Result<(), ()>;
     fn wake(&self);
