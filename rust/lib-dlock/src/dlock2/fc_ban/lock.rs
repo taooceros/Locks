@@ -4,11 +4,9 @@ use std::{
     cmp::max,
     ptr::{self, null_mut, NonNull},
     sync::atomic::{AtomicI64, AtomicPtr, AtomicU32, Ordering::*},
-    thread::current,
 };
 
 use crossbeam::{
-    deque::Worker,
     utils::{Backoff, CachePadded},
 };
 use thread_local::ThreadLocal;

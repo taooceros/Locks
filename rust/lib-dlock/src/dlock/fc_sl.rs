@@ -4,7 +4,7 @@ use std::{
     mem::transmute,
     num::*,
     sync::atomic::*,
-    sync::{atomic::Ordering::*, Mutex},
+    sync::{atomic::Ordering::*},
     thread::current,
     time::Duration,
 };
@@ -16,7 +16,7 @@ use thread_local::ThreadLocal;
 use crate::{
     dlock::{DLock, DLockDelegate},
     dlock::guard::DLockGuard,
-    parker::{Parker, State},
+    parker::{Parker},
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };
@@ -71,7 +71,7 @@ where
         }
     }
 
-    fn combine(&self, combiner_node: &mut Node<T, P>) {
+    fn combine(&self, _combiner_node: &mut Node<T, P>) {
         // println!("{} is combining", current().name().unwrap());
 
         let mut aux = 0;

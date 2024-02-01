@@ -4,7 +4,7 @@ use criterion::black_box;
 use csv::Writer;
 use itertools::Itertools;
 use std::cell::{OnceCell, RefCell};
-use std::fmt::Display;
+
 use std::fs::File;
 use std::path::Path;
 use std::thread::current;

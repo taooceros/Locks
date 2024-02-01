@@ -3,7 +3,6 @@ use std::{
     cell::SyncUnsafeCell,
     ptr::{self, null_mut, NonNull},
     sync::atomic::{AtomicPtr, AtomicU32, Ordering::*},
-    thread::current,
 };
 
 use crossbeam::utils::{Backoff, CachePadded};

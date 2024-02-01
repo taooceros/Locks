@@ -134,7 +134,7 @@ fn thread_job(
     let timer = Clock::new();
 
     let mut num_acquire = 0u64;
-    let mut hold_time = Duration::ZERO;
+    let hold_time = Duration::ZERO;
 
     let mut response_times = vec![];
     let mut is_combiners = vec![];

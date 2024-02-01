@@ -1,6 +1,6 @@
-use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use arrow_ipc::CompressionType;
-use core::num;
+
+
+
 use core_affinity::CoreId;
 use csv::Writer;
 use itertools::Itertools;
@@ -12,10 +12,10 @@ use libdlock::dlock2::mutex::DLock2Mutex;
 use libdlock::dlock2::spinlock::DLock2SpinLock;
 use libdlock::dlock2::DLock2;
 use std::cell::{OnceCell, RefCell};
-use std::fmt::Display;
+
 use std::fs::File;
 use std::hint::black_box;
-use std::path::Path;
+
 use std::thread::{available_parallelism, current};
 use zstd::stream::AutoFinishEncoder;
 
@@ -25,13 +25,12 @@ use std::{
     time::Duration,
 };
 
-use crate::benchmark::helper::create_plain_writer;
-use crate::benchmark::records::{Records, RecordsBuilder};
 
-use histo::Histogram;
+use crate::benchmark::records::{Records};
+
+
 use libdlock::{
-    dlock::guard::DLockGuard,
-    dlock::{BenchmarkType, DLock},
+    dlock::{DLock},
 };
 use quanta::Clock;
 
@@ -151,12 +150,12 @@ where
 
     let mut loop_result = 0u64;
     let mut num_acquire = 0u64;
-    let mut hold_time = Duration::ZERO;
+    let hold_time = Duration::ZERO;
 
-    let mut respone_time_start = timer.now();
+    let _respone_time_start = timer.now();
 
-    let mut response_times = Vec::new();
-    let mut is_combiners = Vec::new();
+    let response_times = Vec::new();
+    let is_combiners = Vec::new();
     let thread_id = current().id();
 
     while !stop.load(Ordering::Acquire) {
