@@ -15,7 +15,7 @@ use super::node::Node;
 
 const CLEAN_UP_AGE: u32 = 500;
 
-pub struct FCLock<'a, T, F, L>
+pub struct FC<'a, T, F, L>
 where
     T: Send + Sync,
     F: Fn(&mut T, T) -> T + 'a,
@@ -30,7 +30,7 @@ where
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<T, F, L> FCLock<'_, T, F, L>
+impl<T, F, L> FC<'_, T, F, L>
 where
     T: Send + Sync,
     F: Fn(&mut T, T) -> T + Send + Sync,
@@ -140,7 +140,7 @@ where
     }
 }
 
-impl<T, F> DLock2<T, F> for FCLock<'_, T, F, RawSpinLock>
+impl<T, F> DLock2<T, F> for FC<'_, T, F, RawSpinLock>
 where
     T: Send + Sync,
     F: Fn(&mut T, T) -> T + Send + Sync + 'static,
