@@ -145,7 +145,7 @@ where
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        const LOOP_LIMIT: u64 = 3000;
+        const LOOP_LIMIT: u64 = 1000;
 
         lock_type.lock(LOOP_LIMIT);
 
