@@ -1,5 +1,6 @@
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow_ipc::CompressionType;
+use criterion::black_box;
 use csv::Writer;
 use itertools::Itertools;
 use std::cell::{OnceCell, RefCell};
@@ -180,8 +181,8 @@ fn thread_job(
     core_affinity::set_for_current(core_affinity::CoreId { id: id % num_cpu });
     let timer = Clock::new();
 
-    let mut loop_result = 0u64;
-    let mut num_acquire = 0u64;
+    let mut loop_result = black_box(0u64);
+    let mut num_acquire = black_box(0u64);
     let mut hold_time = Duration::ZERO;
 
     let mut respone_time_start = timer.now();
@@ -200,7 +201,9 @@ fn thread_job(
         let mut current_response_time = None;
         let mut is_combiner = None;
 
-        lock_type.lock(|mut guard: DLockGuard<u64>| {
+        lock_type.lock(|guard: DLockGuard<u64>| {
+            let mut guard = black_box(guard);
+
             if record_response_time {
                 current_response_time = Some(timer.now().duration_since(respone_time_start));
                 is_combiner = Some(current().id() == thread_id);

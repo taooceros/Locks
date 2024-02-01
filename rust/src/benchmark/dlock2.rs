@@ -1,11 +1,12 @@
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow_ipc::CompressionType;
-use core_affinity::CoreId;
 use core::num;
+use core_affinity::CoreId;
 use csv::Writer;
 use itertools::Itertools;
 use libdlock::dlock2::cc::CCSynch;
-use libdlock::dlock2::fc::fclock::FCLock;
+use libdlock::dlock2::fc::FC;
+use libdlock::dlock2::fc_ban::lock::FCBan;
 use libdlock::dlock2::mutex::DLock2Mutex;
 use libdlock::dlock2::spinlock::DLock2SpinLock;
 use libdlock::dlock2::DLock2;
@@ -55,15 +56,17 @@ pub fn job(lockdata: &mut u64, data: u64) -> u64 {
 }
 
 pub fn benchmark_dlock2(info: LockBenchInfo<u64>) {
-    let lock1 = Arc::new(FCLock::new(0u64, job));
-    let lock2 = Arc::new(CCSynch::new(0u64, job));
-    let lock3 = Arc::new(DLock2Mutex::new(0u64, job));
-    let lock4 = Arc::new(DLock2SpinLock::new(0u64, job));
+    let lock1 = Arc::new(FC::new(0u64, job));
+    let lock2 = Arc::new(FCBan::new(0u64, job));
+    let lock3 = Arc::new(CCSynch::new(0u64, job));
+    let lock4 = Arc::new(DLock2Mutex::new(0u64, job));
+    let lock5 = Arc::new(DLock2SpinLock::new(0u64, job));
 
     start_bench(lock1, &info);
     start_bench(lock2, &info);
     start_bench(lock3, &info);
     start_bench(lock4, &info);
+    start_bench(lock5, &info);
 }
 
 fn start_bench<F, L>(lock: Arc<L>, info: &LockBenchInfo<'_, u64>)
@@ -156,12 +159,12 @@ where
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        const LOOP_LIMIT: u64 = 1000;
+        let loop_limit = 1000 * (id % 3 + 1) as u64;
 
-        lock_type.lock(LOOP_LIMIT);
+        lock_type.lock(loop_limit);
 
         num_acquire += 1;
-        loop_result += LOOP_LIMIT;
+        loop_result += loop_limit;
     }
 
     println!("{:?} finished: {}", thread_id, loop_result);
