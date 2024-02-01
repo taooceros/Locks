@@ -5,6 +5,7 @@ use core_affinity::CoreId;
 use csv::Writer;
 use itertools::Itertools;
 use libdlock::dlock2::cc::CCSynch;
+use libdlock::dlock2::cc_ban::CCBan;
 use libdlock::dlock2::fc::FC;
 use libdlock::dlock2::fc_ban::lock::FCBan;
 use libdlock::dlock2::mutex::DLock2Mutex;
@@ -59,14 +60,16 @@ pub fn benchmark_dlock2(info: LockBenchInfo<u64>) {
     let lock1 = Arc::new(FC::new(0u64, job));
     let lock2 = Arc::new(FCBan::new(0u64, job));
     let lock3 = Arc::new(CCSynch::new(0u64, job));
-    let lock4 = Arc::new(DLock2Mutex::new(0u64, job));
-    let lock5 = Arc::new(DLock2SpinLock::new(0u64, job));
+    let lock4 = Arc::new(CCBan::new(0u64, job));
+    let lock5 = Arc::new(DLock2Mutex::new(0u64, job));
+    let lock6 = Arc::new(DLock2SpinLock::new(0u64, job));
 
     start_bench(lock1, &info);
     start_bench(lock2, &info);
     start_bench(lock3, &info);
     start_bench(lock4, &info);
     start_bench(lock5, &info);
+    start_bench(lock6, &info);
 }
 
 fn start_bench<F, L>(lock: Arc<L>, info: &LockBenchInfo<'_, u64>)
@@ -159,7 +162,7 @@ where
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        let loop_limit = 1000 * (id % 3 + 1) as u64;
+        let loop_limit = 3000  as u64;
 
         lock_type.lock(loop_limit);
 

@@ -100,6 +100,8 @@ where
         let mut num_exec = unsafe { self.num_exec.get().read() };
         let mut avg_cs = unsafe { self.avg_cs.get().read() };
 
+        let mut work_begin = begin;
+
         while let Some(current_nonnull) = current_ptr {
             let current = unsafe { current_nonnull.as_ref() };
 
@@ -109,8 +111,6 @@ where
                     (*current.age.get()) = pass;
 
                     // if banned, skip
-
-                    let work_begin = __rdtscp(&mut aux);
 
                     if work_begin >= current.banned_until.get().read() {
                         current.data.get().write(
@@ -133,7 +133,7 @@ where
                                     as u64),
                         );
 
-                        continue;
+                        work_begin = work_end;
                     }
                 }
             }

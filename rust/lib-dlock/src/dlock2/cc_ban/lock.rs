@@ -1,9 +1,10 @@
 use crate::dlock2::DLock2;
 use std::{
     arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
+    cell::{SyncUnsafeCell, UnsafeCell},
+    cmp::max,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicPtr, Ordering::*},
+    sync::atomic::{AtomicI64, AtomicPtr, Ordering::*},
 };
 
 use crossbeam::utils::Backoff;
@@ -15,34 +16,74 @@ use crate::dlock2::DLock2Delegate;
 #[derive(Debug)]
 pub struct ThreadData<T> {
     pub(crate) node: AtomicPtr<Node<T>>,
+    pub(crate) banned_until: UnsafeCell<u64>,
 }
 
-#[derive(Debug)]
-pub struct CCSynch<T, F: DLock2Delegate<T>> {
+#[derive(Debug, Default)]
+pub struct CCBan<T, F: DLock2Delegate<T>> {
     delegate: F,
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<T>>,
+    avg_cs: SyncUnsafeCell<i64>,
+    num_exec: SyncUnsafeCell<i64>,
+    num_waiting_threads: AtomicI64,
     local_node: ThreadLocal<ThreadData<T>>,
 }
 
-impl<T, F: DLock2Delegate<T>> CCSynch<T, F> {
+impl<T, F: DLock2Delegate<T>> CCBan<T, F> {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             delegate,
             data: SyncUnsafeCell::new(data),
             tail: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
             local_node: ThreadLocal::new(),
+            avg_cs: SyncUnsafeCell::new(0),
+            num_exec: SyncUnsafeCell::new(0),
+            num_waiting_threads: AtomicI64::new(0),
+        }
+    }
+
+    fn ban(&self, data: &ThreadData<T>, panelty: u64) {
+        unsafe {
+            // println!(
+            //     "current cs {}; avg cs {}",
+            //     current_cs,
+            //     self.avg_cs.load_consume()
+            // );
+
+            data.banned_until.get().write(panelty);
         }
     }
 }
 
 const H: u32 = 16;
 
-impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
+impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCBan<T, F> {
     fn lock(&self, data: T) -> T {
-        let thread_data = self.local_node.get_or(|| ThreadData {
-            node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
+        let thread_data = self.local_node.get_or(|| {
+            self.num_waiting_threads.fetch_add(1, Relaxed);
+            ThreadData {
+                node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
+                banned_until: 0.into(),
+            }
         });
+
+        let mut aux = 0;
+
+        unsafe {
+            let banned_until = thread_data.banned_until.get().read();
+
+            let backoff = Backoff::default();
+            loop {
+                let current = __rdtscp(&mut aux);
+
+                if current >= banned_until {
+                    break;
+                }
+                backoff.snooze();
+            }
+        }
+
         let mut aux = 0;
         // use thread local node as next node
         let next_node = unsafe { &mut *thread_data.node.load(Acquire) };
@@ -74,6 +115,9 @@ impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
 
         // check whether the current node is completed
         if current_node.completed.load(Acquire) {
+            unsafe {
+                self.ban(thread_data, current_node.panelty.get().read());
+            }
             return unsafe { ptr::read(current_node.data.get()) };
         }
 
@@ -87,6 +131,11 @@ impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
         let mut counter: u32 = 0;
 
         let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
+
+        let mut work_begin = begin;
+
+        let mut num_exec = unsafe { self.num_exec.get().read() };
+        let mut avg_cs = unsafe { self.avg_cs.get().read() };
 
         while let Some(next_nonnull) = next_ptr {
             if counter >= H {
@@ -104,9 +153,21 @@ impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
                         ptr::read(tmp_node.data.get()),
                     ),
                 );
+                let work_end = __rdtscp(&mut aux);
 
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);
+
+                let cs = (work_end - work_begin) as i64;
+
+                num_exec += 1;
+                avg_cs += (cs - avg_cs) / (num_exec);
+                tmp_node.panelty.get().write(
+                    work_begin
+                        + (max((cs * (self.num_waiting_threads.load(Relaxed))) - avg_cs, 0) as u64),
+                );
+
+                work_begin = work_end;
             }
 
             tmp_node = next_node;
@@ -114,6 +175,10 @@ impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
         }
 
         tmp_node.wait.store(false, Release);
+
+        unsafe {
+            self.ban(thread_data, current_node.panelty.get().read());
+        }
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
