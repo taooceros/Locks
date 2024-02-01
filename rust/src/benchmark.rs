@@ -10,13 +10,8 @@ use self::bencher::Bencher;
 
 mod bencher;
 mod helper;
-mod non_cs_counter;
-mod one_three_ratio_counter;
-mod proposion_counter;
 mod records;
-mod response_time_single_addition;
-mod response_time_variable;
-mod subversion_job;
+mod dlock;
 mod dlock2;
 
 pub fn benchmark(

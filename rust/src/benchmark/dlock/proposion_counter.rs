@@ -26,7 +26,7 @@ use libdlock::{
 };
 use quanta::Clock;
 
-use super::bencher::LockBenchInfo;
+use crate::benchmark::bencher::LockBenchInfo;
 
 thread_local! {
     static WRITER: OnceCell<

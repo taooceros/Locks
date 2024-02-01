@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use super::bencher::LockBenchInfo;
+use crate::benchmark::bencher::LockBenchInfo;
+
 use super::proposion_counter;
 
 pub fn counter_one_three_non_cs_one() -> Box<dyn Fn(LockBenchInfo<u64>)> {
