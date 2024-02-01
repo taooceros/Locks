@@ -8,8 +8,8 @@ use crossbeam::{atomic::AtomicConsume, utils::CachePadded};
 use thread_local::ThreadLocal;
 
 use crate::{
-    dlock::{DLock, DLockDelegate},
     dlock::guard::DLockGuard,
+    dlock::{DLock, DLockDelegate},
     parker::Parker,
     spin_lock::RawSpinLock,
     RawSimpleLock,
@@ -46,6 +46,7 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
 
     fn push_node(&self, node: &mut Node<T, P>) {
         let mut head = self.head.load(Ordering::Acquire);
+        node.active.store(true, Ordering::Release);
         loop {
             node.next = head;
             match self
@@ -53,7 +54,6 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
                 .compare_exchange_weak(head, node, Ordering::Release, Ordering::Acquire)
             {
                 Ok(_) => {
-                    node.active.store(true, Ordering::Release);
                     break;
                 }
                 Err(x) => head = x,
