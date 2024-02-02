@@ -13,12 +13,12 @@ let cs = seq $base_duration $base_duration ((3 * $base_duration)) | str join ","
 
 # echo $cs
 
-target/release/dlock counter-proportional -t $threads --cs $cs --stat-response-time -d 15
+target/release/dlock d-lock2 counter-proportional -t $threads --cs $cs --stat-response-time -d 15
 
 let cs = seq $base_duration $base_duration ((8 * $base_duration)) | str join ","
-target/release/dlock counter-proportional -t $threads --cs $cs --stat-response-time -d 15
+target/release/dlock d-lock2 counter-proportional -t $threads --cs $cs --stat-response-time -d 15
 
 let noncs = $base_duration
-target/release/dlock counter-proportional -t $threads --cs $cs --non-cs $noncs --stat-response-time -d 15
+target/release/dlock d-lock2 counter-proportional -t $threads --cs $cs --non-cs $noncs --stat-response-time -d 15
 
-target/release/dlock counter-proportional -t 32 64 --stat-response-time --cs 1
+target/release/dlock d-lock2 counter-proportional -t 32 64 --stat-response-time --cs 1
