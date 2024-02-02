@@ -9,8 +9,8 @@ use crate::lock_target::{DLock1Target, DLock2Target, WaiterType};
 pub struct DLock1Option {
     #[command(subcommand)]
     pub experiment: Option<DLock1Experiment>,
-    #[arg(long, short, value_delimiter = ',', default_values_t = DLock1Target::iter())]
-    pub targets: Vec<DLock1Target>,
+    #[arg(long, short, value_delimiter = ',')]
+    pub lock_targets: Option<Vec<DLock1Target>>,
     #[arg(global = true, long, short, default_value = "all")]
     pub waiter: WaiterType,
 }
@@ -19,10 +19,9 @@ pub struct DLock1Option {
 pub struct DLock2Option {
     #[command(subcommand)]
     pub experiment: Option<DLock2Experiment>,
-    #[arg(long, short, value_delimiter = ',', default_values_t = DLock2Target::iter())]
-    pub lock_target: Vec<DLock2Target>,
+    #[arg(long, short, value_delimiter = ',')]
+    pub lock_targets: Option<Vec<DLock2Target>>,
 }
-
 
 #[derive(Debug, Clone, Display, Subcommand)]
 pub enum Experiment {
@@ -36,9 +35,9 @@ pub enum DLock1Experiment {
     CounterSubversion,
     CounterRatioOneThreeNonCS,
     CounterProportional {
-        #[arg(value_parser = parse_duration, long = "cs", default_value = "100000", value_delimiter = ',')]
+        #[arg(value_parser = parse_duration, long = "cs", default_values = ["1000"], value_delimiter = ',')]
         cs_durations: Vec<Duration>,
-        #[arg(value_parser = parse_duration, long = "non-cs", default_value = "0", value_delimiter = ',')]
+        #[arg(value_parser = parse_duration, long = "non-cs", default_values = ["0"], value_delimiter = ',')]
         non_cs_durations: Vec<Duration>,
         #[arg(long = "file-name", default_value = "proportional_counter")]
         file_name: String,
@@ -50,7 +49,6 @@ pub enum DLock1Experiment {
 impl DLock1Experiment {
     pub fn to_vec_ref() -> Vec<&'static Self> {
         static INSTANCE: OnceLock<Vec<DLock1Experiment>> = OnceLock::new();
-
         INSTANCE
             .get_or_init(|| DLock1Experiment::iter().collect())
             .iter()
@@ -60,7 +58,14 @@ impl DLock1Experiment {
 
 #[derive(Debug, Clone, Display, Subcommand, EnumIter)]
 pub enum DLock2Experiment {
-    CounterRatioOneThree,
+    CounterRatioOneThree {
+        #[arg(long = "cs", default_values_t = [1000usize], value_delimiter = ',')]
+        cs_loops: Vec<usize>,
+        #[arg(long = "non-cs", default_values_t = [0usize], value_delimiter = ',')]
+        non_cs_loops: Vec<usize>,
+        #[arg(long = "file-name")]
+        file_name: Option<String>,
+    },
 }
 
 impl DLock2Experiment {

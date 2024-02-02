@@ -40,15 +40,14 @@ pub fn counter_subversion_benchmark(info: LockBenchInfo<u64>) {
 
             println!("Start Subversion for {}", info.lock_type);
 
-            let mut writer = unsafe {
-                cell.get_or_init(|| {
+            let mut writer = cell
+                .get_or_init(|| {
                     RefCell::new(Writer::from_writer(
                         create_zstd_writer(info.output_path.join("subversion_benchmark.csv"))
                             .expect("Failed to create writer"),
                     ))
                 })
-                .borrow_mut()
-            };
+                .borrow_mut();
 
             let (num_thread, num_cpu, lock_type) =
                 (info.num_thread, info.num_cpu, info.lock_type.clone());

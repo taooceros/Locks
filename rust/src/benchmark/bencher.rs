@@ -27,6 +27,7 @@ use crate::{
 
 use super::dlock::benchmark_dlock1;
 
+#[derive(Debug)]
 pub struct Bencher<'a> {
     pub num_cpu: usize,
     pub num_thread: usize,
@@ -67,19 +68,14 @@ impl<'a> Bencher<'a> {
             None => {
                 self.benchmark_dlock2(&DLock2Option {
                     experiment: None,
-                    lock_target: DLock2Target::iter().collect(),
+                    lock_targets: None,
                 });
             }
         }
     }
 
     fn benchmark_dlock2(&self, option: &DLock2Option) {
-        let experiment = &option.experiment;
-
-        let experiments = match experiment {
-            Some(ref e) => vec![e],
-            None => DLock2Experiment::to_vec_ref(),
-        };
+        benchmark_dlock2(self, option);
     }
 
     fn benchmark_dlock1(&self, option: &DLock1Option) {

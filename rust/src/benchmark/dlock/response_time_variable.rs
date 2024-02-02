@@ -17,11 +17,6 @@ use std::thread::{self, current};
 use std::time::Duration;
 use zstd::stream::AutoFinishEncoder;
 
-static mut WRITER: OnceCell<
-    RefCell<
-        Writer<AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>>,
-    >,
-> = OnceCell::new();
 
 pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
     println!(

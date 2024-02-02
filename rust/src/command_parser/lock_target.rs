@@ -129,7 +129,7 @@ impl DLock2Target {
         }
     }
 
-    pub fn to_locktype<T, F, R>(&self, data: T, f: F) -> Option<DLock2Impl<T, F>>
+    pub fn to_locktype<T, F>(&self, data: T, f: F) -> Option<DLock2Impl<T, F>>
     where
         T: Send + Sync,
         F: DLock2Delegate<T>,

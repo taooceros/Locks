@@ -5,6 +5,7 @@ use crate::{
     spin_lock::RawSpinLock,
 };
 use enum_dispatch::enum_dispatch;
+use strum::Display;
 
 use self::{
     cc_ban::CCBan, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock, uscl::DLock2USCL,
@@ -31,7 +32,7 @@ where
 }
 
 #[enum_dispatch]
-#[derive(Debug)]
+#[derive(Debug, Display)]
 pub enum DLock2Impl<T, F>
 where
     T: Send + Sync,

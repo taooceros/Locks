@@ -2,8 +2,6 @@ use std::thread::available_parallelism;
 
 use clap::*;
 
-use strum::IntoEnumIterator;
-
 use self::{
     experiment::Experiment,
     lock_target::{DLock1Target, WaiterType},

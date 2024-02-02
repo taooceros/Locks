@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use itertools::Itertools;
 use libdlock::{
     dlock::{
         rcl::{rcllock::RclLock, rclserver::RclServer},
@@ -7,6 +8,7 @@ use libdlock::{
     },
     parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
 };
+use strum::IntoEnumIterator;
 
 use crate::{
     benchmark::{
@@ -82,7 +84,13 @@ pub fn benchmark_dlock1(bencher: &Bencher, option: &DLock1Option) {
             }
         };
 
-        let targets = extract_targets(option.waiter, option.targets.iter());
+        let iter = DLock1Target::iter().collect_vec();
+        let option_targets = option
+            .lock_targets
+            .as_ref()
+            .unwrap_or(&iter);
+
+        let targets = extract_targets(option.waiter, option_targets.iter());
 
         for target in targets {
             if let Some(lock) = target {
@@ -99,7 +107,7 @@ pub fn benchmark_dlock1(bencher: &Bencher, option: &DLock1Option) {
             }
         }
 
-        if option.targets.contains(&DLock1Target::RCL) {
+        if option_targets.contains(&DLock1Target::RCL) {
             match option.waiter {
                 WaiterType::Spin => {
                     bench_rcl::<_, SpinParker, _>(bencher, experiment, &bencher.output_path, job)
