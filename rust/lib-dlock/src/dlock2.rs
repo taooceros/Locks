@@ -21,28 +21,29 @@ pub mod mutex;
 pub mod spinlock;
 pub mod uscl;
 
-pub trait DLock2Delegate<T> = Fn(&mut T, T) -> T + Send + Sync;
+pub trait DLock2Delegate<T, I> = Fn(&mut T, I) -> I + Send + Sync;
 
-#[enum_dispatch(DLock2Impl<T, F>)]
-pub trait DLock2<T, F>: Send + Sync
+#[enum_dispatch(DLock2Impl<T, I, F>)]
+pub trait DLock2<T, I, F>: Send + Sync
 where
-    F: DLock2Delegate<T>,
+    F: DLock2Delegate<T, I>,
 {
-    fn lock(&self, data: T) -> T;
+    fn lock(&self, data: I) -> I;
 }
 
 #[enum_dispatch]
 #[derive(Debug, Display)]
-pub enum DLock2Impl<T, F>
+pub enum DLock2Impl<T, I, F>
 where
     T: Send + Sync,
-    F: DLock2Delegate<T> + 'static,
+    I: Send,
+    F: DLock2Delegate<T, I> + 'static,
 {
-    FC(FC<T, F, RawSpinLock>),
-    FCBan(FCBan<T, F, RawSpinLock>),
-    CC(CCSynch<T, F>),
-    CCBan(CCBan<T, F>),
-    SpinLock(DLock2SpinLock<T, F>),
-    Mutex(DLock2Mutex<T, F>),
-    USCL(DLock2USCL<T, F>),
+    FC(FC<T, I, F, RawSpinLock>),
+    FCBan(FCBan<T, I, F, RawSpinLock>),
+    CC(CCSynch<T, I, F>),
+    CCBan(CCBan<T, I, F>),
+    SpinLock(DLock2SpinLock<T, I, F>),
+    Mutex(DLock2Mutex<T, I, F>),
+    USCL(DLock2USCL<T, I, F>),
 }

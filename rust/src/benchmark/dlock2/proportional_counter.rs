@@ -2,6 +2,7 @@ use std::{
     cell::{OnceCell, RefCell},
     fmt::Display,
     hint::{black_box, spin_loop},
+    mem::MaybeUninit,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -37,16 +38,25 @@ pub fn proportional_counter<'a>(
     for target in targets {
         let lock = target.to_locktype(
             0usize,
-            black_box(|data: &mut usize, input: usize| {
+            Data::Input { data: 0 },
+            black_box(|data: &mut usize, input: Data| {
                 let data = black_box(data);
                 let mut input = black_box(input);
 
-                while input > 0 {
-                    *data += 1;
-                    input -= 1;
+                if let Data::Input {
+                    data: mut loop_limit,
+                } = input
+                {
+                    while loop_limit > 0 {
+                        *data += 1;
+                        loop_limit -= 1;
+                    }
                 }
 
-                *data
+                Data::Output {
+                    response_time: Duration::from_secs(0),
+                    data: *data,
+                }
             }),
         );
 
@@ -57,14 +67,24 @@ pub fn proportional_counter<'a>(
     }
 }
 
+pub enum Data {
+    Input {
+        data: usize,
+    },
+    Output {
+        response_time: Duration,
+        data: usize,
+    },
+}
+
 fn start_benchmark<F>(
     bencher: &Bencher,
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
-    lock_target: impl DLock2<usize, F> + 'static + Display,
+    lock_target: impl DLock2<usize, Data, F> + 'static + Display,
 ) -> Vec<Records>
 where
-    F: DLock2Delegate<usize>,
+    F: DLock2Delegate<usize, Data>,
 {
     println!("Start benchmark for {}", lock_target);
 
@@ -94,7 +114,8 @@ where
                     let mut loop_count = 0;
 
                     while !stop_signal.load(Ordering::Acquire) {
-                        lock_ref.lock(cs_loop);
+                        let data = Data::Input { data: cs_loop };
+                        lock_ref.lock(data);
                         loop_count += cs_loop;
 
                         for _ in 0..non_cs_loop {

@@ -1,4 +1,4 @@
 mod lock;
 mod node;
 
-pub type FCBan<T, F, L> = lock::FCBan<T, F, L>;
+pub type FCBan<T, I, F, L> = lock::FCBan<T, I, F, L>;

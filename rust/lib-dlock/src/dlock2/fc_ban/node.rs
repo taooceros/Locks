@@ -14,10 +14,11 @@ pub struct Node<T> {
     #[cfg(feature = "combiner_stat")]
     pub combiner_time_stat: i64,
 }
+
 impl<T> Node<T> {
     pub(crate) fn new() -> Node<T>
     where
-        T: Send + Sync,
+        T: Send, // we never pass reference to the data
     {
         Node {
             age: 0.into(),

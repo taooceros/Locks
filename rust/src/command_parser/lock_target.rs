@@ -15,7 +15,7 @@ use libdlock::{
         uscl::DLock2USCL, DLock2, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
-    spin_lock::SpinLock,
+    spin_lock::{RawSpinLock, SpinLock},
     u_scl::USCL,
 };
 use serde::Serialize;
@@ -129,12 +129,13 @@ impl DLock2Target {
         }
     }
 
-    pub fn to_locktype<T, F>(&self, data: T, f: F) -> Option<DLock2Impl<T, F>>
+    pub fn to_locktype<T, I, F>(&self, data: T, _: I, f: F) -> Option<DLock2Impl<T, I, F>>
     where
         T: Send + Sync,
-        F: DLock2Delegate<T>,
+        I: Send,
+        F: DLock2Delegate<T, I>,
     {
-        return Some::<DLock2Impl<T, F>>(match self {
+        return Some::<DLock2Impl<T, I, F>>(match self {
             DLock2Target::FC => FC::new(data, f).into(),
             DLock2Target::FCBan => FCBan::new(data, f).into(),
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),

@@ -1,4 +1,4 @@
 mod lock;
 mod node;
 
-pub type CCBan<T, F> = lock::CCBan<T, F>;
+pub type CCBan<T, I, F> = lock::CCBan<T, I, F>;

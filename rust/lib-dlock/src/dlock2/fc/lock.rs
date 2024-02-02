@@ -8,31 +8,37 @@ use std::{
 use crossbeam::utils::{Backoff, CachePadded};
 use thread_local::ThreadLocal;
 
-use crate::{dlock2::DLock2, spin_lock::RawSpinLock, RawSimpleLock};
+use crate::{
+    dlock2::{DLock2, DLock2Delegate},
+    spin_lock::RawSpinLock,
+    RawSimpleLock,
+};
 
 use super::node::Node;
 
 const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Debug)]
-pub struct FC<T, F, L>
+pub struct FC<T, I, F, L>
 where
     T: Send + Sync,
-    F: Fn(&mut T, T) -> T,
+    I: Send,
+    F: Fn(&mut T, I) -> I,
     L: RawSimpleLock,
 {
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     delegate: F,
     data: SyncUnsafeCell<T>,
-    head: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
+    head: AtomicPtr<Node<I>>,
+    local_node: ThreadLocal<SyncUnsafeCell<Node<I>>>,
 }
 
-impl<T, F, L> FC<T, F, L>
+impl<T, I, F, L> FC<T, I, F, L>
 where
     T: Send + Sync,
-    F: Fn(&mut T, T) -> T + Send + Sync,
+    I: Send,
+    F: DLock2Delegate<T, I>,
     L: RawSimpleLock,
 {
     pub fn new(data: T, delegate: F) -> Self {
@@ -46,7 +52,7 @@ where
         }
     }
 
-    fn push_node(&self, node: &mut Node<T>) {
+    fn push_node(&self, node: &mut Node<I>) {
         let mut head = self.head.load(Acquire);
         node.active.store(true, Release);
         loop {
@@ -63,7 +69,7 @@ where
         }
     }
 
-    fn push_if_unactive(&self, node: &mut Node<T>) {
+    fn push_if_unactive(&self, node: &mut Node<I>) {
         if node.active.load(Acquire) {
             return;
         }
@@ -111,7 +117,7 @@ where
         }
     }
 
-    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<T>>, pass: u32) {
+    unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<I>>, pass: u32) {
         let previous_ptr = NonNull::new(head.load(Acquire)).unwrap();
 
         let mut previous_nonnull = previous_ptr;
@@ -138,12 +144,13 @@ where
     }
 }
 
-impl<'a, T, F> DLock2<T, F> for FC<T, F, RawSpinLock>
+impl<'a, T, I, F> DLock2<T, I, F> for FC<T, I, F, RawSpinLock>
 where
     T: Send + Sync,
-    F: Fn(&mut T, T) -> T + Send + Sync + 'static,
+    I: Send,
+    F: DLock2Delegate<T, I>,
 {
-    fn lock(&self, data: T) -> T {
+    fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
         let node = unsafe { &mut *node.get() };

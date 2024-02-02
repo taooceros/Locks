@@ -18,14 +18,20 @@ pub struct ThreadData<T> {
 }
 
 #[derive(Debug)]
-pub struct CCSynch<T, F: DLock2Delegate<T>> {
+pub struct CCSynch<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
     delegate: F,
     data: SyncUnsafeCell<T>,
-    tail: AtomicPtr<Node<T>>,
-    local_node: ThreadLocal<ThreadData<T>>,
+    tail: AtomicPtr<Node<I>>,
+    local_node: ThreadLocal<ThreadData<I>>,
 }
 
-impl<T, F: DLock2Delegate<T>> CCSynch<T, F> {
+impl<T, I, F> CCSynch<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             delegate,
@@ -38,8 +44,12 @@ impl<T, F: DLock2Delegate<T>> CCSynch<T, F> {
 
 const H: u32 = 16;
 
-impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCSynch<T, F> {
-    fn lock(&self, data: T) -> T {
+impl<T, I, F> DLock2<T, I, F> for CCSynch<T, I, F>
+where
+    T: Send + Sync,
+    F: DLock2Delegate<T, I>,
+{
+    fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| ThreadData {
             node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
         });

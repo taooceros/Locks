@@ -20,17 +20,23 @@ pub struct ThreadData<T> {
 }
 
 #[derive(Debug, Default)]
-pub struct CCBan<T, F: DLock2Delegate<T>> {
+pub struct CCBan<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
     delegate: F,
     data: SyncUnsafeCell<T>,
-    tail: AtomicPtr<Node<T>>,
+    tail: AtomicPtr<Node<I>>,
     avg_cs: SyncUnsafeCell<i64>,
     num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicI64,
-    local_node: ThreadLocal<ThreadData<T>>,
+    local_node: ThreadLocal<ThreadData<I>>,
 }
 
-impl<T, F: DLock2Delegate<T>> CCBan<T, F> {
+impl<T, I, F> CCBan<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             delegate,
@@ -43,7 +49,7 @@ impl<T, F: DLock2Delegate<T>> CCBan<T, F> {
         }
     }
 
-    fn ban(&self, data: &ThreadData<T>, panelty: u64) {
+    fn ban(&self, data: &ThreadData<I>, panelty: u64) {
         unsafe {
             // println!(
             //     "current cs {}; avg cs {}",
@@ -58,8 +64,12 @@ impl<T, F: DLock2Delegate<T>> CCBan<T, F> {
 
 const H: u32 = 16;
 
-impl<T: Send + Sync, F: DLock2Delegate<T>> DLock2<T, F> for CCBan<T, F> {
-    fn lock(&self, data: T) -> T {
+impl<T, I, F> DLock2<T, I, F> for CCBan<T, I, F>
+where
+    T: Send + Sync,
+    F: DLock2Delegate<T, I>,
+{
+    fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| {
             self.num_waiting_threads.fetch_add(1, Relaxed);
             ThreadData {
