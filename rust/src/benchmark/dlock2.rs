@@ -20,7 +20,7 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
 
     for experiment in experiments {
         match experiment {
-            DLock2Experiment::CounterRatioOneThree {
+            DLock2Experiment::CounterProportional {
                 cs_loops,
                 non_cs_loops,
                 file_name,

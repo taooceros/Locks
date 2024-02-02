@@ -58,7 +58,7 @@ impl DLock1Experiment {
 
 #[derive(Debug, Clone, Display, Subcommand, EnumIter)]
 pub enum DLock2Experiment {
-    CounterRatioOneThree {
+    CounterProportional {
         #[arg(long = "cs", default_values_t = [1000usize], value_delimiter = ',')]
         cs_loops: Vec<usize>,
         #[arg(long = "non-cs", default_values_t = [0usize], value_delimiter = ',')]
