@@ -1,7 +1,5 @@
 use std::thread::{self, ThreadId};
 
-
-
 use super::rclserver::RCLServer;
 
 pub struct RCLThread<'a> {
@@ -10,4 +8,3 @@ pub struct RCLThread<'a> {
     pub wait_to_serve: ThreadId,
     pub thread_handle: Option<thread::JoinHandle<()>>,
 }
-

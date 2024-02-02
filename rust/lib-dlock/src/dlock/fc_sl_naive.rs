@@ -8,8 +8,8 @@ use crossbeam_skiplist::SkipMap;
 use thread_local::ThreadLocal;
 
 use crate::{
-    dlock::{DLock, DLockDelegate},
     dlock::guard::DLockGuard,
+    dlock::{DLock, DLockDelegate},
     parker::{Parker, State},
     spin_lock::RawSpinLock,
     RawSimpleLock,

@@ -10,9 +10,9 @@ use crate::{
     dlock::fc_fair_ban::FcFairBanLock,
     dlock::fc_fair_ban_slice::FcFairBanSliceLock,
     dlock::guard::DLockGuard,
+    dlock::rcl::{rcllock::RclLock, rclserver::RclServer},
     dlock::{fc_sl::FCSL, fc_sl_naive::FCSLNaive, DLock, DLockType},
     parker::spin_parker::SpinParker,
-    dlock::rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
 #[test]

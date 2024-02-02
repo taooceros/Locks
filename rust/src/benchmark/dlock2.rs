@@ -1,6 +1,3 @@
-
-
-
 use core_affinity::CoreId;
 use csv::Writer;
 use itertools::Itertools;
@@ -25,13 +22,9 @@ use std::{
     time::Duration,
 };
 
+use crate::benchmark::records::Records;
 
-use crate::benchmark::records::{Records};
-
-
-use libdlock::{
-    dlock::{DLock},
-};
+use libdlock::dlock::DLock;
 use quanta::Clock;
 
 use super::bencher::LockBenchInfo;
@@ -161,7 +154,7 @@ where
     while !stop.load(Ordering::Acquire) {
         // critical section
 
-        let loop_limit = 3000  as u64;
+        let loop_limit = 3000 as u64;
 
         lock_type.lock(loop_limit);
 

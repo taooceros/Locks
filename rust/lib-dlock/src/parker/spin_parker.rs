@@ -6,7 +6,7 @@ use std::hint::spin_loop;
 
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::thread::{yield_now};
+use std::thread::yield_now;
 use std::time::Duration;
 
 use super::State;

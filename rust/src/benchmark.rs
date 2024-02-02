@@ -9,10 +9,10 @@ use crate::command_parser::*;
 use self::bencher::Bencher;
 
 mod bencher;
-mod helper;
-mod records;
 mod dlock;
 mod dlock2;
+mod helper;
+mod records;
 
 pub fn benchmark(
     num_cpu: usize,

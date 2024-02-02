@@ -6,9 +6,7 @@ use std::{
     sync::atomic::{AtomicI64, AtomicPtr, AtomicU32, Ordering::*},
 };
 
-use crossbeam::{
-    utils::{Backoff, CachePadded},
-};
+use crossbeam::utils::{Backoff, CachePadded};
 use thread_local::ThreadLocal;
 
 use crate::{dlock2::DLock2, spin_lock::RawSpinLock, RawSimpleLock};

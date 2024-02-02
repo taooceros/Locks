@@ -1,4 +1,4 @@
-use std::{ops::DerefMut};
+use std::ops::DerefMut;
 
 use crate::spin_lock::SpinLock;
 

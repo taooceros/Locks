@@ -1,12 +1,6 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    mem::transmute,
-    num::*,
-    sync::atomic::*,
-    sync::{atomic::Ordering::*},
-    thread::current,
-    time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*,
+    sync::atomic::Ordering::*, sync::atomic::*, thread::current, time::Duration,
 };
 
 use crossbeam::utils::CachePadded;
@@ -14,9 +8,9 @@ use crossbeam_skiplist::SkipMap;
 use thread_local::ThreadLocal;
 
 use crate::{
-    dlock::{DLock, DLockDelegate},
     dlock::guard::DLockGuard,
-    parker::{Parker},
+    dlock::{DLock, DLockDelegate},
+    parker::Parker,
     spin_lock::RawSpinLock,
     RawSimpleLock,
 };

@@ -2,7 +2,7 @@ use std::{cell::SyncUnsafeCell, fmt::Debug};
 
 use crossbeam::utils::CachePadded;
 
-use crate::{dlock::DLockDelegate, dlock::guard::DLockGuard, parker::Parker};
+use crate::{dlock::guard::DLockGuard, dlock::DLockDelegate, parker::Parker};
 
 use super::rcllock::*;
 

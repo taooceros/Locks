@@ -1,3 +1,1 @@
-pub struct RCLServer {
-    
-}
+pub struct RCLServer {}

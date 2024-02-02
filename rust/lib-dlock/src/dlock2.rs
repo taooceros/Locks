@@ -1,6 +1,5 @@
 use enum_dispatch::enum_dispatch;
 
-
 pub mod cc;
 pub mod cc_ban;
 pub mod fc;

@@ -1,9 +1,9 @@
 use std::{cell::SyncUnsafeCell, mem::MaybeUninit};
 
 use crate::{
+    dlock::guard::DLockGuard,
     dlock::{DLock, DLockDelegate},
     fairlock_acquire, fairlock_init, fairlock_release, fairlock_t, fairlock_thread_init,
-    dlock::guard::DLockGuard,
 };
 
 use self::scl_gurad::SCL_Guard;

@@ -8,26 +8,19 @@ pub mod ccsynch_fair_ban;
 pub mod fc;
 pub mod fc_fair_ban;
 pub mod fc_fair_ban_slice;
-pub mod fc_sl_naive;
 pub mod fc_sl;
+pub mod fc_sl_naive;
 pub mod guard;
 pub mod rcl;
 
 pub mod mutex_extension;
 
-
 use enum_dispatch::enum_dispatch;
 
 use self::{
-    ccsynch::CCSynch,
-    ccsynch_fair_ban::CCBan,
-    fc::fclock::FcLock,
-    fc_fair_ban::FcFairBanLock,
-    fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_sl_naive::FCSLNaive,
-    guard::DLockGuard,
+    ccsynch::CCSynch, ccsynch_fair_ban::CCBan, fc::fclock::FcLock, fc_fair_ban::FcFairBanLock,
+    fc_fair_ban_slice::FcFairBanSliceLock, fc_sl::FCSL, fc_sl_naive::FCSLNaive, guard::DLockGuard,
     rcl::rcllock::RclLock,
-    fc_sl::FCSL,
 };
 
 use crate::{

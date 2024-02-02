@@ -21,8 +21,8 @@ use crate::benchmark::records::{Records, RecordsBuilder};
 
 use histo::Histogram;
 use libdlock::{
-    dlock::{BenchmarkType, DLock},
     dlock::guard::DLockGuard,
+    dlock::{BenchmarkType, DLock},
 };
 use quanta::Clock;
 

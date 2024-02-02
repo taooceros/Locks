@@ -4,12 +4,12 @@ use clap::ValueEnum;
 use libdlock::{
     dlock::ccsynch::CCSynch,
     dlock::ccsynch_fair_ban::CCBan,
-    dlock::{BenchmarkType, DLockType},
     dlock::fc::fclock::FcLock,
     dlock::fc_fair_ban::FcFairBanLock,
     dlock::fc_fair_ban_slice::FcFairBanSliceLock,
     dlock::fc_sl::FCSL,
     dlock::fc_sl_naive::FCSLNaive,
+    dlock::{BenchmarkType, DLockType},
     parker::Parker,
     spin_lock::SpinLock,
     u_scl::USCL,
