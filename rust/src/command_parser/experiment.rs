@@ -1,11 +1,31 @@
 use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use strum::{Display, EnumIter, IntoEnumIterator};
+
+use crate::lock_target::{DLock1Target, WaiterType};
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct DLock1Option {
+    #[command(subcommand)]
+    pub experiment: Option<DLock1Experiment>,
+    #[arg(long, short, value_delimiter = ',', default_values_t = DLock1Target::iter())]
+    pub targets: Vec<DLock1Target>,
+    #[arg(global = true, long, short, default_value = "all")]
+    pub waiter: WaiterType,
+}
 
 #[derive(Debug, Clone, Display, Subcommand, EnumIter)]
 pub enum Experiment {
-    DLock2,
+    DLock2 {
+        #[command(subcommand)]
+        subcommand: Option<DLock2Experiment>,
+    },
+    DLock1(DLock1Option),
+}
+
+#[derive(Debug, Clone, Display, Subcommand, EnumIter)]
+pub enum DLock1Experiment {
     CounterRatioOneThree,
     CounterSubversion,
     CounterRatioOneThreeNonCS,
@@ -21,12 +41,28 @@ pub enum Experiment {
     ResponseTimeRatioOneThree,
 }
 
-impl Experiment {
+impl DLock1Experiment {
     pub fn to_vec_ref() -> Vec<&'static Self> {
-        static INSTANCE: OnceLock<Vec<Experiment>> = OnceLock::new();
+        static INSTANCE: OnceLock<Vec<DLock1Experiment>> = OnceLock::new();
 
         INSTANCE
-            .get_or_init(|| Experiment::iter().collect())
+            .get_or_init(|| DLock1Experiment::iter().collect())
+            .iter()
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Display, Subcommand, EnumIter)]
+pub enum DLock2Experiment {
+    CounterRatioOneThree,
+}
+
+impl DLock2Experiment {
+    pub fn to_vec_ref() -> Vec<&'static Self> {
+        static INSTANCE: OnceLock<Vec<DLock2Experiment>> = OnceLock::new();
+
+        INSTANCE
+            .get_or_init(|| DLock2Experiment::iter().collect())
             .iter()
             .collect()
     }

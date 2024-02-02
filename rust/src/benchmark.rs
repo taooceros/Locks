@@ -3,7 +3,7 @@ use strum::IntoEnumIterator;
 use std::path::Path;
 
 use crate::command_parser::experiment::Experiment;
-use crate::command_parser::lock_target::LockTarget;
+use crate::command_parser::lock_target::DLock1Target;
 use crate::command_parser::*;
 
 use self::bencher::Bencher;
@@ -24,14 +24,9 @@ pub fn benchmark(
         num_cpu,
         num_thread,
         experiment,
-        match &options.lock_target {
-            Some(t) => t.clone(),
-            None => LockTarget::iter().collect(),
-        },
         Path::new(&options.output_path)
             .to_path_buf()
             .into_boxed_path(),
-        options.waiter,
         options.stat_response_time,
         options.duration,
         options.verbose,

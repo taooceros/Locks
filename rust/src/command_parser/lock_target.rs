@@ -23,8 +23,16 @@ pub enum WaiterType {
     Block,
     All,
 }
-#[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq)]
-pub enum LockTarget {
+
+impl Default for WaiterType {
+    fn default() -> Self {
+        WaiterType::All
+    }
+}
+
+
+#[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq, Display)]
+pub enum DLock1Target {
     /// Benchmark Flat-Combining Skiplist Naive
     FCSLNaive,
     /// Benchmark Flat-Combining Skiplist
@@ -50,18 +58,18 @@ pub enum LockTarget {
     USCL,
 }
 
-impl LockTarget {
+impl DLock1Target {
     pub fn is_dlock(&self) -> bool {
         match self {
-            LockTarget::FCSLNaive
-            | LockTarget::FCSL
-            | LockTarget::FC
-            | LockTarget::FCBan
-            | LockTarget::FCBanSlice
-            | LockTarget::CC
-            | LockTarget::CCBan
-            | LockTarget::RCL => true,
-            LockTarget::Mutex | LockTarget::SpinLock | LockTarget::USCL => false,
+            DLock1Target::FCSLNaive
+            | DLock1Target::FCSL
+            | DLock1Target::FC
+            | DLock1Target::FCBan
+            | DLock1Target::FCBanSlice
+            | DLock1Target::CC
+            | DLock1Target::CCBan
+            | DLock1Target::RCL => true,
+            DLock1Target::Mutex | DLock1Target::SpinLock | DLock1Target::USCL => false,
         }
     }
 
@@ -71,20 +79,20 @@ impl LockTarget {
         BenchmarkType<u64>: From<DLockType<u64, P>>,
     {
         let locktype: DLockType<u64, P> = match self {
-            LockTarget::FCSLNaive => FCSLNaive::new(0u64).into(),
-            LockTarget::FCSL => FCSL::new(0u64).into(),
-            LockTarget::FC => FcLock::new(0u64).into(),
-            LockTarget::FCBan => FcFairBanLock::new(0u64).into(),
-            LockTarget::FCBanSlice => FcFairBanSliceLock::new(0u64).into(),
-            LockTarget::CC => CCSynch::new(0u64).into(),
-            LockTarget::CCBan => CCBan::new(0u64).into(),
+            DLock1Target::FCSLNaive => FCSLNaive::new(0u64).into(),
+            DLock1Target::FCSL => FCSL::new(0u64).into(),
+            DLock1Target::FC => FcLock::new(0u64).into(),
+            DLock1Target::FCBan => FcFairBanLock::new(0u64).into(),
+            DLock1Target::FCBanSlice => FcFairBanSliceLock::new(0u64).into(),
+            DLock1Target::CC => CCSynch::new(0u64).into(),
+            DLock1Target::CCBan => CCBan::new(0u64).into(),
             // RCL requires special treatment
-            LockTarget::RCL => return None,
-            LockTarget::SpinLock => {
+            DLock1Target::RCL => return None,
+            DLock1Target::SpinLock => {
                 return Some(BenchmarkType::OtherLocks(SpinLock::new(0u64).into()))
             }
-            LockTarget::Mutex => return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into())),
-            LockTarget::USCL => return Some(BenchmarkType::OtherLocks(USCL::new(0u64).into())),
+            DLock1Target::Mutex => return Some(BenchmarkType::OtherLocks(Mutex::new(0u64).into())),
+            DLock1Target::USCL => return Some(BenchmarkType::OtherLocks(USCL::new(0u64).into())),
         };
 
         Some(locktype.into())
