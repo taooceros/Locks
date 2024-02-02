@@ -1,4 +1,5 @@
 use std::{
+    arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
     fmt::Display,
     hint::{black_box, spin_loop},
@@ -18,14 +19,15 @@ use arrow_ipc::{
 };
 use itertools::izip;
 use libdlock::dlock2::{DLock2, DLock2Delegate};
+use nix::sys::time;
 
 use crate::{
     benchmark::{
         bencher::Bencher,
         helper::create_plain_writer,
-        records::{Record, Records, RecordsBuilder},
+        records::{Records, RecordsBuilder},
     },
-    lock_target::{self, DLock2Target},
+    lock_target::DLock2Target,
 };
 
 pub fn proportional_counter<'a>(
@@ -36,12 +38,22 @@ pub fn proportional_counter<'a>(
     non_cs_loop: impl Iterator<Item = usize> + Clone,
 ) {
     for target in targets {
+        let stat_response_time = bencher.stat_response_time;
+
         let lock = target.to_locktype(
             0usize,
             Data::Input { data: 0 },
-            black_box(|data: &mut usize, input: Data| {
+            black_box(move |data: &mut usize, input: Data| {
                 let data = black_box(data);
-                let mut input = black_box(input);
+                let input = black_box(input);
+
+                let timestamp = unsafe {
+                    if stat_response_time {
+                        __rdtscp(&mut 0)
+                    } else {
+                        0
+                    }
+                };
 
                 if let Data::Input {
                     data: mut loop_limit,
@@ -53,8 +65,10 @@ pub fn proportional_counter<'a>(
                     }
                 }
 
+                let mut aux = 0;
+
                 Data::Output {
-                    response_time: Duration::from_secs(0),
+                    timestamp: timestamp,
                     data: *data,
                 }
             }),
@@ -68,13 +82,8 @@ pub fn proportional_counter<'a>(
 }
 
 pub enum Data {
-    Input {
-        data: usize,
-    },
-    Output {
-        response_time: Duration,
-        data: usize,
-    },
+    Input { data: usize },
+    Output { timestamp: u64, data: usize },
 }
 
 fn start_benchmark<F>(
@@ -103,6 +112,7 @@ where
                 let lock_ref = lock_ref.clone();
                 let core_id = *core_id;
                 let stop_signal = stop_signal.clone();
+                let stat_response_time = bencher.stat_response_time;
 
                 scope.spawn(move || {
                     core_affinity::set_for_current(core_id);
@@ -110,15 +120,30 @@ where
                     let stop_signal = black_box(stop_signal);
                     let cs_loop = black_box(cs_loop);
                     let non_cs_loop = black_box(non_cs_loop);
-
+                    let mut response_times = vec![];
                     let mut loop_count = 0;
+                    let mut aux = 0;
 
                     while !stop_signal.load(Ordering::Acquire) {
                         let data = Data::Input { data: cs_loop };
-                        lock_ref.lock(data);
+
+                        let begin = if stat_response_time {
+                            unsafe { __rdtscp(&mut aux) }
+                        } else {
+                            0
+                        };
+
+                        let _output = lock_ref.lock(data);
+
+                        if stat_response_time {
+                            let end = unsafe { __rdtscp(&mut aux) };
+                            response_times.push(end - begin);
+                        }
+
                         loop_count += cs_loop;
 
-                        for _ in 0..non_cs_loop {
+                        for i in 0..non_cs_loop {
+                            black_box(i);
                             spin_loop()
                         }
                     }
