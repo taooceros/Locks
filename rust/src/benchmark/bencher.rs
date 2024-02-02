@@ -22,7 +22,7 @@ use crate::{
         dlock2::benchmark_dlock2,
     },
     command_parser::{experiment::Experiment, lock_target::*},
-    experiment::{DLock1Option, DLock1Experiment, DLock2Experiment},
+    experiment::{DLock1Experiment, DLock1Option, DLock2Experiment, DLock2Option},
 };
 
 use super::dlock::benchmark_dlock1;
@@ -63,14 +63,19 @@ impl<'a> Bencher<'a> {
             Some(Experiment::DLock1(dlock1_option)) => {
                 self.benchmark_dlock1(dlock1_option);
             }
-            Some(Experiment::DLock2 { subcommand }) => self.benchmark_dlock2(subcommand),
+            Some(Experiment::DLock2(dlock2_option)) => self.benchmark_dlock2(dlock2_option),
             None => {
-                self.benchmark_dlock2(&None);
+                self.benchmark_dlock2(&DLock2Option {
+                    experiment: None,
+                    lock_target: DLock2Target::iter().collect(),
+                });
             }
         }
     }
 
-    fn benchmark_dlock2(&self, experiment: &Option<DLock2Experiment>) {
+    fn benchmark_dlock2(&self, option: &DLock2Option) {
+        let experiment = &option.experiment;
+
         let experiments = match experiment {
             Some(ref e) => vec![e],
             None => DLock2Experiment::to_vec_ref(),

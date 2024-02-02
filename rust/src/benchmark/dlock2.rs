@@ -1,3 +1,4 @@
+use crate::benchmark::dlock2::proportional_counter::proportional_counter;
 use crate::experiment::DLock2Experiment;
 
 use super::bencher::Bencher;
@@ -14,7 +15,7 @@ pub fn benchmark_dlock2(bencher: &Bencher, experiment: &Option<DLock2Experiment>
     for experiment in experiments {
         match experiment {
             DLock2Experiment::CounterRatioOneThree => {
-                // counter_one_three_benchmark(bencher);
+                proportional_counter(bencher);
             }
         }
     }

@@ -10,6 +10,10 @@ use libdlock::{
     dlock::fc_sl::FCSL,
     dlock::fc_sl_naive::FCSLNaive,
     dlock::{BenchmarkType, DLockType},
+    dlock2::{
+        self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
+        uscl::DLock2USCL, DLock2, DLock2Delegate, DLock2Impl,
+    },
     parker::Parker,
     spin_lock::SpinLock,
     u_scl::USCL,
@@ -29,7 +33,6 @@ impl Default for WaiterType {
         WaiterType::All
     }
 }
-
 
 #[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq, Display)]
 pub enum DLock1Target {
@@ -96,5 +99,49 @@ impl DLock1Target {
         };
 
         Some(locktype.into())
+    }
+}
+
+#[derive(Debug, ValueEnum, EnumIter, Clone, Copy, PartialEq, Display)]
+pub enum DLock2Target {
+    /// Benchmark Flat-Combining Lock
+    FC,
+    /// Benchmark Flat-Combining Fair (Banning) Lock
+    FCBan,
+
+    /// Benchmark CCSynch
+    CC,
+    /// Benchmark CCSynch (Ban)
+    CCBan,
+    /// Benchmark Mutex
+    Mutex,
+    /// Benchmark Spinlock
+    SpinLock,
+    /// Benchmark U-SCL
+    USCL,
+}
+
+impl DLock2Target {
+    pub fn is_dlock(&self) -> bool {
+        match self {
+            DLock2Target::FC | DLock2Target::FCBan | DLock2Target::CC | DLock2Target::CCBan => true,
+            DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
+        }
+    }
+
+    pub fn to_locktype<T, F, R>(&self, data: T, f: F) -> Option<DLock2Impl<T, F>>
+    where
+        T: Send + Sync,
+        F: DLock2Delegate<T>,
+    {
+        return Some::<DLock2Impl<T, F>>(match self {
+            DLock2Target::FC => FC::new(data, f).into(),
+            DLock2Target::FCBan => FCBan::new(data, f).into(),
+            DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
+            DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
+            DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
+            DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
+            DLock2Target::USCL => DLock2USCL::new(data, f).into(),
+        });
     }
 }

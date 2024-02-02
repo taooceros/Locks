@@ -3,7 +3,7 @@ use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 use clap::{Args, Subcommand};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
-use crate::lock_target::{DLock1Target, WaiterType};
+use crate::lock_target::{DLock1Target, DLock2Target, WaiterType};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DLock1Option {
@@ -15,12 +15,18 @@ pub struct DLock1Option {
     pub waiter: WaiterType,
 }
 
-#[derive(Debug, Clone, Display, Subcommand, EnumIter)]
+#[derive(Args, Debug, Clone)]
+pub struct DLock2Option {
+    #[command(subcommand)]
+    pub experiment: Option<DLock2Experiment>,
+    #[arg(long, short, value_delimiter = ',', default_values_t = DLock2Target::iter())]
+    pub lock_target: Vec<DLock2Target>,
+}
+
+
+#[derive(Debug, Clone, Display, Subcommand)]
 pub enum Experiment {
-    DLock2 {
-        #[command(subcommand)]
-        subcommand: Option<DLock2Experiment>,
-    },
+    DLock2(DLock2Option),
     DLock1(DLock1Option),
 }
 

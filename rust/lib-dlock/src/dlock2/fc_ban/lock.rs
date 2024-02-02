@@ -15,10 +15,11 @@ use super::node::Node;
 
 const CLEAN_UP_AGE: u32 = 500;
 
-pub struct FCBan<'a, T, F, L>
+#[derive(Debug)]
+pub struct FCBan<T, F, L>
 where
     T: Send + Sync,
-    F: Fn(&mut T, T) -> T + 'a,
+    F: Fn(&mut T, T) -> T,
     L: RawSimpleLock,
 {
     pass: AtomicU32,
@@ -30,10 +31,9 @@ where
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<T>>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<T>>>,
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<T, F, L> FCBan<'_, T, F, L>
+impl<T, F, L> FCBan<T, F, L>
 where
     T: Send + Sync,
     F: Fn(&mut T, T) -> T + Send + Sync,
@@ -50,7 +50,6 @@ where
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
-            _marker: std::marker::PhantomData,
         }
     }
 
@@ -178,7 +177,7 @@ where
     }
 }
 
-impl<T, F> DLock2<T, F> for FCBan<'_, T, F, RawSpinLock>
+impl<T, F> DLock2<T, F> for FCBan<T, F, RawSpinLock>
 where
     T: Send + Sync,
     F: Fn(&mut T, T) -> T + Send + Sync + 'static,
