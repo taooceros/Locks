@@ -1,6 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
+    default,
     fmt::Display,
     hint::{black_box, spin_loop},
     mem::MaybeUninit,
@@ -9,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread,
+    thread::{self, current, ThreadId},
     time::Duration,
 };
 
@@ -42,8 +43,8 @@ pub fn proportional_counter<'a>(
 
         let lock = target.to_locktype(
             0usize,
-            Data::Input { data: 0 },
-            black_box(move |data: &mut usize, input: Data| {
+            Data::default(),
+            move |data: &mut usize, input: Data| {
                 let data = black_box(data);
                 let input = black_box(input);
 
@@ -56,6 +57,7 @@ pub fn proportional_counter<'a>(
                 };
 
                 if let Data::Input {
+                    thread_id,
                     data: mut loop_limit,
                 } = input
                 {
@@ -63,15 +65,16 @@ pub fn proportional_counter<'a>(
                         *data += 1;
                         loop_limit -= 1;
                     }
+
+                    return Data::Output {
+                        timestamp,
+                        is_combiner: current().id() == thread_id,
+                        data: *data,
+                    };
                 }
 
-                let mut aux = 0;
-
-                Data::Output {
-                    timestamp: timestamp,
-                    data: *data,
-                }
-            }),
+                panic!("Invalid input")
+            },
         );
 
         if let Some(lock) = lock {
@@ -81,9 +84,19 @@ pub fn proportional_counter<'a>(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Data {
-    Input { data: usize },
-    Output { timestamp: u64, data: usize },
+    #[default]
+    Nothing,
+    Input {
+        data: usize,
+        thread_id: ThreadId,
+    },
+    Output {
+        timestamp: u64,
+        is_combiner: bool,
+        data: usize,
+    },
 }
 
 fn start_benchmark<F>(
@@ -108,7 +121,8 @@ where
     thread::scope(move |scope| {
         let handles = izip!(cs_loop.cycle(), non_cs_loop.cycle(), core_ids.cycle(),)
             .take(bencher.num_thread)
-            .map(|(cs_loop, non_cs_loop, core_id)| {
+            .enumerate()
+            .map(|(id, (cs_loop, non_cs_loop, core_id))| {
                 let lock_ref = lock_ref.clone();
                 let core_id = *core_id;
                 let stop_signal = stop_signal.clone();
@@ -121,19 +135,29 @@ where
                     let cs_loop = black_box(cs_loop);
                     let non_cs_loop = black_box(non_cs_loop);
                     let mut response_times = vec![];
+                    let mut is_combiners = vec![];
                     let mut loop_count = 0;
                     let mut aux = 0;
 
-                    while !stop_signal.load(Ordering::Acquire) {
-                        let data = Data::Input { data: cs_loop };
+                    let data = Data::Input {
+                        data: cs_loop,
+                        thread_id: current().id(),
+                    };
 
+                    while !stop_signal.load(Ordering::Acquire) {
                         let begin = if stat_response_time {
                             unsafe { __rdtscp(&mut aux) }
                         } else {
                             0
                         };
 
-                        let _output = lock_ref.lock(data);
+                        let output = lock_ref.lock(data);
+
+                        if let Data::Output { is_combiner, .. } = output {
+                            is_combiners.push(is_combiner);
+                        } else {
+                            panic!("Invalid output");
+                        }
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
@@ -149,14 +173,14 @@ where
                     }
 
                     Records {
-                        id: 0,
+                        id: id,
                         cpu_id: core_id.id,
-                        thread_num: 0,
-                        cpu_num: 0,
+                        thread_num: bencher.num_thread,
+                        cpu_num: bencher.num_cpu,
                         loop_count: loop_count as u64,
                         num_acquire: 0,
-                        cs_length: Default::default(),
-                        non_cs_length: None,
+                        cs_length: Duration::from_nanos(cs_loop as u64),
+                        non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
                         is_combiner: None,
                         response_times: Some(response_times),
                         hold_time: Default::default(),
