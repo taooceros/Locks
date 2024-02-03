@@ -235,9 +235,9 @@ fn write_results<'a>(
         let mut writer = cell
             .get_or_init(|| {
                 let option = IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5)
-                    .unwrap()
-                    .try_with_compression(Some(CompressionType::ZSTD))
-                    .expect("Failed to create compression option");
+                    .unwrap();
+                    // .try_with_compression(Some(CompressionType::ZSTD))
+                    // .expect("Failed to create compression option");
 
                 RefCell::new(
                     FileWriter::try_new_with_options(
