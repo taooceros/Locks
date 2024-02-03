@@ -137,7 +137,7 @@ where
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(end - begin);
+                            response_times.push(Some(Duration::from_nanos((end - begin) / 2400)));
                         }
 
                         loop_count += cs_loop;
@@ -158,7 +158,7 @@ where
                         cs_length: Default::default(),
                         non_cs_length: None,
                         is_combiner: None,
-                        response_times: None,
+                        response_times: Some(response_times),
                         hold_time: Default::default(),
                         combine_time: None,
                         locktype: format!("{}", lock_ref),
