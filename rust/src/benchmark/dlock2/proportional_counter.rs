@@ -178,9 +178,6 @@ where
                         }
                     }
 
-                    println!("response_time_length: {:?}", &response_times[0..10]);
-                    println!("length {}", response_times.len());
-
                     Records {
                         id,
                         cpu_id: core_id.id,
