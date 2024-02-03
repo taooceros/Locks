@@ -15,7 +15,7 @@ where
     pub(super) next: AtomicPtr<Node<T, P>>,
     pub(super) current_cs: u64,
     #[cfg(feature = "combiner_stat")]
-    pub(super) combiner_time_stat: i64,
+    pub(super) combiner_time_stat: u64,
 }
 
 unsafe impl<T, P: Parker> Send for Node<T, P> {}

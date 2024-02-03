@@ -126,8 +126,7 @@ where
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            (*self.local_node.get().unwrap().get()).combiner_time_stat +=
-                (end - combiner_begin) as i64;
+            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - combiner_begin;
         }
     }
 }
@@ -168,15 +167,15 @@ impl<T: 'static, P: Parker> DLock<T> for FCSL<T, RawSpinLock, P> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
-        let count = unsafe {
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
+        unsafe {
             (*self
                 .local_node
                 .get()
                 .expect("should contains thread local value")
                 .get())
             .combiner_time_stat
-        };
-        NonZeroI64::new(count)
+        }
+        .into()
     }
 }

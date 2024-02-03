@@ -16,7 +16,8 @@ use crate::dlock2::DLock2Delegate;
 #[derive(Debug)]
 pub struct ThreadData<T> {
     pub(crate) node: AtomicPtr<Node<T>>,
-    pub(crate) banned_until: UnsafeCell<u64>,
+    pub(crate) banned_until: SyncUnsafeCell<u64>,
+    pub combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -75,6 +76,7 @@ where
             ThreadData {
                 node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
                 banned_until: 0.into(),
+                combiner_time_stat: 0.into(),
             }
         });
 
@@ -194,9 +196,22 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*thread_data.node.load(Acquire)).combiner_time_stat += (end - begin) as i64;
+            (*thread_data.combiner_time_stat.get()) += end - begin;
         }
 
-        return unsafe { ptr::read(current_node.data.get()) };
+        return unsafe { current_node.data.get().read() };
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64> {
+        unsafe {
+            self.local_node
+                .get()
+                .unwrap()
+                .combiner_time_stat
+                .get()
+                .read()
+                .into()
+        }
     }
 }

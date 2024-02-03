@@ -11,7 +11,7 @@ pub struct Node<T> {
     pub complete: AtomicBool,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: i64,
+    pub combiner_time_stat: u64,
 }
 
 impl<T> Node<T> {

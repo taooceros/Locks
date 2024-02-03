@@ -171,7 +171,7 @@ pub struct Records {
     pub is_combiner: Vec<bool>,
     pub response_times: Vec<Duration>,
     pub hold_time: Duration,
-    pub combine_time: Option<NonZeroI64>,
+    pub combine_time: Option<u64>,
     pub locktype: String,
     pub waiter_type: String,
 }
@@ -212,7 +212,7 @@ pub struct Record {
     #[serde_as(as = "DurationNanoSeconds")]
     pub hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
-    pub combine_time: Option<NonZeroI64>,
+    pub combine_time: Option<u64>,
     pub locktype: String,
     pub waiter_type: String,
 }

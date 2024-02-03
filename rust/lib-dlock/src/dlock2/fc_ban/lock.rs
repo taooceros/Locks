@@ -151,7 +151,7 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += (end - begin) as i64;
+            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
         }
     }
 
@@ -227,5 +227,19 @@ where
         }
 
         unsafe { ptr::read(node.data.get()) }
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64> {
+        unsafe {
+            self.local_node
+                .get()
+                .unwrap()
+                .get()
+                .as_ref()
+                .unwrap()
+                .combiner_time_stat
+                .into()
+        }
     }
 }

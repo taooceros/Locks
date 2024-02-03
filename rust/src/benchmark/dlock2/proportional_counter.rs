@@ -158,7 +158,7 @@ where
                         let output = lock_ref.lock(data);
 
                         if let Data::Output { is_combiner, .. } = output {
-                            is_combiners.push(is_combiner);
+                            is_combiners.push(Some(is_combiner));
                         } else {
                             panic!("Invalid output");
                         }
@@ -187,10 +187,10 @@ where
                         num_acquire,
                         cs_length: Duration::from_nanos(cs_loop as u64),
                         non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
-                        is_combiner: None,
+                        is_combiner: Some(is_combiners),
                         response_times: Some(response_times),
                         hold_time: Default::default(),
-                        combine_time: None,
+                        combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
                     }
@@ -237,10 +237,10 @@ fn write_results<'a>(
     WRITER.with(|cell| {
         let mut writer = cell
             .get_or_init(|| {
-                let option = IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5)
-                    .unwrap();
-                    // .try_with_compression(Some(CompressionType::ZSTD))
-                    // .expect("Failed to create compression option");
+                let option =
+                    IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
+                // .try_with_compression(Some(CompressionType::ZSTD))
+                // .expect("Failed to create compression option");
 
                 RefCell::new(
                     FileWriter::try_new_with_options(

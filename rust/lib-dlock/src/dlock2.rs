@@ -29,6 +29,9 @@ where
     F: DLock2Delegate<T, I>,
 {
     fn lock(&self, data: I) -> I;
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64>;
 }
 
 #[enum_dispatch]

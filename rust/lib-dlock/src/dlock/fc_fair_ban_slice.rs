@@ -144,7 +144,7 @@ impl<T, P: Parker> FcFairBanSliceLock<T, RawSpinLock, P> {
         }
 
         combiner_node.combiner_time = already_work;
-        combiner_node.combiner_time_stat += (combine_end - combine_begin) as i64;
+        combiner_node.combiner_time_stat += combine_end - combine_begin;
 
         unsafe {
             let avg_combiner_slice = &mut *self.avg_combiner_slice.get();
@@ -227,8 +227,7 @@ impl<T, P: Parker> DLock<T> for FcFairBanSliceLock<T, RawSpinLock, P> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
-        let count = unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
-        NonZeroI64::new(count)
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
+        unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat }.into()
     }
 }

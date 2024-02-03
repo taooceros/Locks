@@ -11,7 +11,7 @@ pub(crate) struct Node<T, P: Parker> {
     pub(super) completed: AtomicBool,
     pub(super) next: AtomicPtr<Node<T, P>>,
     #[cfg(feature = "combiner_stat")]
-    pub(super) combiner_time_stat: i64,
+    pub(super) combiner_time_stat: u64,
 }
 
 unsafe impl<T, W: Parker> Send for Node<T, W> {}

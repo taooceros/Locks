@@ -22,7 +22,7 @@ pub struct Records {
     pub is_combiner: Option<Vec<Option<bool>>>,
     pub response_times: Option<Vec<Option<Duration>>>,
     pub hold_time: Duration,
-    pub combine_time: Option<NonZeroI64>,
+    pub combine_time: Option<u64>,
     pub locktype: String,
     pub waiter_type: String,
 }
@@ -90,7 +90,7 @@ pub struct Record {
     #[serde_as(as = "DurationNanoSeconds")]
     pub hold_time: Duration,
     #[cfg(feature = "combiner_stat")]
-    pub combine_time: Option<NonZeroI64>,
+    pub combine_time: Option<u64>,
     pub locktype: String,
     pub waiter_type: String,
 }
@@ -103,11 +103,11 @@ pub struct RecordsBuilder {
     cpu_num: UInt64Builder,
     loop_count: UInt64Builder,
     num_acquire: UInt64Builder,
-    job_length: UInt64Builder,
+    cs_length: UInt64Builder,
     is_combiner: ListBuilder<BooleanBuilder>,
     response_time: ListBuilder<DurationNanosecondBuilder>,
     hold_time: UInt64Builder,
-    combine_time: Int64Builder,
+    combine_time: UInt64Builder,
     locktype: StringBuilder,
     waiter_type: StringBuilder,
 }
@@ -120,8 +120,7 @@ impl RecordsBuilder {
         self.cpu_num.append_value(row.cpu_num as u64);
         self.loop_count.append_value(row.loop_count as u64);
         self.num_acquire.append_value(row.num_acquire as u64);
-        self.job_length
-            .append_value(row.cs_length.as_nanos() as u64);
+        self.cs_length.append_value(row.cs_length.as_nanos() as u64);
         self.is_combiner
             .append_option(row.is_combiner.as_ref().map(|v| v.iter().copied()));
         self.response_time.append_option(
@@ -130,8 +129,7 @@ impl RecordsBuilder {
                 .map(|v| v.iter().map(|v| v.as_ref().map(|d| d.as_nanos() as i64))),
         );
         self.hold_time.append_value(row.hold_time.as_nanos() as u64);
-        self.combine_time
-            .append_option(row.combine_time.and_then(|v| Some(v.get())));
+        self.combine_time.append_option(row.combine_time);
         self.locktype.append_value(row.locktype.clone());
         self.waiter_type.append_value(row.waiter_type.clone());
     }
@@ -257,7 +255,7 @@ impl RecordsBuilder {
 
         let num_acquire = Arc::new(self.num_acquire.finish()) as ArrayRef;
 
-        let job_length = Arc::new(self.job_length.finish()) as ArrayRef;
+        let job_length = Arc::new(self.cs_length.finish()) as ArrayRef;
 
         let is_combiner = Arc::new(self.is_combiner.finish()) as ArrayRef;
 

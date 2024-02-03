@@ -13,7 +13,7 @@ pub struct Node<T> {
     pub panelty: SyncUnsafeCell<u64>,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: i64,
+    pub combiner_time_stat: u64,
 }
 
 impl<T> Default for Node<T> {

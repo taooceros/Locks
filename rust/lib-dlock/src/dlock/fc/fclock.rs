@@ -105,7 +105,7 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += (end - begin) as i64;
+            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
         }
     }
 
@@ -171,8 +171,7 @@ impl<T, P: Parker> DLock<T> for FcLock<T, RawSpinLock, P> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
-        let count = unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat };
-        NonZeroI64::new(count)
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
+        unsafe { (*self.local_node.get().unwrap().get()).combiner_time_stat }.into()
     }
 }

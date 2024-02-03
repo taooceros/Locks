@@ -47,7 +47,7 @@ pub trait DLock<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a);
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64>;
+    fn get_current_thread_combining_time(&self) -> Option<u64>;
 }
 
 #[enum_dispatch(DLock<T>)]

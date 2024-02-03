@@ -12,7 +12,7 @@ pub struct Node<T> {
     pub next: AtomicPtr<Node<T>>,
     pub banned_until: SyncUnsafeCell<u64>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: i64,
+    pub combiner_time_stat: u64,
 }
 
 impl<T> Node<T> {

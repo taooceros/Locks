@@ -37,11 +37,11 @@ impl<T, P: Parker> DLock<T> for CCBan<T, P> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<NonZeroI64> {
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
         let count = unsafe {
             (*((*self.local_node.get().unwrap().get()).node.load_consume())).combiner_time_stat
         };
-        NonZeroI64::new(count)
+        count.into()
     }
 }
 
@@ -201,7 +201,7 @@ impl<T, P: Parker> CCBan<T, P> {
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*(*thread_data.get()).node.load_consume()).combiner_time_stat += (end - begin) as i64;
+            (*(*thread_data.get()).node.load_consume()).combiner_time_stat += end - begin;
         }
     }
 }

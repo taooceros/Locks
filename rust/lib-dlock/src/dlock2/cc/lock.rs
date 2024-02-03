@@ -13,8 +13,9 @@ use super::node::Node;
 use crate::{dlock2::DLock2Delegate, parker::Parker};
 
 #[derive(Debug)]
-pub struct ThreadData<T> {
-    pub(crate) node: AtomicPtr<Node<T>>,
+struct ThreadData<T> {
+    node: AtomicPtr<Node<T>>,
+    combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
 #[derive(Debug)]
@@ -52,6 +53,7 @@ where
     fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| ThreadData {
             node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
+            combiner_time_stat: 0.into(),
         });
         let mut aux = 0;
         // use thread local node as next node
@@ -129,9 +131,22 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*thread_data.node.load(Acquire)).combiner_time_stat += (end - begin) as i64;
+            *thread_data.combiner_time_stat.get() += end - begin;
         }
 
         return unsafe { ptr::read(current_node.data.get()) };
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64> {
+        unsafe {
+            self.local_node
+                .get()
+                .expect("No thread local node found")
+                .combiner_time_stat
+                .get()
+                .read()
+                .into()
+        }
     }
 }

@@ -17,7 +17,7 @@ where
     pub(super) banned_until: u64,
     pub(super) combiner_time: i64,
     #[cfg(feature = "combiner_stat")]
-    pub(super) combiner_time_stat: i64,
+    pub(super) combiner_time_stat: u64,
 }
 
 unsafe impl<T, P: Parker> Send for Node<T, P> {}

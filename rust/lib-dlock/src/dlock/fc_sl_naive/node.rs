@@ -13,7 +13,7 @@ where
     pub(super) f: CachePadded<Option<*mut (dyn DLockDelegate<T>)>>,
     pub(super) parker: P, // id: i32,
     #[cfg(feature = "combiner_stat")]
-    pub(super) combiner_time_stat: i64,
+    pub(super) combiner_time_stat: u64,
 }
 
 unsafe impl<T, P: Parker> Send for Node<T, P> {}

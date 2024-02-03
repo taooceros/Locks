@@ -112,7 +112,7 @@ impl<T: Sized> DLock<T> for SpinLock<T> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64> {
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
         return None;
     }
 }

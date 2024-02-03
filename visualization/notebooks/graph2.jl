@@ -100,12 +100,12 @@ md"""
 """
 
 # ╔═╡ 3057df9f-c907-4228-add5-f97213b2c6b5
-@bind thread_num Select([4,8,16,32,64])
+@bind thread_num_combine_time Select([4,8,16,32,64])
 
 # ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
 begin
 	combine_time_df = @chain df1 begin
-		@subset(:thread_num .== thread_num)
+		@subset(:thread_num .== thread_num_combine_time)
 		dropmissing(:combine_time)
 	end
 end;
@@ -120,11 +120,26 @@ draw(combine_time_plt, figure=(;size=(1400,600)))
 md"""
 # Response Time
 Enable Analysis $(@bind analyze_response_time CheckBox(false))
+
+Thread Num $(@bind thread_num_response_time Select([2,4,8,16,32,64]))
 """
+
+# ╔═╡ 077e3609-a542-45ab-95be-a46ee49a43c9
+if analyze_response_time
+	response_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		flatten([:response_time])
+	end;
+end;
 
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 if analyze_response_time
-	
+	response_time_plt = data(response_time_df) * mapping(:response_time => Dates.value, color=:job_length => nonnumeric, layout=:locktype) * (visual(ECDFPlot));
+end;
+
+# ╔═╡ 5f3d39d9-273d-48f7-a86e-211ec5c3bd81
+if analyze_response_time
+	draw(response_time_plt, figure=(;size=(1200,600)))
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2138,6 +2153,8 @@ version = "3.5.0+0"
 # ╠═4777ad7f-1dba-4217-b2a9-473a0fbf698a
 # ╠═905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
 # ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
+# ╠═077e3609-a542-45ab-95be-a46ee49a43c9
 # ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
+# ╠═5f3d39d9-273d-48f7-a86e-211ec5c3bd81
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

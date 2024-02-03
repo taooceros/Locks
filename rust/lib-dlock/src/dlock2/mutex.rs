@@ -37,4 +37,9 @@ where
         let mut lock_data = self.data.lock().unwrap();
         (self.delegate)(lock_data.deref_mut(), data)
     }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64> {
+        None
+    }
 }
