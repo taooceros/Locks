@@ -203,7 +203,7 @@ impl RecordsBuilder {
 
         let combine_time_field = Arc::new(Field::new(
             "combine_time",
-            arrow::datatypes::DataType::Int64,
+            arrow::datatypes::DataType::UInt64,
             true,
         ));
         let locktype_field = Arc::new(Field::new(
