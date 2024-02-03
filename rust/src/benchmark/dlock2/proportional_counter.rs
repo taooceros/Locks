@@ -137,6 +137,7 @@ where
                     let mut response_times = vec![];
                     let mut is_combiners = vec![];
                     let mut loop_count = 0;
+                    let mut num_acquire = 0;
                     let mut aux = 0;
 
                     let data = Data::Input {
@@ -159,6 +160,8 @@ where
                             panic!("Invalid output");
                         }
 
+                        num_acquire += 1;
+
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
                             response_times.push(Some(Duration::from_nanos((end - begin) / 2400)));
@@ -173,12 +176,12 @@ where
                     }
 
                     Records {
-                        id: id,
+                        id,
                         cpu_id: core_id.id,
                         thread_num: bencher.num_thread,
                         cpu_num: bencher.num_cpu,
                         loop_count: loop_count as u64,
-                        num_acquire: 0,
+                        num_acquire,
                         cs_length: Duration::from_nanos(cs_loop as u64),
                         non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
                         is_combiner: None,
