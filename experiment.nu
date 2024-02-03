@@ -7,7 +7,7 @@ cargo build --release
 let threads = seq 1 6 | each { |it| 2 ** $it} | str join ","
 # echo $threads
 
-let base_duration = 100000
+let base_duration = 10000
 
 let cs = seq $base_duration $base_duration ((3 * $base_duration)) | str join ","
 

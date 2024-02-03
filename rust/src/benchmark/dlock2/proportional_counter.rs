@@ -58,9 +58,12 @@ pub fn proportional_counter<'a>(
 
                 if let Data::Input {
                     thread_id,
-                    data: mut loop_limit,
+                    data: loop_limit,
                 } = input
                 {
+                    // it is very important to have black_box here
+                    let mut loop_limit = black_box(loop_limit);
+
                     while loop_limit > 0 {
                         *data += 1;
                         loop_limit -= 1;
@@ -164,7 +167,7 @@ where
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos((end - begin) / 2400)));
+                            response_times.push(Some(Duration::from_nanos(end - begin)));
                         }
 
                         loop_count += cs_loop;
@@ -174,6 +177,9 @@ where
                             spin_loop()
                         }
                     }
+
+                    println!("response_time_length: {:?}", &response_times[0..10]);
+                    println!("length {}", response_times.len());
 
                     Records {
                         id,
