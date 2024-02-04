@@ -16,7 +16,7 @@ end
 
 # ╔═╡ 3c5e052c-f11e-4a8a-932f-786bf70aa8de
 begin
-	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables
+	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine
 	
 	using AlgebraOfGraphics: density
 	CairoMakie.activate!(type="svg")
@@ -121,20 +121,32 @@ md"""
 # Response Time
 Enable Analysis $(@bind analyze_response_time CheckBox(false))
 
-Thread Num $(@bind thread_num_response_time Select([2,4,8,16,32,64]))
+Thread Num $(@bind thread_num_response_time Select([2,4,8,16,32,64], default=16))
 """
+
+# ╔═╡ 73cb50ea-2b4b-46be-af5d-f0faca7763e0
+function range_tuple(x, length = 10000)
+	start, stop = x
+	range(start, stop, length)
+end;
 
 # ╔═╡ 077e3609-a542-45ab-95be-a46ee49a43c9
 if analyze_response_time
 	response_time_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time)
-		flatten([:response_time])
+		@select(:locktype, :id, :job_length, :is_combiner, :response_time)
+		@transform(@byrow :response_time = Dates.value.(:response_time))
+		groupby([:locktype, :job_length])
+		@combine(:ecdf = ecdf(SplitApplyCombine.flatten(:response_time)))
+		@transform(:points = range_tuple.(extrema.(:ecdf)))
+		@transform(@byrow :ecdf_value = :ecdf(:points))
+		DataFramesMeta.flatten([:points, :ecdf_value])
 	end;
 end;
 
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 if analyze_response_time
-	response_time_plt = data(response_time_df) * mapping(:response_time => Dates.value, color=:job_length => nonnumeric, layout=:locktype) * (visual(ECDFPlot));
+	response_time_plt = data(response_time_df) * mapping(:points, :ecdf_value, color=:job_length => nonnumeric, layout=:locktype) * (visual(Lines));
 end;
 
 # ╔═╡ 5f3d39d9-273d-48f7-a86e-211ec5c3bd81
@@ -157,6 +169,7 @@ Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+SplitApplyCombine = "03a91e81-4c3e-53e1-a0a4-9c0c8f19dd66"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
@@ -171,6 +184,7 @@ Pluto = "~0.19.37"
 PlutoUI = "~0.7.55"
 PrettyTables = "~2.3.1"
 Revise = "~3.5.13"
+SplitApplyCombine = "~1.2.2"
 StatsBase = "~0.34.2"
 """
 
@@ -180,7 +194,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.0"
 manifest_format = "2.0"
-project_hash = "57c0b7851154916489b9767d5ff21b5220a69d3c"
+project_hash = "f1143b9f297d3baaba432812c40c102910c70079"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1797,6 +1811,12 @@ weakdeps = ["ChainRulesCore"]
     [deps.SpecialFunctions.extensions]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
+[[deps.SplitApplyCombine]]
+deps = ["Dictionaries", "Indexing"]
+git-tree-sha1 = "48f393b0231516850e39f6c756970e7ca8b77045"
+uuid = "03a91e81-4c3e-53e1-a0a4-9c0c8f19dd66"
+version = "1.2.2"
+
 [[deps.StableHashTraits]]
 deps = ["Compat", "PikaParser", "SHA", "Tables", "TupleTools"]
 git-tree-sha1 = "662f56ffe22b3985f3be7474f0aecbaf214ecf0f"
@@ -2153,6 +2173,7 @@ version = "3.5.0+0"
 # ╠═4777ad7f-1dba-4217-b2a9-473a0fbf698a
 # ╠═905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
 # ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
+# ╠═73cb50ea-2b4b-46be-af5d-f0faca7763e0
 # ╠═077e3609-a542-45ab-95be-a46ee49a43c9
 # ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 # ╠═5f3d39d9-273d-48f7-a86e-211ec5c3bd81
