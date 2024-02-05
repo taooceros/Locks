@@ -65,6 +65,8 @@ pub enum DLock2Experiment {
         non_cs_loops: Vec<usize>,
         #[arg(long = "file-name")]
         file_name: Option<String>,
+        #[arg(long = "inlcude-lock-free", default_value_t = true)]
+        include_lock_free: bool,
     },
 }
 

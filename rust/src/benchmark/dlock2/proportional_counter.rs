@@ -7,7 +7,7 @@ use std::{
     mem::MaybeUninit,
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread::{self, current, ThreadId},
@@ -31,12 +31,58 @@ use crate::{
     lock_target::DLock2Target,
 };
 
+struct FetchAddDlock2 {
+    data: AtomicUsize,
+}
+
+impl<F> DLock2<usize, Data, F> for FetchAddDlock2
+where
+    F: DLock2Delegate<usize, Data>,
+{
+    fn lock(&self, input: Data) -> Data {
+        let input = black_box(input);
+
+        if let Data::Input {
+            thread_id,
+            data: loop_limit,
+        } = input
+        {
+            // it is very important to have black_box here
+            let mut loop_limit = loop_limit;
+
+            while loop_limit > 0 {
+                self.data.fetch_add(1, Ordering::AcqRel);
+                loop_limit -= 1;
+            }
+
+            return Data::Output {
+                timestamp: 0,
+                is_combiner: current().id() == thread_id,
+                data: self.data.load(Ordering::Acquire),
+            };
+        }
+
+        panic!("Invalid input")
+    }
+
+    fn get_combine_time(&self) -> std::option::Option<u64> {
+        None
+    }
+}
+
+impl Display for FetchAddDlock2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LockFree (Fetch&Add)")
+    }
+}
+
 pub fn proportional_counter<'a>(
     bencher: &Bencher,
     file_name: &str,
     targets: impl Iterator<Item = &'a DLock2Target>,
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
+    include_lock_free: bool,
 ) {
     for target in targets {
         let stat_response_time = bencher.stat_response_time;
@@ -84,6 +130,20 @@ pub fn proportional_counter<'a>(
             let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
             finish_benchmark(&bencher.output_path, file_name, records.iter());
         }
+    }
+
+    if include_lock_free {
+        let lock = FetchAddDlock2 {
+            data: AtomicUsize::new(0),
+        };
+
+        let records = start_benchmark::<fn(&mut usize, Data) -> Data>(
+            bencher,
+            cs_loop.clone(),
+            non_cs_loop.clone(),
+            lock,
+        );
+        finish_benchmark(&bencher.output_path, file_name, records.iter());
     }
 }
 
@@ -157,15 +217,15 @@ where
 
                         let output = lock_ref.lock(data);
 
-                        if let Data::Output { is_combiner, .. } = output {
-                            is_combiners.push(Some(is_combiner));
-                        } else {
-                            panic!("Invalid output");
-                        }
-
                         num_acquire += 1;
 
                         if stat_response_time {
+                            if let Data::Output { is_combiner, .. } = output {
+                                is_combiners.push(Some(is_combiner));
+                            } else {
+                                panic!("Invalid output");
+                            }
+
                             let end = unsafe { __rdtscp(&mut aux) };
                             response_times.push(Some(Duration::from_nanos(end - begin)));
                         }

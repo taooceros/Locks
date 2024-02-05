@@ -31,7 +31,7 @@ html"""
 	@media screen {
 		main {
 			margin: 0 auto;
-			max-width: 60vw;
+			max-width: 50vw;
 		}
 	}
 </style>
@@ -143,6 +143,22 @@ if analyze_response_time
 		DataFramesMeta.flatten([:points, :ecdf_value])
 	end;
 end;
+
+# ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
+if analyze_response_time
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :job_length, :is_combiner, :response_time)
+		@transform(@byrow :response_time = Dates.value.(:response_time))
+		@transform(@byrow :c_r = zip(:is_combiner, :response_time))
+		@transform(@byrow begin
+			:combine_response = Iterators.filter((y->y[1]), :c_r)
+			:response = Iterators.filter((y->!y[1]), :c_r)
+		end)
+		stack([:combine_response, :response])
+		@rename(:response_type = :variable)
+	end
+end
 
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 if analyze_response_time
@@ -2175,6 +2191,7 @@ version = "3.5.0+0"
 # ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
 # ╠═73cb50ea-2b4b-46be-af5d-f0faca7763e0
 # ╠═077e3609-a542-45ab-95be-a46ee49a43c9
+# ╠═a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 # ╠═5f3d39d9-273d-48f7-a86e-211ec5c3bd81
 # ╟─00000000-0000-0000-0000-000000000001
