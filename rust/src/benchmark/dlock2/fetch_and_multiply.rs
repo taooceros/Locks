@@ -160,7 +160,6 @@ impl DLock2<f64, Data, fn(&mut f64, Data) -> Data> for FetchAndMultiplyDLock2 {
 
 pub fn fetch_and_multiply<'a>(
     bencher: &Bencher,
-    file_name: &str,
     targets: impl Iterator<Item = &'a DLock2Target>,
     include_lock_free: bool,
 ) {
@@ -196,7 +195,7 @@ pub fn fetch_and_multiply<'a>(
 
         if let Some(lock) = lock {
             let records = start_benchmark(bencher, lock);
-            finish_benchmark(&bencher.output_path, file_name, records.iter());
+            finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
 
@@ -206,7 +205,7 @@ pub fn fetch_and_multiply<'a>(
         };
 
         let records = start_benchmark::<fn(&mut f64, Data) -> Data>(bencher, lock);
-        finish_benchmark(&bencher.output_path, file_name, records.iter());
+        finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
     }
 }
 

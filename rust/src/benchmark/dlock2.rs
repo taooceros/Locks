@@ -1,3 +1,4 @@
+use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
 use itertools::Itertools;
 use nix::libc::FILENAME_MAX;
 use strum::IntoEnumIterator;
@@ -8,8 +9,8 @@ use crate::lock_target::DLock2Target;
 
 use super::bencher::Bencher;
 
-mod proportional_counter;
 mod fetch_and_multiply;
+mod proportional_counter;
 
 pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     let experiment = &option.experiment;
@@ -20,6 +21,15 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     };
 
     for experiment in experiments {
+        let mut default_targets = None;
+
+        let targets = option
+            .lock_targets
+            .as_ref()
+            .unwrap_or_else(|| default_targets.insert(DLock2Target::iter().collect_vec()));
+        
+        let mut name_maybe = None;
+
         match experiment {
             DLock2Experiment::CounterProportional {
                 cs_loops,
@@ -28,23 +38,20 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 include_lock_free,
             } => proportional_counter(
                 bencher,
-                file_name
-                    .as_ref()
-                    .unwrap_or(&format!(
+                file_name.as_deref().unwrap_or_else(|| {
+                    name_maybe.insert(format!(
                         "counter cs {:?} noncs {:?}",
                         cs_loops, non_cs_loops
                     ))
-                    .as_str(),
-                option
-                    .lock_targets
-                    .as_ref()
-                    .unwrap_or(&DLock2Target::iter().collect_vec())
-                    .iter(),
+                }),
+                targets.iter(),
                 cs_loops.iter().copied(),
                 non_cs_loops.iter().copied(),
                 *include_lock_free,
             ),
-            DLock2Experiment::FetchAndMultiply {} => todo!(),
+            DLock2Experiment::FetchAndMultiply { include_lock_free } => {
+                fetch_and_multiply(bencher, targets.iter(), *include_lock_free)
+            }
         }
     }
 }

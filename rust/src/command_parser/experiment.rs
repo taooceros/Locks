@@ -69,7 +69,7 @@ pub enum DLock2Experiment {
         include_lock_free: bool,
     },
     FetchAndMultiply {
-        
+        include_lock_free: bool,
     }
 }
 
