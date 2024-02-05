@@ -9,6 +9,7 @@ use crate::lock_target::DLock2Target;
 use super::bencher::Bencher;
 
 mod proportional_counter;
+mod fetch_and_multiply;
 
 pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     let experiment = &option.experiment;
@@ -25,26 +26,25 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 non_cs_loops,
                 file_name,
                 include_lock_free,
-            } => {
-                proportional_counter(
-                    bencher,
-                    file_name
-                        .as_ref()
-                        .unwrap_or(&format!(
-                            "counter cs {:?} noncs {:?}",
-                            cs_loops, non_cs_loops
-                        ))
-                        .as_str(),
-                    option
-                        .lock_targets
-                        .as_ref()
-                        .unwrap_or(&DLock2Target::iter().collect_vec())
-                        .iter(),
-                    cs_loops.iter().copied(),
-                    non_cs_loops.iter().copied(),
-                    *include_lock_free,
-                );
-            }
+            } => proportional_counter(
+                bencher,
+                file_name
+                    .as_ref()
+                    .unwrap_or(&format!(
+                        "counter cs {:?} noncs {:?}",
+                        cs_loops, non_cs_loops
+                    ))
+                    .as_str(),
+                option
+                    .lock_targets
+                    .as_ref()
+                    .unwrap_or(&DLock2Target::iter().collect_vec())
+                    .iter(),
+                cs_loops.iter().copied(),
+                non_cs_loops.iter().copied(),
+                *include_lock_free,
+            ),
+            DLock2Experiment::FetchAndMultiply {} => todo!(),
         }
     }
 }
