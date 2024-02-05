@@ -29,7 +29,7 @@ where
     }
 }
 
-impl<T, I, F> DLock2<T, I, F> for DLock2USCL<T, I, F>
+impl<T, I, F> DLock2<T, I> for DLock2USCL<T, I, F>
 where
     T: Send + Sync,
     I: Send,

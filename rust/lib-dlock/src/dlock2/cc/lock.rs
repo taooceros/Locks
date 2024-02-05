@@ -45,7 +45,7 @@ where
 
 const H: u32 = 16;
 
-impl<T, I, F> DLock2<T, I, F> for CCSynch<T, I, F>
+impl<T, I, F> DLock2<T, I> for CCSynch<T, I, F>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,

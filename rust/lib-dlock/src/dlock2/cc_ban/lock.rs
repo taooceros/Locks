@@ -65,7 +65,7 @@ where
 
 const H: u32 = 16;
 
-impl<T, I, F> DLock2<T, I, F> for CCBan<T, I, F>
+impl<T, I, F> DLock2<T, I> for CCBan<T, I, F>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,

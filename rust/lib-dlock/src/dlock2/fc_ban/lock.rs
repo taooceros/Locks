@@ -183,7 +183,7 @@ where
     }
 }
 
-impl<T, I, F> DLock2<T, I, F> for FCBan<T, I, F, RawSpinLock>
+impl<T, I, F> DLock2<T, I> for FCBan<T, I, F, RawSpinLock>
 where
     T: Send + Sync,
     I: Send,

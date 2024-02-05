@@ -24,9 +24,7 @@ pub mod uscl;
 pub trait DLock2Delegate<T, I> = Fn(&mut T, I) -> I + Send + Sync;
 
 #[enum_dispatch(DLock2Impl<T, I, F>)]
-pub trait DLock2<T, I, F>: Send + Sync
-where
-    F: DLock2Delegate<T, I>,
+pub trait DLock2<T, I>: Send + Sync
 {
     fn lock(&self, data: I) -> I;
 

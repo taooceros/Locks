@@ -121,7 +121,7 @@ impl Display for FetchAndMultiplyDLock2 {
     }
 }
 
-impl DLock2<f64, Data, fn(&mut f64, Data) -> Data> for FetchAndMultiplyDLock2 {
+impl DLock2<f64, Data> for FetchAndMultiplyDLock2 {
     fn lock(&self, input: Data) -> Data {
         if let Data::Input { thread_id: _, data } = input {
             // compare and exchange loop for fetch and multiply self.data
@@ -210,7 +210,7 @@ pub fn fetch_and_multiply<'a>(
             data: AtomicF64::new(1.0),
         });
 
-        let records = start_benchmark::<fn(&mut f64, Data) -> Data>(bencher, lock.clone());
+        let records = start_benchmark(bencher, lock.clone());
         finish_benchmark(
             &bencher.output_path,
             "FetchAndMultiply",
@@ -220,13 +220,10 @@ pub fn fetch_and_multiply<'a>(
     }
 }
 
-fn start_benchmark<'a, F>(
+fn start_benchmark<'a>(
     bencher: &Bencher,
-    lock_target: Arc<impl DLock2<f64, Data, F> + 'static + Display>,
-) -> Vec<Records>
-where
-    F: DLock2Delegate<f64, Data>,
-{
+    lock_target: Arc<impl DLock2<f64, Data> + 'a + Display>,
+) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
@@ -290,11 +287,11 @@ where
                         loop_count += 1;
 
                         // random loop
-                        // let non_cs_loop = rng.gen_range(1..8);
+                        let non_cs_loop = rng.gen_range(1..8);
 
-                        // for _ in 0..non_cs_loop {
-                        //     spin_loop()
-                        // }
+                        for _ in 0..non_cs_loop {
+                            spin_loop()
+                        }
                     }
 
                     Records {
@@ -328,14 +325,12 @@ where
     })
 }
 
-fn finish_benchmark<'a, F>(
+fn finish_benchmark<'a>(
     output_path: &Path,
     file_name: &str,
     records: impl Iterator<Item = &'a Records> + Clone,
-    lock_target: Arc<impl DLock2<f64, Data, F> + 'static + Display>,
-) where
-    F: DLock2Delegate<f64, Data>,
-{
+    lock_target: Arc<impl DLock2<f64, Data> + 'static + Display>,
+) {
     write_results(output_path, file_name, records.clone());
 
     // for record in records.clone() {

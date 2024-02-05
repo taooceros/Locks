@@ -11,7 +11,7 @@ use super::bencher::Bencher;
 
 mod fetch_and_multiply;
 mod proportional_counter;
-mod linkedlist;
+mod queue;
 
 pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     let experiment = &option.experiment;

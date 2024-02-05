@@ -35,10 +35,7 @@ struct FetchAddDlock2 {
     data: AtomicUsize,
 }
 
-impl<F> DLock2<usize, Data, F> for FetchAddDlock2
-where
-    F: DLock2Delegate<usize, Data>,
-{
+impl DLock2<usize, Data> for FetchAddDlock2 {
     fn lock(&self, input: Data) -> Data {
         let input = black_box(input);
 
@@ -137,12 +134,7 @@ pub fn proportional_counter<'a>(
             data: AtomicUsize::new(0),
         };
 
-        let records = start_benchmark::<fn(&mut usize, Data) -> Data>(
-            bencher,
-            cs_loop.clone(),
-            non_cs_loop.clone(),
-            lock,
-        );
+        let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
         finish_benchmark(&bencher.output_path, file_name, records.iter());
     }
 }
@@ -162,15 +154,12 @@ pub enum Data {
     },
 }
 
-fn start_benchmark<F>(
+fn start_benchmark(
     bencher: &Bencher,
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
-    lock_target: impl DLock2<usize, Data, F> + 'static + Display,
-) -> Vec<Records>
-where
-    F: DLock2Delegate<usize, Data>,
-{
+    lock_target: impl DLock2<usize, Data> + 'static + Display,
+) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
 
     let stop_signal = Arc::new(AtomicBool::new(false));

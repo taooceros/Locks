@@ -41,9 +41,12 @@ pub enum Data {
     },
 }
 
+pub struct DLock2Queue<L, Q> {
+    lock: L,
+    queue: Q,
+}
 
-
-pub fn fetch_and_multiply<'a>(
+pub fn benchmark_queue<'a>(
     bencher: &Bencher,
     targets: impl Iterator<Item = &'a DLock2Target>,
     include_lock_free: bool,
@@ -83,16 +86,12 @@ pub fn fetch_and_multiply<'a>(
             finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
-
 }
 
-fn start_benchmark<F>(
+fn start_benchmark(
     bencher: &Bencher,
-    lock_target: impl DLock2<f64, Data, F> + 'static + Display,
-) -> Vec<Records>
-where
-    F: DLock2Delegate<f64, Data>,
-{
+    lock_target: impl DLock2<f64, Data> + 'static + Display,
+) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
