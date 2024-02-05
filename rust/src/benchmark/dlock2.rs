@@ -11,6 +11,7 @@ use super::bencher::Bencher;
 
 mod fetch_and_multiply;
 mod proportional_counter;
+mod linkedlist;
 
 pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     let experiment = &option.experiment;
@@ -27,7 +28,7 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
             .lock_targets
             .as_ref()
             .unwrap_or_else(|| default_targets.insert(DLock2Target::iter().collect_vec()));
-        
+
         let mut name_maybe = None;
 
         match experiment {

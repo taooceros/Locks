@@ -26,72 +26,6 @@ use crate::{
     lock_target::DLock2Target,
 };
 
-pub struct AtomicF64 {
-    storage: AtomicU64,
-}
-impl AtomicF64 {
-    pub fn new(value: f64) -> Self {
-        let as_u64 = value.to_bits();
-        Self {
-            storage: AtomicU64::new(as_u64),
-        }
-    }
-    pub fn store(&self, value: f64, ordering: Ordering) {
-        let as_u64 = value.to_bits();
-        self.storage.store(as_u64, ordering)
-    }
-    pub fn load(&self, ordering: Ordering) -> f64 {
-        let as_u64 = self.storage.load(ordering);
-        f64::from_bits(as_u64)
-    }
-
-    pub fn compare_exchange(
-        &self,
-        current: f64,
-        new: f64,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<f64, f64> {
-        let current_as_u64 = current.to_bits();
-        let new_as_u64 = new.to_bits();
-        match self
-            .storage
-            .compare_exchange(current_as_u64, new_as_u64, success, failure)
-        {
-            Ok(_) => Ok(current),
-            Err(actual_as_u64) => {
-                let actual = f64::from_bits(actual_as_u64);
-                Err(actual)
-            }
-        }
-    }
-
-    pub fn compare_exchange_weak(
-        &self,
-        current: f64,
-        new: f64,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<f64, f64> {
-        let current_as_u64 = current.to_bits();
-        let new_as_u64 = new.to_bits();
-        match self
-            .storage
-            .compare_exchange_weak(current_as_u64, new_as_u64, success, failure)
-        {
-            Ok(_) => Ok(current),
-            Err(actual_as_u64) => {
-                let actual = f64::from_bits(actual_as_u64);
-                Err(actual)
-            }
-        }
-    }
-}
-
-pub struct FetchAndMultiplyDLock2 {
-    data: AtomicF64,
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Data {
     #[default]
@@ -107,55 +41,7 @@ pub enum Data {
     },
 }
 
-impl FetchAndMultiplyDLock2 {
-    pub fn new(value: f64) -> Self {
-        Self {
-            data: AtomicF64::new(value),
-        }
-    }
-}
 
-impl Display for FetchAndMultiplyDLock2 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LockFree (Fetch & Multiply)")
-    }
-}
-
-impl DLock2<f64, Data, fn(&mut f64, Data) -> Data> for FetchAndMultiplyDLock2 {
-    fn lock(&self, input: Data) -> Data {
-        if let Data::Input { thread_id: _, data } = input {
-            // compare and exchange loop for fetch and multiply self.data
-
-            let mut current = self.data.load(Ordering::Acquire);
-
-            loop {
-                let new = current * data;
-                match self.data.compare_exchange_weak(
-                    current,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        return Data::Output {
-                            timestamp: 0,
-                            is_combiner: false,
-                            data: new,
-                        }
-                    }
-                    Err(actual) => current = actual,
-                }
-            }
-        } else {
-            panic!("Invalid input")
-        }
-    }
-
-    #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        None
-    }
-}
 
 pub fn fetch_and_multiply<'a>(
     bencher: &Bencher,
@@ -165,7 +51,7 @@ pub fn fetch_and_multiply<'a>(
     for target in targets {
         let stat_response_time = bencher.stat_response_time;
 
-        let lock = target.to_locktype(1.0, Data::default(), move |data: &mut f64, input: Data| {
+        let lock = target.to_locktype(0.0, Data::default(), move |data: &mut f64, input: Data| {
             let timestamp = unsafe {
                 if stat_response_time {
                     __rdtscp(&mut 0)
@@ -193,36 +79,16 @@ pub fn fetch_and_multiply<'a>(
         });
 
         if let Some(lock) = lock {
-            let lock = Arc::new(lock);
-
-            let records = start_benchmark(bencher, lock.clone());
-            finish_benchmark(
-                &bencher.output_path,
-                "FetchAndMultiply",
-                records.iter(),
-                lock,
-            );
+            let records = start_benchmark(bencher, lock);
+            finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
 
-    if include_lock_free {
-        let lock = Arc::new(FetchAndMultiplyDLock2 {
-            data: AtomicF64::new(1.0),
-        });
-
-        let records = start_benchmark::<fn(&mut f64, Data) -> Data>(bencher, lock.clone());
-        finish_benchmark(
-            &bencher.output_path,
-            "FetchAndMultiply",
-            records.iter(),
-            lock,
-        );
-    }
 }
 
-fn start_benchmark<'a, F>(
+fn start_benchmark<F>(
     bencher: &Bencher,
-    lock_target: Arc<impl DLock2<f64, Data, F> + 'static + Display>,
+    lock_target: impl DLock2<f64, Data, F> + 'static + Display,
 ) -> Vec<Records>
 where
     F: DLock2Delegate<f64, Data>,
@@ -230,7 +96,7 @@ where
     println!("Start benchmark for {}", lock_target);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
-    let lock_ref = lock_target;
+    let lock_ref = Arc::new(lock_target);
 
     let core_ids = core_affinity::get_core_ids().unwrap();
     let core_ids = core_ids.iter().take(bencher.num_thread);
@@ -290,11 +156,11 @@ where
                         loop_count += 1;
 
                         // random loop
-                        // let non_cs_loop = rng.gen_range(1..8);
+                        let non_cs_loop = rng.gen_range(1..32);
 
-                        // for _ in 0..non_cs_loop {
-                        //     spin_loop()
-                        // }
+                        for _ in 0..non_cs_loop {
+                            spin_loop()
+                        }
                     }
 
                     Records {
@@ -328,14 +194,11 @@ where
     })
 }
 
-fn finish_benchmark<'a, F>(
+fn finish_benchmark<'a>(
     output_path: &Path,
     file_name: &str,
     records: impl Iterator<Item = &'a Records> + Clone,
-    lock_target: Arc<impl DLock2<f64, Data, F> + 'static + Display>,
-) where
-    F: DLock2Delegate<f64, Data>,
-{
+) {
     write_results(output_path, file_name, records.clone());
 
     // for record in records.clone() {
@@ -345,17 +208,6 @@ fn finish_benchmark<'a, F>(
     let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
-
-    let data = Data::Input {
-        data: 1.0,
-        thread_id: current().id(),
-    };
-
-    let result = lock_target.lock(data);
-
-    if let Data::Output { data, .. } = result {
-        println!("final result: {}", data);
-    }
 }
 
 fn write_results<'a>(
