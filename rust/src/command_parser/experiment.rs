@@ -3,7 +3,7 @@ use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 use clap::{Args, Subcommand};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
-use crate::lock_target::{DLock1Target, DLock2Target, WaiterType};
+use crate::{benchmark::dlock2::queue::LockFreeQueue, lock_target::{DLock1Target, DLock2Target, WaiterType}};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DLock1Option {
@@ -72,6 +72,10 @@ pub enum DLock2Experiment {
         #[arg(long = "inlcude-lock-free", default_value_t = true)]
         include_lock_free: bool,
     },
+    Queue {
+        #[arg(long = "lock-free-queues")]
+        lock_free_queues: Vec<LockFreeQueue>,
+    }
 }
 
 impl DLock2Experiment {

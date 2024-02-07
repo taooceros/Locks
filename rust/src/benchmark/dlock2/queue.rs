@@ -15,8 +15,10 @@ use std::{
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 
+use clap::ValueEnum;
 use libdlock::dlock2::{DLock2, DLock2Delegate};
 use rand::Rng;
+use strum::{Display, EnumIter};
 
 use crate::{
     benchmark::{
@@ -26,6 +28,11 @@ use crate::{
     },
     lock_target::DLock2Target,
 };
+
+#[derive(Debug, Clone, ValueEnum, EnumIter, Display)]
+pub enum LockFreeQueue {
+    MCSQueue,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum QueueData<T: Send> {
@@ -41,7 +48,7 @@ pub enum QueueData<T: Send> {
     OutputEmpty,
 }
 
-pub unsafe trait ConcurrentQueue<T>
+pub unsafe trait ConcurrentQueue<T>: Send + Sync
 where
     T: Send,
 {
@@ -53,7 +60,6 @@ pub trait SequentialQueue<T> {
     fn push(&mut self, value: T);
     fn pop(&mut self) -> Option<T>;
 }
-
 
 unsafe impl<T, L> ConcurrentQueue<T> for L
 where
@@ -86,11 +92,9 @@ impl<T: Send> SequentialQueue<T> for VecDeque<T> {
 pub fn benchmark_queue<'a>(
     bencher: &Bencher,
     targets: impl Iterator<Item = &'a DLock2Target>,
-    _include_lock_free: bool,
+    lock_free_queues: &Vec<LockFreeQueue>,
 ) {
     for target in targets {
-        let stat_response_time = bencher.stat_response_time;
-
         let lock = target.to_locktype(
             VecDeque::new(),
             QueueData::default(),
@@ -117,11 +121,14 @@ pub fn benchmark_queue<'a>(
     }
 }
 
-fn start_benchmark<T: Send>(
+fn start_benchmark<T>(
     bencher: &Bencher,
     concurrent_queue: impl ConcurrentQueue<T>,
     queue_name: &str,
-) -> Vec<Records> {
+) -> Vec<Records>
+where
+    T: Send + Default,
+{
     println!("Start benchmark for {}", queue_name);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
@@ -146,70 +153,51 @@ fn start_benchmark<T: Send>(
                 scope.spawn(move || {
                     core_affinity::set_for_current(core_id);
 
-                    // let stop_signal = black_box(stop_signal);
-                    // let mut response_times = vec![];
-                    // let mut is_combiners = vec![];
-                    // let mut loop_count = 0;
-                    // let mut num_acquire = 0;
-                    // let mut aux = 0;
+                    let stop_signal = black_box(stop_signal);
+                    let mut response_times = vec![];
+                    let mut loop_count = 0;
+                    let mut num_acquire = 0;
+                    let mut aux = 0;
 
-                    // let data = Data::Input {
-                    //     data: 1.000001,
-                    //     thread_id: current().id(),
-                    // };
+                    let rng = &mut rand::thread_rng();
 
-                    // let mut rng = rand::thread_rng();
+                    while !stop_signal.load(Ordering::Acquire) {
+                        let begin = if stat_response_time {
+                            unsafe { __rdtscp(&mut aux) }
+                        } else {
+                            0
+                        };
 
-                    // while !stop_signal.load(Ordering::Acquire) {
-                    //     let begin = if stat_response_time {
-                    //         unsafe { __rdtscp(&mut aux) }
-                    //     } else {
-                    //         0
-                    //     };
+                        if rng.gen_bool(0.5) {
+                            lock_ref.push(T::default());
+                        } else {
+                            lock_ref.pop();
+                        }
 
-                    //     let output = lock_ref.lock(data);
+                        num_acquire += 1;
 
-                    //     num_acquire += 1;
+                        if stat_response_time {
+                            let end = unsafe { __rdtscp(&mut aux) };
+                            response_times.push(Some(Duration::from_nanos(end - begin)));
+                        }
 
-                    //     if stat_response_time {
-                    //         if let Data::Output { is_combiner, .. } = output {
-                    //             is_combiners.push(Some(is_combiner));
-                    //         } else {
-                    //             panic!("Invalid output");
-                    //         }
+                        loop_count += 1;
+                    }
 
-                    //         let end = unsafe { __rdtscp(&mut aux) };
-                    //         response_times.push(Some(Duration::from_nanos(end - begin)));
-                    //     }
-
-                    //     loop_count += 1;
-
-                    //     // random loop
-                    //     let non_cs_loop = rng.gen_range(1..32);
-
-                    //     for _ in 0..non_cs_loop {
-                    //         spin_loop()
-                    //     }
-                    // }
-
-                    // Records {
-                    //     id,
-                    //     cpu_id: core_id.id,
-                    //     thread_num: bencher.num_thread,
-                    //     cpu_num: bencher.num_cpu,
-                    //     loop_count: loop_count as u64,
-                    //     num_acquire,
-                    //     cs_length: Duration::from_nanos(0),
-                    //     non_cs_length: Some(Duration::from_nanos(0)),
-                    //     is_combiner: Some(is_combiners),
-                    //     response_times: Some(response_times),
-                    //     hold_time: Default::default(),
-                    //     combine_time: lock_ref.get_combine_time(),
-                    //     locktype: format!("{}", lock_ref),
-                    //     waiter_type: "".to_string(),
-                    // }
-
-                    Default::default()
+                    Records {
+                        id,
+                        cpu_id: core_id.id,
+                        thread_num: bencher.num_thread,
+                        cpu_num: bencher.num_cpu,
+                        loop_count: loop_count as u64,
+                        num_acquire,
+                        cs_length: Duration::from_nanos(0),
+                        non_cs_length: Some(Duration::from_nanos(0)),
+                        response_times: Some(response_times),
+                        locktype: queue_name.to_owned(),
+                        waiter_type: "".to_string(),
+                        ..Default::default()
+                    }
                 })
             })
             .collect::<Vec<_>>();
@@ -232,9 +220,9 @@ fn finish_benchmark<'a>(
 ) {
     write_results(output_path, file_name, records.clone());
 
-    // for record in records.clone() {
-    //     println!("{}", record.loop_count);
-    // }
+    for record in records.clone() {
+        println!("{}", record.loop_count);
+    }
 
     let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
 

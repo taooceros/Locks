@@ -21,6 +21,8 @@ pub mod uscl;
 
 pub trait DLock2Delegate<T, I> = Fn(&mut T, I) -> I + Send + Sync;
 
+
+// We probably should have a slightly more restrictive bound on the trait
 #[enum_dispatch(DLock2Impl<T, I, F>)]
 pub unsafe trait DLock2<I>: Send + Sync {
     fn lock(&self, data: I) -> I;

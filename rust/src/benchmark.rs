@@ -8,7 +8,7 @@ use self::bencher::Bencher;
 
 mod bencher;
 mod dlock;
-mod dlock2;
+pub(crate) mod dlock2;
 mod helper;
 mod records;
 

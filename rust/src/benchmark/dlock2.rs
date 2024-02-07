@@ -11,7 +11,7 @@ use super::bencher::Bencher;
 
 mod fetch_and_multiply;
 mod proportional_counter;
-mod queue;
+pub mod queue;
 
 pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
     let experiment = &option.experiment;
@@ -52,6 +52,9 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
             ),
             DLock2Experiment::FetchAndMultiply { include_lock_free } => {
                 fetch_and_multiply(bencher, targets.iter(), *include_lock_free)
+            }
+            DLock2Experiment::Queue { lock_free_queues } => {
+                queue::benchmark_queue(bencher, targets.iter(), lock_free_queues)
             }
         }
     }
