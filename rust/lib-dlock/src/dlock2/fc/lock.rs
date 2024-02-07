@@ -144,7 +144,7 @@ where
     }
 }
 
-impl<'a, T, I, F> DLock2<T, I> for FC<T, I, F, RawSpinLock>
+unsafe impl<'a, T, I, F> DLock2<I> for FC<T, I, F, RawSpinLock>
 where
     T: Send + Sync,
     I: Send,

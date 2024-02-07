@@ -22,7 +22,7 @@ pub mod uscl;
 pub trait DLock2Delegate<T, I> = Fn(&mut T, I) -> I + Send + Sync;
 
 #[enum_dispatch(DLock2Impl<T, I, F>)]
-pub trait DLock2<T, I>: Send + Sync {
+pub unsafe trait DLock2<I>: Send + Sync {
     fn lock(&self, data: I) -> I;
 
     #[cfg(feature = "combiner_stat")]

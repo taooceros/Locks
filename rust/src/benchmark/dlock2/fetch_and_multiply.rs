@@ -121,7 +121,7 @@ impl Display for FetchAndMultiplyDLock2 {
     }
 }
 
-impl DLock2<f64, Data> for FetchAndMultiplyDLock2 {
+unsafe impl DLock2<Data> for FetchAndMultiplyDLock2 {
     fn lock(&self, input: Data) -> Data {
         if let Data::Input { thread_id: _, data } = input {
             // compare and exchange loop for fetch and multiply self.data
@@ -222,7 +222,7 @@ pub fn fetch_and_multiply<'a>(
 
 fn start_benchmark<'a>(
     bencher: &Bencher,
-    lock_target: Arc<impl DLock2<f64, Data> + 'a + Display>,
+    lock_target: Arc<impl DLock2<Data> + 'a + Display>,
 ) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
 
@@ -329,7 +329,7 @@ fn finish_benchmark<'a>(
     output_path: &Path,
     file_name: &str,
     records: impl Iterator<Item = &'a Records> + Clone,
-    lock_target: Arc<impl DLock2<f64, Data> + 'static + Display>,
+    lock_target: Arc<impl DLock2<Data> + 'static + Display>,
 ) {
     write_results(output_path, file_name, records.clone());
 

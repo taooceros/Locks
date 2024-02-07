@@ -29,7 +29,7 @@ struct FetchAddDlock2 {
     data: AtomicUsize,
 }
 
-impl DLock2<usize, Data> for FetchAddDlock2 {
+unsafe impl DLock2<Data> for FetchAddDlock2 {
     fn lock(&self, input: Data) -> Data {
         let input = black_box(input);
 
@@ -152,7 +152,7 @@ fn start_benchmark(
     bencher: &Bencher,
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
-    lock_target: impl DLock2<usize, Data> + 'static + Display,
+    lock_target: impl DLock2<Data> + 'static + Display,
 ) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
 

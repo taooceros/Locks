@@ -1,6 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
+    collections::VecDeque,
     fmt::Display,
     hint::{black_box, spin_loop},
     path::Path,
@@ -27,23 +28,59 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Default)]
-pub enum Data {
+pub enum QueueData<T: Send> {
     #[default]
     Nothing,
-    Input {
-        data: f64,
-        thread_id: ThreadId,
+    Push {
+        data: T,
     },
-    Output {
-        timestamp: u64,
-        is_combiner: bool,
-        data: f64,
+    Pop,
+    OutputT {
+        data: T,
     },
+    OutputEmpty,
 }
 
-pub struct DLock2Queue<L, Q> {
-    lock: L,
-    queue: Q,
+pub unsafe trait ConcurrentQueue<T>
+where
+    T: Send,
+{
+    fn push(&self, value: T);
+    fn pop(&self) -> Option<T>;
+}
+
+pub trait SequentialQueue<T> {
+    fn push(&mut self, value: T);
+    fn pop(&mut self) -> Option<T>;
+}
+
+
+unsafe impl<T, L> ConcurrentQueue<T> for L
+where
+    T: Send,
+    L: DLock2<QueueData<T>>,
+{
+    fn push(&self, value: T) {
+        self.lock(QueueData::Push { data: value });
+    }
+
+    fn pop(&self) -> Option<T> {
+        match self.lock(QueueData::Nothing) {
+            QueueData::OutputT { data } => Some(data),
+            QueueData::OutputEmpty => None,
+            _ => panic!("Invalid output"),
+        }
+    }
+}
+
+impl<T: Send> SequentialQueue<T> for VecDeque<T> {
+    fn push(&mut self, value: T) {
+        self.push_back(value);
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        self.pop_front()
+    }
 }
 
 pub fn benchmark_queue<'a>(
@@ -54,48 +91,41 @@ pub fn benchmark_queue<'a>(
     for target in targets {
         let stat_response_time = bencher.stat_response_time;
 
-        let lock = target.to_locktype(0.0, Data::default(), move |data: &mut f64, input: Data| {
-            let timestamp = unsafe {
-                if stat_response_time {
-                    __rdtscp(&mut 0)
-                } else {
-                    0
+        let lock = target.to_locktype(
+            VecDeque::new(),
+            QueueData::default(),
+            move |queue: &mut VecDeque<u64>, input: QueueData<u64>| match input {
+                QueueData::Push { data } => {
+                    queue.push(data);
+                    QueueData::Nothing
                 }
-            };
-
-            if let Data::Input {
-                thread_id,
-                data: multiplier,
-            } = input
-            {
-                let old_value = *data;
-                *data *= multiplier;
-
-                return Data::Output {
-                    timestamp,
-                    is_combiner: current().id() == thread_id,
-                    data: old_value,
-                };
-            }
-
-            panic!("Invalid input")
-        });
+                QueueData::Pop => {
+                    let output = queue.pop();
+                    match output {
+                        Some(data) => QueueData::OutputT { data },
+                        None => QueueData::OutputEmpty,
+                    }
+                }
+                _ => panic!("Invalid input"),
+            },
+        );
 
         if let Some(lock) = lock {
-            let records = start_benchmark(bencher, lock);
+            let records = start_benchmark(bencher, lock, "");
             finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
 }
 
-fn start_benchmark(
+fn start_benchmark<T: Send>(
     bencher: &Bencher,
-    lock_target: impl DLock2<f64, Data> + 'static + Display,
+    concurrent_queue: impl ConcurrentQueue<T>,
+    queue_name: &str,
 ) -> Vec<Records> {
-    println!("Start benchmark for {}", lock_target);
+    println!("Start benchmark for {}", queue_name);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
-    let lock_ref = Arc::new(lock_target);
+    let lock_ref = Arc::new(concurrent_queue);
 
     let core_ids = core_affinity::get_core_ids().unwrap();
     let core_ids = core_ids.iter().take(bencher.num_thread);
@@ -116,68 +146,70 @@ fn start_benchmark(
                 scope.spawn(move || {
                     core_affinity::set_for_current(core_id);
 
-                    let stop_signal = black_box(stop_signal);
-                    let mut response_times = vec![];
-                    let mut is_combiners = vec![];
-                    let mut loop_count = 0;
-                    let mut num_acquire = 0;
-                    let mut aux = 0;
+                    // let stop_signal = black_box(stop_signal);
+                    // let mut response_times = vec![];
+                    // let mut is_combiners = vec![];
+                    // let mut loop_count = 0;
+                    // let mut num_acquire = 0;
+                    // let mut aux = 0;
 
-                    let data = Data::Input {
-                        data: 1.000001,
-                        thread_id: current().id(),
-                    };
+                    // let data = Data::Input {
+                    //     data: 1.000001,
+                    //     thread_id: current().id(),
+                    // };
 
-                    let mut rng = rand::thread_rng();
+                    // let mut rng = rand::thread_rng();
 
-                    while !stop_signal.load(Ordering::Acquire) {
-                        let begin = if stat_response_time {
-                            unsafe { __rdtscp(&mut aux) }
-                        } else {
-                            0
-                        };
+                    // while !stop_signal.load(Ordering::Acquire) {
+                    //     let begin = if stat_response_time {
+                    //         unsafe { __rdtscp(&mut aux) }
+                    //     } else {
+                    //         0
+                    //     };
 
-                        let output = lock_ref.lock(data);
+                    //     let output = lock_ref.lock(data);
 
-                        num_acquire += 1;
+                    //     num_acquire += 1;
 
-                        if stat_response_time {
-                            if let Data::Output { is_combiner, .. } = output {
-                                is_combiners.push(Some(is_combiner));
-                            } else {
-                                panic!("Invalid output");
-                            }
+                    //     if stat_response_time {
+                    //         if let Data::Output { is_combiner, .. } = output {
+                    //             is_combiners.push(Some(is_combiner));
+                    //         } else {
+                    //             panic!("Invalid output");
+                    //         }
 
-                            let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos(end - begin)));
-                        }
+                    //         let end = unsafe { __rdtscp(&mut aux) };
+                    //         response_times.push(Some(Duration::from_nanos(end - begin)));
+                    //     }
 
-                        loop_count += 1;
+                    //     loop_count += 1;
 
-                        // random loop
-                        let non_cs_loop = rng.gen_range(1..32);
+                    //     // random loop
+                    //     let non_cs_loop = rng.gen_range(1..32);
 
-                        for _ in 0..non_cs_loop {
-                            spin_loop()
-                        }
-                    }
+                    //     for _ in 0..non_cs_loop {
+                    //         spin_loop()
+                    //     }
+                    // }
 
-                    Records {
-                        id,
-                        cpu_id: core_id.id,
-                        thread_num: bencher.num_thread,
-                        cpu_num: bencher.num_cpu,
-                        loop_count: loop_count as u64,
-                        num_acquire,
-                        cs_length: Duration::from_nanos(0),
-                        non_cs_length: Some(Duration::from_nanos(0)),
-                        is_combiner: Some(is_combiners),
-                        response_times: Some(response_times),
-                        hold_time: Default::default(),
-                        combine_time: lock_ref.get_combine_time(),
-                        locktype: format!("{}", lock_ref),
-                        waiter_type: "".to_string(),
-                    }
+                    // Records {
+                    //     id,
+                    //     cpu_id: core_id.id,
+                    //     thread_num: bencher.num_thread,
+                    //     cpu_num: bencher.num_cpu,
+                    //     loop_count: loop_count as u64,
+                    //     num_acquire,
+                    //     cs_length: Duration::from_nanos(0),
+                    //     non_cs_length: Some(Duration::from_nanos(0)),
+                    //     is_combiner: Some(is_combiners),
+                    //     response_times: Some(response_times),
+                    //     hold_time: Default::default(),
+                    //     combine_time: lock_ref.get_combine_time(),
+                    //     locktype: format!("{}", lock_ref),
+                    //     waiter_type: "".to_string(),
+                    // }
+
+                    Default::default()
                 })
             })
             .collect::<Vec<_>>();

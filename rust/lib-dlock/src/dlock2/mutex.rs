@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<T, I, F> DLock2<T, I> for DLock2Mutex<T, I, F>
+unsafe impl<T, I, F> DLock2<I> for DLock2Mutex<T, I, F>
 where
     T: Send + Sync,
     I: Send,

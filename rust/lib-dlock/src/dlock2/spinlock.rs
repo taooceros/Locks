@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<T, I, F> DLock2<T, I> for DLock2SpinLock<T, I, F>
+unsafe impl<T, I, F> DLock2<I> for DLock2SpinLock<T, I, F>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
