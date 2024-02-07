@@ -1,8 +1,8 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
-    collections::VecDeque,
-    fmt::Display,
+    collections::{LinkedList, VecDeque},
+    fmt::{format, Display},
     hint::{black_box, spin_loop},
     path::Path,
     sync::{
@@ -71,7 +71,7 @@ where
     }
 
     fn pop(&self) -> Option<T> {
-        match self.lock(QueueData::Nothing) {
+        match self.lock(QueueData::Pop) {
             QueueData::OutputT { data } => Some(data),
             QueueData::OutputEmpty => None,
             _ => panic!("Invalid output"),
@@ -89,6 +89,16 @@ impl<T: Send> SequentialQueue<T> for VecDeque<T> {
     }
 }
 
+impl<T: Send> SequentialQueue<T> for LinkedList<T> {
+    fn push(&mut self, value: T) {
+        self.push_back(value);
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        self.pop_front()
+    }
+}
+
 pub fn benchmark_queue<'a>(
     bencher: &Bencher,
     targets: impl Iterator<Item = &'a DLock2Target>,
@@ -96,9 +106,9 @@ pub fn benchmark_queue<'a>(
 ) {
     for target in targets {
         let lock = target.to_locktype(
-            VecDeque::new(),
+            LinkedList::new(),
             QueueData::default(),
-            move |queue: &mut VecDeque<u64>, input: QueueData<u64>| match input {
+            move |queue: &mut LinkedList<u64>, input: QueueData<u64>| match input {
                 QueueData::Push { data } => {
                     queue.push(data);
                     QueueData::Nothing
@@ -115,7 +125,8 @@ pub fn benchmark_queue<'a>(
         );
 
         if let Some(lock) = lock {
-            let records = start_benchmark(bencher, lock, "");
+            let lockname = format!("{}-queue", lock);
+            let records = start_benchmark(bencher, lock, &lockname);
             finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
@@ -179,6 +190,12 @@ where
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
                             response_times.push(Some(Duration::from_nanos(end - begin)));
+                        }
+
+                        let non_cs_loop = rng.gen_range(1..=8);
+
+                        for i in 0..non_cs_loop {
+                            spin_loop()
                         }
 
                         loop_count += 1;
