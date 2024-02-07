@@ -1,7 +1,7 @@
 use crate::dlock2::DLock2;
 use std::{
     arch::x86_64::__rdtscp,
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::SyncUnsafeCell,
     cmp::max,
     ptr::{self, NonNull},
     sync::atomic::{AtomicI64, AtomicPtr, Ordering::*},

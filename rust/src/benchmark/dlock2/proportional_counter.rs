@@ -1,26 +1,20 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
-    default,
     fmt::Display,
     hint::{black_box, spin_loop},
-    mem::MaybeUninit,
     path::Path,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread::{self, current, ThreadId},
     time::Duration,
 };
 
-use arrow_ipc::{
-    writer::{FileWriter, IpcWriteOptions},
-    CompressionType,
-};
+use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use itertools::izip;
 use libdlock::dlock2::{DLock2, DLock2Delegate};
-use nix::sys::time;
 
 use crate::{
     benchmark::{

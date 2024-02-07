@@ -85,10 +85,7 @@ pub fn benchmark_dlock1(bencher: &Bencher, option: &DLock1Option) {
         };
 
         let iter = DLock1Target::iter().collect_vec();
-        let option_targets = option
-            .lock_targets
-            .as_ref()
-            .unwrap_or(&iter);
+        let option_targets = option.lock_targets.as_ref().unwrap_or(&iter);
 
         let targets = extract_targets(option.waiter, option_targets.iter());
 

@@ -1,5 +1,5 @@
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, num::*, ptr::null_mut,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, cmp::max, mem::transmute, ptr::null_mut,
     sync::atomic::*, time::Duration,
 };
 

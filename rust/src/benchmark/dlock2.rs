@@ -1,6 +1,6 @@
 use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
 use itertools::Itertools;
-use nix::libc::FILENAME_MAX;
+
 use strum::IntoEnumIterator;
 
 use crate::benchmark::dlock2::proportional_counter::proportional_counter;

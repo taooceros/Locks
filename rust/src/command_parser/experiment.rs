@@ -71,7 +71,7 @@ pub enum DLock2Experiment {
     FetchAndMultiply {
         #[arg(long = "inlcude-lock-free", default_value_t = true)]
         include_lock_free: bool,
-    }
+    },
 }
 
 impl DLock2Experiment {

@@ -13,7 +13,7 @@ use std::{
 };
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use itertools::izip;
+
 use libdlock::dlock2::{DLock2, DLock2Delegate};
 use rand::Rng;
 

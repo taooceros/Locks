@@ -1,7 +1,7 @@
 use crate::parker::State::*;
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, num::*, ptr::null_mut,
-    sync::atomic::*, time::Duration,
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, mem::transmute, ptr::null_mut, sync::atomic::*,
+    time::Duration,
 };
 
 use crossbeam::{atomic::AtomicConsume, utils::CachePadded};

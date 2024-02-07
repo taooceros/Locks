@@ -1,9 +1,7 @@
-use strum::IntoEnumIterator;
-
 use std::path::Path;
 
 use crate::command_parser::experiment::Experiment;
-use crate::command_parser::lock_target::DLock1Target;
+
 use crate::command_parser::*;
 
 use self::bencher::Bencher;

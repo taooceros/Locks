@@ -3,7 +3,6 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     mem::transmute,
-    num::*,
     ptr::null_mut,
     sync::atomic::{AtomicPtr, Ordering::*},
 };

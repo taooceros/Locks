@@ -1,7 +1,6 @@
 use arrow::{array::*, datatypes::*};
 use serde_with::DurationNanoSeconds;
 use std::{
-    num::NonZeroI64,
     sync::{Arc, OnceLock},
     time::Duration,
 };

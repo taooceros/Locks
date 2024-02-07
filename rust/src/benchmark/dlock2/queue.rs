@@ -5,7 +5,7 @@ use std::{
     hint::{black_box, spin_loop},
     path::Path,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     thread::{self, current, ThreadId},
@@ -13,7 +13,7 @@ use std::{
 };
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use itertools::izip;
+
 use libdlock::dlock2::{DLock2, DLock2Delegate};
 use rand::Rng;
 
@@ -49,7 +49,7 @@ pub struct DLock2Queue<L, Q> {
 pub fn benchmark_queue<'a>(
     bencher: &Bencher,
     targets: impl Iterator<Item = &'a DLock2Target>,
-    include_lock_free: bool,
+    _include_lock_free: bool,
 ) {
     for target in targets {
         let stat_response_time = bencher.stat_response_time;

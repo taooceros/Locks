@@ -12,10 +12,10 @@ use libdlock::{
     dlock::{BenchmarkType, DLockType},
     dlock2::{
         self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
-        uscl::DLock2USCL, DLock2, DLock2Delegate, DLock2Impl,
+        uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
-    spin_lock::{RawSpinLock, SpinLock},
+    spin_lock::SpinLock,
     u_scl::USCL,
 };
 use serde::Serialize;

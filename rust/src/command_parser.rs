@@ -2,10 +2,7 @@ use std::thread::available_parallelism;
 
 use clap::*;
 
-use self::{
-    experiment::Experiment,
-    lock_target::{DLock1Target, WaiterType},
-};
+use self::experiment::Experiment;
 
 pub mod experiment;
 pub mod lock_target;
