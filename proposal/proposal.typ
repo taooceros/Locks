@@ -168,8 +168,7 @@ is concurrently accessing the concurrent object), `operation_num`,
 (whether operation is performed by the same thread), `hold_time` (the total
 time the thread is using the concurrent object), `combine_time` (the total
 time the thread is performing volunteering work), `noncs_length` (a time
-slice where the thread doesn't touch the concurrent object). #footnote[Some of the data will only valid for a particular sets of concurrent
-  objects.]
+slice where the thread doesn't touch the concurrent object). #footnote[Some of the data will only valid for a subset of the concurrent objects.]
 
 === Concurrent Object
 
@@ -215,7 +214,6 @@ for Fall 2024)
   principle based on banning.
 - Basic Benchmark Suite for calculating the throughput, scalability, and
   fairness.
-#pagebreak(weak: true)
 == Summer 2024
 - Analysis of the locks and additional state of art concurrent data structure
   to compare.
@@ -226,20 +224,19 @@ for Fall 2024)
 
 = Conclusion
 
-In conclusion, I propose to demonstrate that delegation-styled locks
-suffers from the scheduler subversion problem. To remedy this problem, I
-propose to integrate existing delegation-styled locks with "banning"
+#indent In conclusion, I propose to demonstrate that delegation-styled
+locks suffers from the scheduler subversion problem. To remedy this
+problem, I propose to integrate existing delegation-styled locks with "banning"
 strategy to ensure their usage fairness. Further I propose to employ
 stochastic methods to share the combining evenly.
 
-In the future, I plan to resolve the response time issue of the combiner by
-swapping the non-critical work of combiner to one of the waiter that
-expected to wait long. One possible approach is to employ a similar
-strategy used in the TCL Lock @transparent_dlock_ref, while another
-proposal is to embrace the asynchronous programming model provided by _rust_ to
-delegate the
-#raw("Future") for execution and create a custom runtime that adapts takes
-lock-usage.
+For future improvements, the project plans to tackle the combiner's
+response time issue by offloading non-critical work to a waiting thread
+that is anticipated to experience a longer wait time. This could be
+achieved through strategies inspired by the TCL Lock or by leveraging the
+asynchronous programming model provided by many modern languages
+(C++/Rust/C\#/JavaScript) and manage `Future` executions within a custom
+runtime that adapts to lock-usage patterns.
 
 
 
