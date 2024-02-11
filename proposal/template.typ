@@ -4,7 +4,7 @@
 #let project(title: "", authors: (), advisor : (), body) = {
   // Set the document's basic properties.
   set document(author: authors, title: title)
-  set page(numbering: "1", number-align: center)
+  set page(numbering: "1", number-align: center, margin: 1in)
   set text(font: "Charis SIL", lang: "en", weight: 300)
   set par(justify: false)
    
@@ -15,7 +15,9 @@
    
   set block(below: 1.5em, above: 1.5em)
    
-  set par(leading: 1em, linebreaks: auto, first-line-indent: 1em)
+  set par(leading: 1em, linebreaks: auto, first-line-indent: 1.5em)
+
+  set enum(spacing: 1.5em)
   
   // Title row.
   align(center)[
@@ -24,7 +26,7 @@
    
   // Author information.
   pad(
-    top: 0.8em,
+    top: 0.5em,
     x: 2em,
     grid(
       columns: (1fr,) * calc.min(3, authors.len()),
@@ -35,7 +37,6 @@
 
   // Advisor information.
   pad(
-    bottom: 0.8em,
     x: 2em,
     grid(
       columns: (1fr,),
