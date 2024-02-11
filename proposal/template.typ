@@ -5,13 +5,10 @@
   // Set the document's basic properties.
   set document(author: authors, title: title)
   set page(numbering: "1", number-align: center, margin: 1in)
-  set text(font: "Charis SIL", lang: "en", weight: 300)
+  set text(font: "Charis SIL", lang: "en", weight: 300, size: 11pt)
   set par(justify: false)
    
   set heading(numbering: "1.1")
-   
-  // Set paragraph spacing.
-  show par: set block(above: 1.2em, below: 1.2em)
    
   set block(below: 1.5em, above: 1.5em)
    
