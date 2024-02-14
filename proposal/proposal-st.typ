@@ -204,23 +204,27 @@ and the responsiveness of the concurrent object to operations
 (`latencies`). This comprehensive methodological approach is designed to
 yield a lock mechanism that is both equitable and efficient.
 
-= Timeline
+= Previous Experience
 
-#indent Total Project Hours: 500 (300 for Spring and Summer 2024 and 200
-for Fall 2024)
+#indent I have been engaged in programming for many years. Starting in the
+interim between high school and college, I start contributing to an
+open-source project, #link("https://github.com/Flow-Launcher/Flow.Launcher", [Flow Launcher]),
+for several years. This project has since garnered over 5,000 stars on
+GitHub. It is developed in C\#, a language that captivates me, especially
+its asynchronous programming model and parallelism capabilities.
 
-== Spring 2024
-- Implementation of the delegation-styled lock that adapts usage-fairness
-  principle based on banning.
-- Basic Benchmark Suite for calculating the throughput, scalability, and
-  fairness.
-== Summer 2024
-- Analysis of the locks and additional state of art concurrent data structure
-  to compare.
-- Advanced State of art concurrent object to compare.
-== Fall 2024
-- Implementation of the delegation-styled lock that adapts usage-fairness
-  principle based on a concurrent MPSC Priority Queue.
+In particular, I am intrigued by the application framework we utilize, _WPF_,
+which includes a feature known as Dispatcher to synchronize work to the UI
+thread. This is akin to a delegation-styled lock. My focus has been on
+enhancing the application's performance through the implementation of
+various parallelism techniques.
+
+My academic journey has included comprehensive coursework in systems
+programming, specifically CS 537 and CS 564. Prior to embarking on the
+proposed project, I have thoroughly studied two influencial texts in the
+field of multiprocessor shared memory synchronization: Shared-Memory
+Synchronization and The Art of Multiprocessor Programming, which served as
+the foundational references for my work.
 
 = Conclusion
 
