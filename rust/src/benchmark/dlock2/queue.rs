@@ -126,7 +126,7 @@ pub fn benchmark_queue<'a>(
         if let Some(lock) = lock {
             let lockname = format!("{}-queue", lock);
             let records = start_benchmark(bencher, lock, &lockname);
-            finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
+            finish_benchmark(&bencher.output_path, "Queue", records.iter());
         }
     }
 }

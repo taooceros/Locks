@@ -70,7 +70,7 @@ pub fn benchmark_pq<'a, S: SequentialPriorityQueue<u64> + Send + Sync + 'static>
 
             let lockname = format!("{}-queue", queue.inner);
             let records = start_benchmark(bencher, queue, &lockname);
-            finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
+            finish_benchmark(&bencher.output_path, "PriorityQueue", records.iter());
         }
     }
 }
