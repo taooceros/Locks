@@ -135,7 +135,7 @@ impl DLock2Target {
         I: Send,
         F: DLock2Delegate<T, I>,
     {
-        return Some::<DLock2Impl<T, I, F>>(match self {
+        Some::<DLock2Impl<T, I, F>>(match self {
             DLock2Target::FC => FC::new(data, f).into(),
             DLock2Target::FCBan => FCBan::new(data, f).into(),
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
@@ -143,6 +143,6 @@ impl DLock2Target {
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
-        });
+        })
     }
 }

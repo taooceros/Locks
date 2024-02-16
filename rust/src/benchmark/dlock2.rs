@@ -1,3 +1,5 @@
+use std::collections::{BTreeSet, BinaryHeap};
+
 use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
 use itertools::Itertools;
 
@@ -10,6 +12,7 @@ use crate::lock_target::DLock2Target;
 use super::bencher::Bencher;
 
 mod fetch_and_multiply;
+pub mod priority_queue;
 mod proportional_counter;
 pub mod queue;
 
@@ -56,6 +59,15 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
             DLock2Experiment::Queue { lock_free_queues } => {
                 queue::benchmark_queue(bencher, targets.iter(), lock_free_queues)
             }
+            DLock2Experiment::PriorityQueue { sequencial_pq_type } => match sequencial_pq_type {
+                crate::experiment::SequencialPQ::BTreeSet => {
+                    priority_queue::benchmark_pq(bencher, BTreeSet::new, targets.iter())
+                }
+                crate::experiment::SequencialPQ::BinaryHeap => {
+                    priority_queue::benchmark_pq(bencher, BinaryHeap::new, targets.iter())
+                }
+                crate::experiment::SequencialPQ::PairingHeap => todo!(),
+            },
         }
     }
 }

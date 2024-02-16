@@ -1,7 +1,6 @@
 #![feature(sync_unsafe_cell)]
 #![feature(pointer_is_aligned)]
 #![feature(type_alias_impl_trait)]
-#![feature(atomic_from_ptr)]
 #![feature(thread_id_value)]
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]

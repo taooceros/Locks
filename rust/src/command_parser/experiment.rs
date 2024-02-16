@@ -1,9 +1,12 @@
 use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
-use crate::{benchmark::dlock2::queue::LockFreeQueue, lock_target::{DLock1Target, DLock2Target, WaiterType}};
+use crate::{
+    benchmark::dlock2::queue::LockFreeQueue,
+    lock_target::{DLock1Target, DLock2Target, WaiterType},
+};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DLock1Option {
@@ -75,7 +78,19 @@ pub enum DLock2Experiment {
     Queue {
         #[arg(long = "lock-free-queues")]
         lock_free_queues: Vec<LockFreeQueue>,
-    }
+    },
+    PriorityQueue {
+        #[arg(long = "sequencial-pq-type", default_value = "binary-heap")]
+        sequencial_pq_type: SequencialPQ,
+    },
+}
+
+#[derive(Debug, Default, Clone, Display, EnumIter, ValueEnum)]
+pub enum SequencialPQ {
+    BTreeSet,
+    #[default]
+    BinaryHeap,
+    PairingHeap,
 }
 
 impl DLock2Experiment {

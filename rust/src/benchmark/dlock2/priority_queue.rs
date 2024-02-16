@@ -1,25 +1,23 @@
 use std::{
-    any::Any,
     arch::x86_64::__rdtscp,
+    borrow::Borrow,
     cell::{OnceCell, RefCell},
-    collections::{LinkedList, VecDeque},
-    fmt::{format, Display},
+    collections::{BTreeSet, BinaryHeap, LinkedList},
     hint::{black_box, spin_loop},
+    ops::Deref,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread::{self, current, ThreadId},
+    thread,
     time::Duration,
 };
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-
-use clap::ValueEnum;
-use libdlock::dlock2::{DLock2, DLock2Delegate};
+use crossbeam_skiplist::SkipMap;
+use libdlock::dlock2::DLock2;
 use rand::Rng;
-use strum::{Display, EnumIter};
 
 use crate::{
     benchmark::{
@@ -30,116 +28,60 @@ use crate::{
     lock_target::DLock2Target,
 };
 
-#[derive(Debug, Clone, ValueEnum, EnumIter, Display)]
-pub enum LockFreeQueue {
-    MCSQueue,
-}
+use self::extension::{
+    ConcurrentPriorityQueue, DLock2PriorityQueue, PQData, SequentialPriorityQueue,
+};
 
-#[derive(Debug, Clone, Copy, Default)]
-pub enum QueueData<T: Send> {
-    #[default]
-    Nothing,
-    Push {
-        data: T,
-    },
-    Pop,
-    OutputT {
-        data: T,
-    },
-    OutputEmpty,
-}
+use super::queue::{ConcurrentQueue, QueueData};
 
-pub unsafe trait ConcurrentQueue<T>: Send + Sync
+mod extension;
+
+fn pq_operation<'a, 'b, T>(
+    queue: &'a mut impl SequentialPriorityQueue<T>,
+    input: PQData<'b, T>,
+) -> PQData<'b, T>
 where
-    T: Send,
+    T: Send + Default + Ord + Sync,
 {
-    fn push(&self, value: T);
-    fn pop(&self) -> Option<T>;
-}
-
-pub trait SequentialQueue<T> {
-    fn push(&mut self, value: T);
-    fn pop(&mut self) -> Option<T>;
-}
-
-unsafe impl<T, L> ConcurrentQueue<T> for L
-where
-    T: Send,
-    L: DLock2<QueueData<T>>,
-{
-    fn push(&self, value: T) {
-        self.lock(QueueData::Push { data: value });
-    }
-
-    fn pop(&self) -> Option<T> {
-        match self.lock(QueueData::Pop) {
-            QueueData::OutputT { data } => Some(data),
-            QueueData::OutputEmpty => None,
-            _ => panic!("Invalid output"),
+    match input {
+        PQData::Push { data } => {
+            queue.push(data);
+            PQData::Nothing
         }
+        PQData::Pop => {
+            let output = queue.pop();
+            PQData::PopResult(output)
+        }
+        _ => panic!("Invalid input"),
     }
 }
 
-impl<T: Send> SequentialQueue<T> for VecDeque<T> {
-    fn push(&mut self, value: T) {
-        self.push_back(value);
-    }
-
-    fn pop(&mut self) -> Option<T> {
-        self.pop_front()
-    }
-}
-
-impl<T: Send> SequentialQueue<T> for LinkedList<T> {
-    fn push(&mut self, value: T) {
-        self.push_back(value);
-    }
-
-    fn pop(&mut self) -> Option<T> {
-        self.pop_front()
-    }
-}
-
-pub fn benchmark_queue<'a>(
+pub fn benchmark_pq<'a, S: SequentialPriorityQueue<u64> + Send + Sync + 'static>(
     bencher: &Bencher,
+    sequencial_pq: impl Fn() -> S,
     targets: impl Iterator<Item = &'a DLock2Target>,
-    lock_free_queues: &Vec<LockFreeQueue>,
+    // lock_free_queues: &Vec<LockFreeQueue>,
 ) {
     for target in targets {
-        let lock = target.to_locktype(
-            LinkedList::new(),
-            QueueData::default(),
-            move |queue: &mut LinkedList<u64>, input: QueueData<u64>| match input {
-                QueueData::Push { data } => {
-                    queue.push(data);
-                    QueueData::Nothing
-                }
-                QueueData::Pop => {
-                    let output = queue.pop();
-                    match output {
-                        Some(data) => QueueData::OutputT { data },
-                        None => QueueData::OutputEmpty,
-                    }
-                }
-                _ => panic!("Invalid input"),
-            },
-        );
+        let lock = target.to_locktype(sequencial_pq(), PQData::<u64>::default(), pq_operation);
 
         if let Some(lock) = lock {
-            let lockname = format!("{}-queue", lock);
-            let records = start_benchmark(bencher, lock, &lockname);
+            let queue = DLock2PriorityQueue::<u64, S, _>::new(lock);
+
+            let lockname = format!("{}-queue", queue.inner);
+            let records = start_benchmark(bencher, queue, &lockname);
             finish_benchmark(&bencher.output_path, "FetchAndMultiply", records.iter());
         }
     }
 }
 
-fn start_benchmark<T>(
+fn start_benchmark<'a, T>(
     bencher: &Bencher,
-    concurrent_queue: impl ConcurrentQueue<T>,
+    concurrent_queue: impl ConcurrentPriorityQueue<T> + 'a,
     queue_name: &str,
 ) -> Vec<Records>
 where
-    T: Send + Default,
+    T: Send + Default + Ord + Sync,
 {
     println!("Start benchmark for {}", queue_name);
 
@@ -158,11 +100,13 @@ where
             .enumerate()
             .map(|(id, core_id)| {
                 let lock_ref = lock_ref.clone();
-                let core_id = *core_id;
                 let stop_signal = stop_signal.clone();
-                let stat_response_time = bencher.stat_response_time;
 
                 scope.spawn(move || {
+                    let lock_ref = lock_ref.clone();
+                    let core_id = *core_id;
+                    let stop_signal = stop_signal.clone();
+                    let stat_response_time = bencher.stat_response_time;
                     core_affinity::set_for_current(core_id);
 
                     let stop_signal = black_box(stop_signal);
