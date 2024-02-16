@@ -81,12 +81,12 @@ pub enum DLock2Experiment {
     },
     PriorityQueue {
         #[arg(long = "sequencial-pq-type", default_value = "binary-heap")]
-        sequencial_pq_type: SequencialPQ,
+        sequencial_pq_type: SequencialPQType,
     },
 }
 
 #[derive(Debug, Default, Clone, Display, EnumIter, ValueEnum)]
-pub enum SequencialPQ {
+pub enum SequencialPQType {
     BTreeSet,
     #[default]
     BinaryHeap,

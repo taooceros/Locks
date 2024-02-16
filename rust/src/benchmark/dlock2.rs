@@ -60,13 +60,13 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 queue::benchmark_queue(bencher, targets.iter(), lock_free_queues)
             }
             DLock2Experiment::PriorityQueue { sequencial_pq_type } => match sequencial_pq_type {
-                crate::experiment::SequencialPQ::BTreeSet => {
+                crate::experiment::SequencialPQType::BTreeSet => {
                     priority_queue::benchmark_pq(bencher, BTreeSet::new, targets.iter())
                 }
-                crate::experiment::SequencialPQ::BinaryHeap => {
+                crate::experiment::SequencialPQType::BinaryHeap => {
                     priority_queue::benchmark_pq(bencher, BinaryHeap::new, targets.iter())
                 }
-                crate::experiment::SequencialPQ::PairingHeap => todo!(),
+                crate::experiment::SequencialPQType::PairingHeap => todo!(),
             },
         }
     }
