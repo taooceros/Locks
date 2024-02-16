@@ -1,16 +1,14 @@
 use std::{
-    any::Any,
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
     collections::{LinkedList, VecDeque},
-    fmt::{format, Display},
     hint::{black_box, spin_loop},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread::{self, current, ThreadId},
+    thread::{self},
     time::Duration,
 };
 

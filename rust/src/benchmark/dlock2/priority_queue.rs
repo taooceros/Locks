@@ -1,10 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
-    borrow::Borrow,
     cell::{OnceCell, RefCell},
-    collections::{BTreeSet, BinaryHeap, LinkedList},
     hint::{black_box, spin_loop},
-    ops::Deref,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,8 +12,7 @@ use std::{
 };
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use crossbeam_skiplist::SkipMap;
-use libdlock::dlock2::DLock2;
+
 use rand::Rng;
 
 use crate::{
@@ -32,7 +28,7 @@ use self::extension::{
     ConcurrentPriorityQueue, DLock2PriorityQueue, PQData, SequentialPriorityQueue,
 };
 
-use super::queue::{ConcurrentQueue, QueueData};
+use super::queue::ConcurrentQueue;
 
 mod extension;
 

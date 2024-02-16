@@ -1,14 +1,11 @@
 use std::{
     self,
     collections::{BTreeSet, BinaryHeap},
-    default,
 };
 
 use libdlock::dlock2::DLock2;
 
 use crossbeam_skiplist::SkipSet;
-
-use std::ops::Deref;
 
 pub unsafe trait ConcurrentPriorityQueue<T>: Send + Sync
 where
