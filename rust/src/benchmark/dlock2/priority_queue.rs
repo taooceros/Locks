@@ -36,12 +36,12 @@ use super::queue::{ConcurrentQueue, QueueData};
 
 mod extension;
 
-fn pq_operation<'a, 'b, T>(
+fn pq_operation<'a, T>(
     queue: &'a mut impl SequentialPriorityQueue<T>,
-    input: PQData<'b, T>,
-) -> PQData<'b, T>
+    input: PQData<T>,
+) -> PQData<T>
 where
-    T: Send + Default + Ord + Sync,
+    T: Send + Default + Ord + Sync + Copy,
 {
     match input {
         PQData::Push { data } => {
@@ -51,6 +51,10 @@ where
         PQData::Pop => {
             let output = queue.pop();
             PQData::PopResult(output)
+        }
+        PQData::Peek => {
+            let output = queue.peek();
+            PQData::PeekResult(output.map(|x| *x))
         }
         _ => panic!("Invalid input"),
     }

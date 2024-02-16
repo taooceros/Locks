@@ -15,7 +15,7 @@ where
     T: PartialOrd + Ord + Eq + Send + Sync,
 {
     fn push(&self, item: T);
-    fn peek(&self) -> Option<impl Deref<Target = T>>;
+    fn peek(&self) -> Option<T>;
     fn pop(&self) -> Option<T>;
 }
 
@@ -27,8 +27,8 @@ where
         self.insert(item);
     }
 
-    fn peek(&self) -> Option<impl Deref<Target = T>> {
-        self.front()
+    fn peek(&self) -> Option<T> {
+        self.front().map(|x| *x)
     }
     fn pop(&self) -> Option<T> {
         self.pop_front().map(|x| *x)
@@ -40,7 +40,7 @@ where
     T: PartialOrd + Ord + Eq,
 {
     fn push(&mut self, item: T);
-    fn peek(&mut self) -> Option<impl Deref<Target = T>>;
+    fn peek(&mut self) -> Option<&T>;
     fn pop(&mut self) -> Option<T>;
 }
 
@@ -48,7 +48,7 @@ pub struct DLock2PriorityQueue<'a, T, Q, L>
 where
     T: PartialOrd + Ord + Eq + Send + Sync + 'a,
     Q: SequentialPriorityQueue<T>,
-    L: DLock2<PQData<'a, T>>,
+    L: DLock2<PQData<T>>,
 {
     pub(crate) inner: L,
     pub(crate) phantom: std::marker::PhantomData<T>,
@@ -60,7 +60,7 @@ impl<'a, T, Q, L> DLock2PriorityQueue<'a, T, Q, L>
 where
     T: PartialOrd + Ord + Eq + Send + Sync,
     Q: SequentialPriorityQueue<T>,
-    L: DLock2<PQData<'a, T>>,
+    L: DLock2<PQData<T>>,
 {
     pub fn new(inner: L) -> Self {
         DLock2PriorityQueue {
@@ -76,7 +76,7 @@ unsafe impl<'a, T, Q, L> Send for DLock2PriorityQueue<'a, T, Q, L>
 where
     T: PartialOrd + Ord + Eq + Send + Sync,
     Q: SequentialPriorityQueue<T>,
-    L: DLock2<PQData<'a, T>>,
+    L: DLock2<PQData<T>>,
 {
 }
 
@@ -84,12 +84,12 @@ unsafe impl<'a, T, Q, L> Sync for DLock2PriorityQueue<'a, T, Q, L>
 where
     T: PartialOrd + Ord + Eq + Send + Sync,
     Q: SequentialPriorityQueue<T>,
-    L: DLock2<PQData<'a, T>>,
+    L: DLock2<PQData<T>>,
 {
 }
 
 #[derive(Debug, Default)]
-pub(crate) enum PQData<'a, T> {
+pub(crate) enum PQData<T> {
     #[default]
     Nothing,
     Push {
@@ -97,7 +97,7 @@ pub(crate) enum PQData<'a, T> {
     },
     Pop,
     Peek,
-    PeekResult(Option<&'a T>),
+    PeekResult(Option<T>),
     PopResult(Option<T>),
 }
 
@@ -105,7 +105,7 @@ unsafe impl<'a, T, Q, L> ConcurrentPriorityQueue<T> for DLock2PriorityQueue<'a, 
 where
     T: PartialOrd + Ord + Eq + Send + Sync,
     Q: SequentialPriorityQueue<T>,
-    L: DLock2<PQData<'a, T>>,
+    L: DLock2<PQData<T>>,
 {
     fn push(&self, item: T) {
         self.inner.lock(PQData::Push { data: item });
@@ -119,7 +119,7 @@ where
         }
     }
 
-    fn peek(&self) -> Option<impl Deref<Target = T>> {
+    fn peek(&self) -> Option<T> {
         if let PQData::PeekResult(item) = self.inner.lock(PQData::Peek) {
             item
         } else {
@@ -136,8 +136,8 @@ where
         self.push(item);
     }
 
-    fn peek(&mut self) -> Option<impl Deref<Target = T>> {
-        self.peek_mut()
+    fn peek(&mut self) -> Option<&T> {
+        BinaryHeap::peek(self)
     }
 
     fn pop(&mut self) -> Option<T> {
@@ -153,7 +153,7 @@ where
         self.insert(item);
     }
 
-    fn peek(&mut self) -> Option<impl Deref<Target = T>> {
+    fn peek(&mut self) -> Option<&T> {
         self.first()
     }
 
