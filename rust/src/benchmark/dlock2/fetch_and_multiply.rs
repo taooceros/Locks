@@ -21,7 +21,7 @@ use crate::{
     benchmark::{
         bencher::Bencher,
         helper::create_plain_writer,
-        records::{Records, RecordsBuilder},
+        old_records::{Records, RecordsBuilder},
     },
     lock_target::DLock2Target,
 };

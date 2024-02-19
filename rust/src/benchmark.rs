@@ -10,6 +10,7 @@ mod bencher;
 mod dlock;
 pub(crate) mod dlock2;
 mod helper;
+mod old_records;
 mod records;
 
 pub fn benchmark(

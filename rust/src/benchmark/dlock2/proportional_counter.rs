@@ -20,7 +20,7 @@ use crate::{
     benchmark::{
         bencher::Bencher,
         helper::create_plain_writer,
-        records::{Records, RecordsBuilder},
+        records::{write_results, Records},
     },
     lock_target::DLock2Target,
 };
@@ -30,26 +30,38 @@ struct FetchAddDlock2 {
 }
 
 unsafe impl DLock2<Data> for FetchAddDlock2 {
+    #[inline(always)]
     fn lock(&self, input: Data) -> Data {
         let input = black_box(input);
 
         if let Data::Input {
             thread_id,
             data: loop_limit,
+            stat_response_time,
         } = input
         {
+            let timestamp = unsafe {
+                if stat_response_time {
+                    __rdtscp(&mut 0)
+                } else {
+                    0
+                }
+            };
+
             // it is very important to have black_box here
             let mut loop_limit = loop_limit;
 
+            let mut last_value = 0;
+
             while loop_limit > 0 {
-                self.data.fetch_add(1, Ordering::AcqRel);
+                last_value = self.data.fetch_add(1, Ordering::AcqRel);
                 loop_limit -= 1;
             }
 
             return Data::Output {
-                timestamp: 0,
+                timestamp,
                 is_combiner: current().id() == thread_id,
-                data: self.data.load(Ordering::Acquire),
+                data: last_value + 1,
             };
         }
 
@@ -78,13 +90,16 @@ pub fn proportional_counter<'a>(
     for target in targets {
         let stat_response_time = bencher.stat_response_time;
 
-        let lock = target.to_locktype(
-            0usize,
-            Data::default(),
-            move |data: &mut usize, input: Data| {
-                let data = black_box(data);
-                let input = black_box(input);
+        let lock = target.to_locktype(0usize, Data::default(), |data: &mut usize, input: Data| {
+            let data = black_box(data);
+            let input = black_box(input);
 
+            if let Data::Input {
+                thread_id,
+                data: loop_limit,
+                stat_response_time,
+            } = input
+            {
                 let timestamp = unsafe {
                     if stat_response_time {
                         __rdtscp(&mut 0)
@@ -93,33 +108,27 @@ pub fn proportional_counter<'a>(
                     }
                 };
 
-                if let Data::Input {
-                    thread_id,
-                    data: loop_limit,
-                } = input
-                {
-                    // it is very important to have black_box here
-                    let mut loop_limit = black_box(loop_limit);
+                // it is very important to have black_box here
+                let mut loop_limit = black_box(loop_limit);
 
-                    while loop_limit > 0 {
-                        *data += 1;
-                        loop_limit -= 1;
-                    }
-
-                    return Data::Output {
-                        timestamp,
-                        is_combiner: current().id() == thread_id,
-                        data: *data,
-                    };
+                while black_box(loop_limit) > 0 {
+                    *data += 1;
+                    loop_limit -= 1;
                 }
 
-                panic!("Invalid input")
-            },
-        );
+                return Data::Output {
+                    timestamp,
+                    is_combiner: current().id() == thread_id,
+                    data: *data,
+                };
+            }
+
+            panic!("Invalid input")
+        });
 
         if let Some(lock) = lock {
             let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
-            finish_benchmark(&bencher.output_path, file_name, records.iter());
+            finish_benchmark(&bencher.output_path, file_name, records);
         }
     }
 
@@ -129,7 +138,7 @@ pub fn proportional_counter<'a>(
         };
 
         let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
-        finish_benchmark(&bencher.output_path, file_name, records.iter());
+        finish_benchmark(&bencher.output_path, file_name, records);
     }
 }
 
@@ -140,6 +149,7 @@ pub enum Data {
     Input {
         data: usize,
         thread_id: ThreadId,
+        stat_response_time: bool,
     },
     Output {
         timestamp: u64,
@@ -177,11 +187,9 @@ fn start_benchmark(
                 scope.spawn(move || {
                     core_affinity::set_for_current(core_id);
 
-                    let stop_signal = black_box(stop_signal);
-                    let cs_loop = black_box(cs_loop);
-                    let non_cs_loop = black_box(non_cs_loop);
-                    let mut response_times = vec![];
-                    let mut is_combiners = vec![];
+                    let stop_signal = stop_signal;
+                    let mut combiner_latency = vec![];
+                    let mut waiter_latency = vec![];
                     let mut loop_count = 0;
                     let mut num_acquire = 0;
                     let mut aux = 0;
@@ -189,6 +197,7 @@ fn start_benchmark(
                     let data = Data::Input {
                         data: cs_loop,
                         thread_id: current().id(),
+                        stat_response_time,
                     };
 
                     while !stop_signal.load(Ordering::Acquire) {
@@ -204,20 +213,22 @@ fn start_benchmark(
 
                         if stat_response_time {
                             if let Data::Output { is_combiner, .. } = output {
-                                is_combiners.push(Some(is_combiner));
+                                let end = unsafe { __rdtscp(&mut aux) };
+                                if is_combiner {
+                                    combiner_latency.push(Some(end - begin));
+                                } else {
+                                    waiter_latency.push(Some(end - begin));
+                                }
                             } else {
                                 panic!("Invalid output");
                             }
-
-                            let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos(end - begin)));
                         }
 
                         loop_count += cs_loop;
 
                         for i in 0..non_cs_loop {
+                            spin_loop();
                             black_box(i);
-                            spin_loop()
                         }
                     }
 
@@ -230,8 +241,8 @@ fn start_benchmark(
                         num_acquire,
                         cs_length: Duration::from_nanos(cs_loop as u64),
                         non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
-                        is_combiner: Some(is_combiners),
-                        response_times: Some(response_times),
+                        combiner_latency: Some(combiner_latency),
+                        waiter_latency: Some(waiter_latency),
                         hold_time: Default::default(),
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
@@ -252,57 +263,14 @@ fn start_benchmark(
     })
 }
 
-fn finish_benchmark<'a>(
-    output_path: &Path,
-    file_name: &str,
-    records: impl Iterator<Item = &'a Records> + Clone,
-) {
-    write_results(output_path, file_name, records.clone());
+fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
+    write_results(output_path, file_name, &records);
 
     // for record in records.clone() {
     //     println!("{}", record.loop_count);
     // }
 
-    let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
-}
-
-fn write_results<'a>(
-    output_path: &Path,
-    file_name: &str,
-    results: impl Iterator<Item = &'a Records>,
-) {
-    thread_local! {
-        static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
-    }
-
-    WRITER.with(|cell| {
-        let mut writer = cell
-            .get_or_init(|| {
-                let option =
-                    IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
-                // .try_with_compression(Some(CompressionType::ZSTD))
-                // .expect("Failed to create compression option");
-
-                RefCell::new(
-                    FileWriter::try_new_with_options(
-                        create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                            .expect("Failed to create writer"),
-                        RecordsBuilder::get_schema(),
-                        option,
-                    )
-                    .expect("Failed to create file writer"),
-                )
-            })
-            .borrow_mut();
-
-        let mut record_builder = RecordsBuilder::default();
-
-        record_builder.extend(results);
-
-        writer
-            .write(&record_builder.finish().into())
-            .expect("Failed to write");
-    });
 }

@@ -109,13 +109,10 @@ where
             let next_node = unsafe { next_nonnull.as_ref() };
 
             unsafe {
-                ptr::write(
-                    tmp_node.data.get(),
-                    (self.delegate)(
-                        self.data.get().as_mut().unwrap_unchecked(),
-                        ptr::read(tmp_node.data.get()),
-                    ),
-                );
+                tmp_node.data.get().write((self.delegate)(
+                    self.data.get().as_mut().unwrap_unchecked(),
+                    tmp_node.data.get().read(),
+                ));
 
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);

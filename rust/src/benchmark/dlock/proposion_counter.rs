@@ -17,7 +17,7 @@ use std::{
 };
 
 use crate::benchmark::helper::create_plain_writer;
-use crate::benchmark::records::{Records, RecordsBuilder};
+use crate::benchmark::old_records::{Records, RecordsBuilder};
 
 use histo::Histogram;
 use libdlock::{

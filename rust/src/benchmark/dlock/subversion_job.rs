@@ -20,7 +20,7 @@ use libdlock::{
 use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
 use crate::benchmark::helper::create_zstd_writer;
-use crate::benchmark::records::Record;
+use crate::benchmark::old_records::Record;
 
 use crate::benchmark::bencher::LockBenchInfo;
 

@@ -1,6 +1,6 @@
 use crate::benchmark::bencher::LockBenchInfo;
 use crate::benchmark::helper::create_plain_writer;
-use crate::benchmark::records::{Records, RecordsBuilder};
+use crate::benchmark::old_records::{Records, RecordsBuilder};
 
 use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
