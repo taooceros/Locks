@@ -1,3 +1,5 @@
+tmux
+
 sudo apt-get update
 sudo apt-get install clang mold -y
 

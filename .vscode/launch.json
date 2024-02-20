@@ -8,9 +8,13 @@
             "type": "lldb",
             "request": "launch",
             "name": "Launch",
+            "preLaunchTask": "rust: cargo build",
             "program": "${workspaceFolder}/rust/target/debug/dlock",
-            "args": ["fc-lock", "-e", "subversion"],
-            "cwd": "${workspaceFolder}"
+            "args": [
+                "d-lock2",
+                "fetch-and-multiply"
+            ],
+            "cwd": "${workspaceFolder}/rust"
         }
     ]
 }

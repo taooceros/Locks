@@ -7,8 +7,8 @@ use std::{
 use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 
 use crate::{
+    dlock::guard::DLockGuard,
     dlock::{DLock, DLockDelegate},
-    guard::DLockGuard,
 };
 
 use super::RawSimpleLock;
@@ -112,7 +112,7 @@ impl<T: Sized> DLock<T> for SpinLock<T> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64> {
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
         return None;
     }
 }

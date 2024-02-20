@@ -1,12 +1,12 @@
 use crate::parker::Parker;
 use crossbeam::utils::Backoff;
 use quanta::Clock;
-use std::cell::SyncUnsafeCell;
+
 use std::hint::spin_loop;
 
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::thread::{current, yield_now, Thread};
+use std::thread::yield_now;
 use std::time::Duration;
 
 use super::State;

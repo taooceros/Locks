@@ -2,12 +2,7 @@ use std::thread::available_parallelism;
 
 use clap::*;
 
-use strum::IntoEnumIterator;
-
-use self::{
-    experiment::Experiment,
-    lock_target::{LockTarget, WaiterType},
-};
+use self::experiment::Experiment;
 
 pub mod experiment;
 pub mod lock_target;
@@ -30,14 +25,10 @@ pub struct GlobalOpts {
     pub cpus: Vec<usize>,
     #[arg(global = true, long, short, default_value = "../visualization/output")]
     pub output_path: String,
-    #[arg(global = true, long, short, default_value = "all")]
-    pub waiter: WaiterType,
     #[arg(global = true, long, short)]
     pub stat_response_time: bool,
     #[arg(global = true, long, short, default_value = "5")]
     pub duration: u64,
-    #[arg(global = true, long, short, value_delimiter = ',')]
-    pub lock_target: Option<Vec<LockTarget>>,
     #[arg(global = true, long, short)]
     pub verbose: bool,
 }

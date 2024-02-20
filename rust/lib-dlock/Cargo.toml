@@ -11,16 +11,15 @@ combiner_stat = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-bindgen = "0.68.1"
+bindgen = "0.69.2"
 
 [dev-dependencies]
 clap = { version = "4.3.12", features = ["derive"] }
-strum = { version = "0.25", features = ["derive"] }
 csv = "1.2.1"
-itertools = "0.11.0"
+itertools = "0.12.1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_with = { version = "3.0.0" }
-serial_test = { version = "2.0.0" }
+serial_test = { version = "3.0.0" }
 
 
 [dependencies]
@@ -29,7 +28,7 @@ intrusive-collections = "0.9.5"
 linux-futex = "0.2.0"
 num_cpus = "1.15.0"
 once_cell = "1.17.1"
-quanta = "0.11.1"
+quanta = "0.12.2"
 thread_local = "1.1"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 enum_dispatch = "0.3.11"
@@ -37,7 +36,8 @@ crossbeam = "0.8.2"
 crossbeam-skiplist = "0.1.1"
 proc-macro2 = { version = ">=1.0.63" }
 fastrand = "2.0.0"
-
+trait-set = "0.3.0"
+strum = { version = "0.26", features = ["derive"] }
 
 [profile.release-with-debug]
 inherits = "release"

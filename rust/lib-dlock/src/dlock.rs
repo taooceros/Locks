@@ -3,20 +3,30 @@ use std::{
     sync::Mutex,
 };
 
+pub mod ccsynch;
+pub mod ccsynch_fair_ban;
+pub mod fc;
+pub mod fc_fair_ban;
+pub mod fc_fair_ban_slice;
+pub mod fc_sl;
+pub mod fc_sl_naive;
+pub mod guard;
+pub mod rcl;
+
+pub mod mutex_extension;
+
 use enum_dispatch::enum_dispatch;
 
-use crate::{
-    ccsynch::CCSynch,
-    ccsynch_fair_ban::CCBan,
-    fc::fclock::FcLock,
-    fc_fair_ban::FcFairBanLock,
-    fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_sl_naive::FCSLNaive,
-    guard::DLockGuard,
-    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
+use self::{
+    ccsynch::CCSynch, ccsynch_fair_ban::CCBan, fc::fclock::FcLock, fc_fair_ban::FcFairBanLock,
+    fc_fair_ban_slice::FcFairBanSliceLock, fc_sl::FCSL, fc_sl_naive::FCSLNaive, guard::DLockGuard,
     rcl::rcllock::RclLock,
+};
+
+use crate::{
+    parker::{block_parker::BlockParker, spin_parker::SpinParker, Parker},
     spin_lock::{RawSpinLock, SpinLock},
-    u_scl::USCL, fc_sl::FCSL,
+    u_scl::USCL,
 };
 
 impl<T, F> DLockDelegate<T> for F
@@ -37,7 +47,7 @@ pub trait DLock<T> {
     fn lock<'a>(&self, f: impl DLockDelegate<T> + 'a);
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64>;
+    fn get_current_thread_combining_time(&self) -> Option<u64>;
 }
 
 #[enum_dispatch(DLock<T>)]

@@ -5,15 +5,14 @@ use std::{
 };
 
 use crate::{
-    ccsynch::CCSynch,
-    dlock::{DLock, DLockType},
-    fc::fclock::FcLock,
-    fc_fair_ban::FcFairBanLock,
-    fc_fair_ban_slice::FcFairBanSliceLock,
-    fc_fair_skiplist::FcSLNaive,
-    guard::DLockGuard,
+    dlock::ccsynch::CCSynch,
+    dlock::fc::fclock::FcLock,
+    dlock::fc_fair_ban::FcFairBanLock,
+    dlock::fc_fair_ban_slice::FcFairBanSliceLock,
+    dlock::guard::DLockGuard,
+    dlock::rcl::{rcllock::RclLock, rclserver::RclServer},
+    dlock::{fc_sl::FCSL, fc_sl_naive::FCSLNaive, DLock, DLockType},
     parker::spin_parker::SpinParker,
-    rcl::{rcllock::RclLock, rclserver::RclServer},
 };
 
 #[test]
@@ -62,18 +61,17 @@ pub fn fc_sl_naive_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(DLockType::from(FcSLNaive::new(0usize)));
+        let cc_lock = Arc::new(DLockType::from(FCSLNaive::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }
-
 
 #[test]
 pub fn fc_sl_test() {
     panic_after(Duration::from_secs(60), || {
         let cpu_count = available_parallelism().unwrap().get();
 
-        let cc_lock = Arc::new(DLockType::from(FcSL::new(0usize)));
+        let cc_lock = Arc::new(DLockType::from(FCSL::new(0usize)));
         inner_test(cc_lock, cpu_count);
     })
 }

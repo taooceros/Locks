@@ -1,9 +1,9 @@
 use std::{cell::SyncUnsafeCell, mem::MaybeUninit};
 
 use crate::{
+    dlock::guard::DLockGuard,
     dlock::{DLock, DLockDelegate},
     fairlock_acquire, fairlock_init, fairlock_release, fairlock_t, fairlock_thread_init,
-    guard::DLockGuard,
 };
 
 use self::scl_gurad::SCL_Guard;
@@ -62,7 +62,7 @@ impl<T> DLock<T> for USCL<T> {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_current_thread_combining_time(&self) -> Option<std::num::NonZeroI64> {
+    fn get_current_thread_combining_time(&self) -> Option<u64> {
         None
     }
 }

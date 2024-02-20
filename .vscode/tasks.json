@@ -16,6 +16,18 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "type": "cargo",
+            "command": "build",
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "build",
+            "label": "rust: cargo build",
+            "options": {
+                "cwd": "${workspaceFolder}/rust"
+            }
         }
     ]
 }
