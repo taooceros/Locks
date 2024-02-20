@@ -88,8 +88,6 @@ pub fn proportional_counter<'a>(
     include_lock_free: bool,
 ) {
     for target in targets {
-        let stat_response_time = bencher.stat_response_time;
-
         let lock = target.to_locktype(0usize, Data::default(), |data: &mut usize, input: Data| {
             let data = black_box(data);
             let input = black_box(input);

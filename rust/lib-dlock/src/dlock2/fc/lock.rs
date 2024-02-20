@@ -26,7 +26,7 @@ where
     F: Fn(&mut T, I) -> I,
     L: RawSimpleLock,
 {
-    pass: AtomicU32,
+    pass: SyncUnsafeCell<u32>,
     combiner_lock: CachePadded<L>,
     delegate: F,
     data: SyncUnsafeCell<T>,
@@ -43,7 +43,7 @@ where
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
-            pass: AtomicU32::new(0),
+            pass: SyncUnsafeCell::new(0),
             combiner_lock: CachePadded::new(L::new()),
             delegate,
             data: SyncUnsafeCell::new(data),
@@ -79,7 +79,10 @@ where
     fn combine(&self) {
         let mut current_ptr = NonNull::new(self.head.load(Acquire));
 
-        let pass = self.pass.fetch_add(1, Relaxed);
+        let pass = unsafe { self.pass.get().read() };
+        unsafe {
+            self.pass.get().write(pass + 1);
+        }
 
         #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
@@ -164,8 +167,10 @@ where
             if self.combiner_lock.try_lock() {
                 self.combine();
                 unsafe {
-                    if self.pass.load(Relaxed) % CLEAN_UP_AGE == 0 {
-                        self.clean_unactive_node(&self.head, self.pass.load(Relaxed));
+                    let pass = self.pass.get().read();
+
+                    if pass % CLEAN_UP_AGE == 0 {
+                        self.clean_unactive_node(&self.head, pass);
                     }
                 }
                 self.combiner_lock.unlock();

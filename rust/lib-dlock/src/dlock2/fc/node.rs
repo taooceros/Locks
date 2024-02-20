@@ -4,9 +4,11 @@ use std::{
     sync::atomic::{AtomicBool, AtomicPtr},
 };
 
+use crossbeam::utils::CachePadded;
+
 pub struct Node<T> {
     pub age: UnsafeCell<u32>,
-    pub active: AtomicBool,
+    pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<T>,
     pub complete: AtomicBool,
     pub next: AtomicPtr<Node<T>>,
@@ -21,7 +23,7 @@ impl<T> Node<T> {
     {
         Node {
             age: 0.into(),
-            active: AtomicBool::new(false),
+            active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
             data: unsafe { MaybeUninit::uninit().assume_init() },
             next: AtomicPtr::default(),
