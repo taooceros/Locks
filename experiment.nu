@@ -25,7 +25,7 @@ dlock2 counter-proportional -t $threads --cs $cs --non-cs $noncs --stat-response
 
 dlock2 counter-proportional -t 8 16 --stat-response-time --cs 1
 
-dlock2 fetch-and-multiply -t $threads --stat-response-time --cs 1 --non-cs 1
+dlock2 fetch-and-multiply -t $threads --stat-response-time
 
 dlock2 queue -t $threads --stat-response-time
 
