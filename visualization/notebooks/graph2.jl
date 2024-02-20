@@ -37,8 +37,11 @@ html"""
 </style>
 """
 
+# ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
+folder = "data"
+
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
-datasets = readdir("../data");
+datasets = readdir("../$folder");
 
 # ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
 md"""
@@ -47,7 +50,7 @@ Select Dataset $(@bind dataset_name Select(datasets))
 
 # ╔═╡ 78545e43-25f8-4b4e-8b37-20be86ac7035
 begin
-	data1 = Arrow.Table(joinpath("..", "data", dataset_name))
+	data1 = Arrow.Table(joinpath("..", folder, dataset_name))
 	df_origin = DataFrame(data1)
 end;
 
@@ -208,7 +211,7 @@ StatsBase = "~0.34.2"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.0"
+julia_version = "1.10.1"
 manifest_format = "2.0"
 project_hash = "f1143b9f297d3baaba432812c40c102910c70079"
 
@@ -493,7 +496,7 @@ weakdeps = ["Dates", "LinearAlgebra"]
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.0.5+1"
+version = "1.1.0+0"
 
 [[deps.ConcurrentUtilities]]
 deps = ["Serialization", "Sockets"]
@@ -1396,7 +1399,7 @@ version = "1.3.5+1"
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
-version = "0.3.23+2"
+version = "0.3.23+4"
 
 [[deps.OpenEXR]]
 deps = ["Colors", "FileIO", "OpenEXR_jll"]
@@ -2171,6 +2174,7 @@ version = "3.5.0+0"
 # ╠═3872be19-d39d-4a5f-be9e-5625ca45bf2d
 # ╠═32fe4de7-887b-4f4f-b7b6-6d10d9c5a0b6
 # ╠═3c5e052c-f11e-4a8a-932f-786bf70aa8de
+# ╠═a5a7824d-095f-4d68-bf22-96f0a93901a3
 # ╠═18b61f75-4981-4988-9523-24700ae73a54
 # ╠═4e1ce063-adf1-4b92-941f-90f3d41dbddb
 # ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
