@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::{BTreeSet, BinaryHeap, LinkedList, VecDeque};
 
 use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
 use itertools::Itertools;
@@ -56,17 +56,25 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
             DLock2Experiment::FetchAndMultiply { include_lock_free } => {
                 fetch_and_multiply(bencher, targets.iter(), *include_lock_free)
             }
-            DLock2Experiment::Queue { lock_free_queues } => {
-                queue::benchmark_queue(bencher, targets.iter(), lock_free_queues)
-            }
+            DLock2Experiment::Queue {
+                lock_free_queues,
+                seq_queue_type,
+            } => match seq_queue_type {
+                crate::experiment::SeqQueueType::LinkedList => {
+                    queue::benchmark_queue(bencher, LinkedList::new, targets.iter())
+                }
+                crate::experiment::SeqQueueType::VecDeque => {
+                    queue::benchmark_queue(bencher, VecDeque::new, targets.iter())
+                }
+            },
             DLock2Experiment::PriorityQueue { sequencial_pq_type } => match sequencial_pq_type {
-                crate::experiment::SequencialPQType::BTreeSet => {
+                crate::experiment::SeqPQType::BTreeSet => {
                     priority_queue::benchmark_pq(bencher, BTreeSet::new, targets.iter())
                 }
-                crate::experiment::SequencialPQType::BinaryHeap => {
+                crate::experiment::SeqPQType::BinaryHeap => {
                     priority_queue::benchmark_pq(bencher, BinaryHeap::new, targets.iter())
                 }
-                crate::experiment::SequencialPQType::PairingHeap => todo!(),
+                crate::experiment::SeqPQType::PairingHeap => todo!(),
             },
         }
     }

@@ -12,16 +12,13 @@ use std::{
     time::Duration,
 };
 
-use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-
-use libdlock::dlock2::{DLock2, DLock2Delegate};
+use libdlock::dlock2::DLock2;
 use rand::Rng;
 
 use crate::{
     benchmark::{
         bencher::Bencher,
-        helper::create_plain_writer,
-        old_records::{Records, RecordsBuilder},
+        records::{write_results, Records},
     },
     lock_target::DLock2Target,
 };
@@ -196,12 +193,7 @@ pub fn fetch_and_multiply<'a>(
             let lock = Arc::new(lock);
 
             let records = start_benchmark(bencher, lock.clone());
-            finish_benchmark(
-                &bencher.output_path,
-                "FetchAndMultiply",
-                records.iter(),
-                lock,
-            );
+            finish_benchmark(&bencher.output_path, "FetchAndMultiply", records, lock);
         }
     }
 
@@ -211,12 +203,7 @@ pub fn fetch_and_multiply<'a>(
         });
 
         let records = start_benchmark(bencher, lock.clone());
-        finish_benchmark(
-            &bencher.output_path,
-            "FetchAndMultiply",
-            records.iter(),
-            lock,
-        );
+        finish_benchmark(&bencher.output_path, "FetchAndMultiply", records, lock);
     }
 }
 
@@ -249,8 +236,8 @@ fn start_benchmark<'a>(
                     core_affinity::set_for_current(core_id);
 
                     let stop_signal = black_box(stop_signal);
-                    let mut response_times = vec![];
-                    let mut is_combiners = vec![];
+                    let mut waiter_latency = vec![];
+                    let mut combiner_latency = vec![];
                     let mut loop_count = 0;
                     let mut num_acquire = 0;
                     let mut aux = 0;
@@ -274,14 +261,17 @@ fn start_benchmark<'a>(
                         num_acquire += 1;
 
                         if stat_response_time {
+                            let end = unsafe { __rdtscp(&mut aux) };
                             if let Data::Output { is_combiner, .. } = output {
-                                is_combiners.push(Some(is_combiner));
+                                if is_combiner {
+                                    &mut combiner_latency
+                                } else {
+                                    &mut waiter_latency
+                                }
+                                .push(Some(end - begin));
                             } else {
                                 panic!("Invalid output");
                             }
-
-                            let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos(end - begin)));
                         }
 
                         loop_count += 1;
@@ -289,8 +279,8 @@ fn start_benchmark<'a>(
                         // random loop
                         let non_cs_loop = rng.gen_range(1..8);
 
-                        for _ in 0..non_cs_loop {
-                            spin_loop()
+                        for i in 0..non_cs_loop {
+                            black_box(i);
                         }
                     }
 
@@ -303,8 +293,8 @@ fn start_benchmark<'a>(
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        is_combiner: Some(is_combiners),
-                        response_times: Some(response_times),
+                        combiner_latency: Some(combiner_latency),
+                        waiter_latency: Some(waiter_latency),
                         hold_time: Default::default(),
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
@@ -328,16 +318,16 @@ fn start_benchmark<'a>(
 fn finish_benchmark<'a>(
     output_path: &Path,
     file_name: &str,
-    records: impl Iterator<Item = &'a Records> + Clone,
+    records: Vec<Records>,
     lock_target: Arc<impl DLock2<Data> + 'static + Display>,
 ) {
-    write_results(output_path, file_name, records.clone());
+    write_results(output_path, file_name, &records);
 
     // for record in records.clone() {
     //     println!("{}", record.loop_count);
     // }
 
-    let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
 
@@ -351,43 +341,4 @@ fn finish_benchmark<'a>(
     if let Data::Output { data, .. } = result {
         println!("final result: {}", data);
     }
-}
-
-fn write_results<'a>(
-    output_path: &Path,
-    file_name: &str,
-    results: impl Iterator<Item = &'a Records>,
-) {
-    thread_local! {
-        static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
-    }
-
-    WRITER.with(|cell| {
-        let mut writer = cell
-            .get_or_init(|| {
-                let option =
-                    IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
-                // .try_with_compression(Some(CompressionType::ZSTD))
-                // .expect("Failed to create compression option");
-
-                RefCell::new(
-                    FileWriter::try_new_with_options(
-                        create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                            .expect("Failed to create writer"),
-                        RecordsBuilder::get_schema(),
-                        option,
-                    )
-                    .expect("Failed to create file writer"),
-                )
-            })
-            .borrow_mut();
-
-        let mut record_builder = RecordsBuilder::default();
-
-        record_builder.extend(results);
-
-        writer
-            .write(&record_builder.finish().into())
-            .expect("Failed to write");
-    });
 }

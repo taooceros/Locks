@@ -1,10 +1,10 @@
-use std::{num::ParseIntError, sync::OnceLock, time::Duration};
+use std::{default, num::ParseIntError, sync::OnceLock, time::Duration};
 
 use clap::{Args, Subcommand, ValueEnum};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 use crate::{
-    benchmark::dlock2::queue::LockFreeQueue,
+    benchmark::dlock2::queue::extension::LockFreeQueue,
     lock_target::{DLock1Target, DLock2Target, WaiterType},
 };
 
@@ -76,17 +76,26 @@ pub enum DLock2Experiment {
         include_lock_free: bool,
     },
     Queue {
+        #[arg(long = "sequencial-queue-type", default_value = "linked-list")]
+        seq_queue_type: SeqQueueType,
         #[arg(long = "lock-free-queues")]
         lock_free_queues: Vec<LockFreeQueue>,
     },
     PriorityQueue {
         #[arg(long = "sequencial-pq-type", default_value = "binary-heap")]
-        sequencial_pq_type: SequencialPQType,
+        sequencial_pq_type: SeqPQType,
     },
 }
 
+#[derive(Default, Debug, Clone, ValueEnum)]
+pub enum SeqQueueType {
+    #[default]
+    LinkedList,
+    VecDeque,
+}
+
 #[derive(Debug, Default, Clone, Display, EnumIter, ValueEnum)]
-pub enum SequencialPQType {
+pub enum SeqPQType {
     BTreeSet,
     #[default]
     BinaryHeap,

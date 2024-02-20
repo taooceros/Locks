@@ -1,5 +1,6 @@
 use std::{
     arch::x86_64::__rdtscp,
+    borrow::Borrow,
     cell::{OnceCell, RefCell},
     hint::{black_box, spin_loop},
     path::Path,
@@ -11,15 +12,12 @@ use std::{
     time::Duration,
 };
 
-use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-
 use rand::Rng;
 
 use crate::{
     benchmark::{
         bencher::Bencher,
-        helper::create_plain_writer,
-        old_records::{Records, RecordsBuilder},
+        records::{write_results, Records},
     },
     lock_target::DLock2Target,
 };
@@ -27,8 +25,6 @@ use crate::{
 use self::extension::{
     ConcurrentPriorityQueue, DLock2PriorityQueue, PQData, SequentialPriorityQueue,
 };
-
-use super::queue::ConcurrentQueue;
 
 mod extension;
 
@@ -70,7 +66,7 @@ pub fn benchmark_pq<'a, S: SequentialPriorityQueue<u64> + Send + Sync + 'static>
 
             let lockname = format!("{}-queue", queue.inner);
             let records = start_benchmark(bencher, queue, &lockname);
-            finish_benchmark(&bencher.output_path, "PriorityQueue", records.iter());
+            finish_benchmark(&bencher.output_path, "PriorityQueue", records);
         }
     }
 }
@@ -110,7 +106,7 @@ where
                     core_affinity::set_for_current(core_id);
 
                     let stop_signal = black_box(stop_signal);
-                    let mut response_times = vec![];
+                    let mut waiter_latency = vec![];
                     let mut loop_count = 0;
                     let mut num_acquire = 0;
                     let mut aux = 0;
@@ -134,7 +130,7 @@ where
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos(end - begin)));
+                            waiter_latency.push(Some(end - begin));
                         }
 
                         let non_cs_loop = rng.gen_range(1..=8);
@@ -155,7 +151,7 @@ where
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        response_times: Some(response_times),
+                        waiter_latency: Some(waiter_latency),
                         locktype: queue_name.to_owned(),
                         waiter_type: "".to_string(),
                         ..Default::default()
@@ -175,57 +171,15 @@ where
     })
 }
 
-fn finish_benchmark<'a>(
-    output_path: &Path,
-    file_name: &str,
-    records: impl Iterator<Item = &'a Records> + Clone,
-) {
-    write_results(output_path, file_name, records.clone());
+fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: impl Borrow<Vec<Records>>) {
+    let records = records.borrow();
+    write_results(output_path, file_name, records);
 
-    for record in records.clone() {
+    for record in records.iter() {
         println!("{}", record.loop_count);
     }
 
-    let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
-}
-
-fn write_results<'a>(
-    output_path: &Path,
-    file_name: &str,
-    results: impl Iterator<Item = &'a Records>,
-) {
-    thread_local! {
-        static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
-    }
-
-    WRITER.with(|cell| {
-        let mut writer = cell
-            .get_or_init(|| {
-                let option =
-                    IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
-                // .try_with_compression(Some(CompressionType::ZSTD))
-                // .expect("Failed to create compression option");
-
-                RefCell::new(
-                    FileWriter::try_new_with_options(
-                        create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                            .expect("Failed to create writer"),
-                        RecordsBuilder::get_schema(),
-                        option,
-                    )
-                    .expect("Failed to create file writer"),
-                )
-            })
-            .borrow_mut();
-
-        let mut record_builder = RecordsBuilder::default();
-
-        record_builder.extend(results);
-
-        writer
-            .write(&record_builder.finish().into())
-            .expect("Failed to write");
-    });
 }

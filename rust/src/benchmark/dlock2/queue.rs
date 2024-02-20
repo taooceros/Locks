@@ -1,7 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
-    collections::{LinkedList, VecDeque},
+    collections::LinkedList,
     hint::{black_box, spin_loop},
     path::Path,
     sync::{
@@ -15,7 +15,7 @@ use std::{
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 
 use clap::ValueEnum;
-use libdlock::dlock2::{DLock2, DLock2Delegate};
+use libdlock::dlock2::DLock2Delegate;
 use rand::Rng;
 use strum::{Display, EnumIter};
 
@@ -28,86 +28,26 @@ use crate::{
     lock_target::DLock2Target,
 };
 
-#[derive(Debug, Clone, ValueEnum, EnumIter, Display)]
-pub enum LockFreeQueue {
-    MCSQueue,
-}
+use self::extension::*;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub enum QueueData<T: Send> {
-    #[default]
-    Nothing,
-    Push {
-        data: T,
-    },
-    Pop,
-    OutputT {
-        data: T,
-    },
-    OutputEmpty,
-}
+pub mod extension;
 
-pub unsafe trait ConcurrentQueue<T>: Send + Sync
-where
-    T: Send,
-{
-    fn push(&self, value: T);
-    fn pop(&self) -> Option<T>;
-}
-
-pub trait SequentialQueue<T> {
-    fn push(&mut self, value: T);
-    fn pop(&mut self) -> Option<T>;
-}
-
-unsafe impl<T, L> ConcurrentQueue<T> for L
-where
-    T: Send,
-    L: DLock2<QueueData<T>>,
-{
-    fn push(&self, value: T) {
-        self.lock(QueueData::Push { data: value });
-    }
-
-    fn pop(&self) -> Option<T> {
-        match self.lock(QueueData::Pop) {
-            QueueData::OutputT { data } => Some(data),
-            QueueData::OutputEmpty => None,
-            _ => panic!("Invalid output"),
-        }
+pub fn lockfree_queue<'a>(bencher: &Bencher, queues: Vec<LockFreeQueue>) {
+    for queue in queues {
+        todo!()
     }
 }
 
-impl<T: Send> SequentialQueue<T> for VecDeque<T> {
-    fn push(&mut self, value: T) {
-        self.push_back(value);
-    }
-
-    fn pop(&mut self) -> Option<T> {
-        self.pop_front()
-    }
-}
-
-impl<T: Send> SequentialQueue<T> for LinkedList<T> {
-    fn push(&mut self, value: T) {
-        self.push_back(value);
-    }
-
-    fn pop(&mut self) -> Option<T> {
-        self.pop_front()
-    }
-}
-
-pub fn benchmark_queue<'a>(
+pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync>(
     bencher: &Bencher,
+    queue: impl Fn() -> Q,
     targets: impl Iterator<Item = &'a DLock2Target>,
-    lock_free_queues: &Vec<LockFreeQueue>,
 ) {
     for target in targets {
         let lock = target.to_locktype(
-            LinkedList::new(),
+            queue(),
             QueueData::default(),
-            move |queue: &mut LinkedList<u64>, input: QueueData<u64>| match input {
+            move |queue: &mut Q, input: QueueData<u64>| match input {
                 QueueData::Push { data } => {
                     queue.push(data);
                     QueueData::Nothing

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     cell::{OnceCell, RefCell},
     collections::HashMap,
     hash::Hash,
@@ -31,7 +32,7 @@ pub struct Records {
     pub waiter_type: String,
 }
 
-pub fn write_results<'a>(output_path: &Path, file_name: &str, results: &Vec<Records>) {
+pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borrow<Vec<Records>>) {
     thread_local! {
         static WRITERs: RefCell<HashMap<String, FileWriter<std::fs::File>>> = HashMap::new().into();
     }
@@ -40,7 +41,7 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: &Vec<Reco
         .unwrap()
         .to_arrow_fields()
         .unwrap();
-    let arrays = serde_arrow::to_arrow(&fields, &results).unwrap();
+    let arrays = serde_arrow::to_arrow(&fields, results.borrow()).unwrap();
 
     let schema = Schema::new(fields);
 
