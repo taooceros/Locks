@@ -213,10 +213,11 @@ fn start_benchmark(
                             if let Data::Output { is_combiner, .. } = output {
                                 let end = unsafe { __rdtscp(&mut aux) };
                                 if is_combiner {
-                                    combiner_latency.push(Some(end - begin));
+                                    &mut combiner_latency
                                 } else {
-                                    waiter_latency.push(Some(end - begin));
+                                    &mut waiter_latency
                                 }
+                                .push(end - begin);
                             } else {
                                 panic!("Invalid output");
                             }
@@ -239,8 +240,8 @@ fn start_benchmark(
                         num_acquire,
                         cs_length: Duration::from_nanos(cs_loop as u64),
                         non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
-                        combiner_latency: Some(combiner_latency),
-                        waiter_latency: Some(waiter_latency),
+                        combiner_latency: combiner_latency,
+                        waiter_latency: waiter_latency,
                         hold_time: Default::default(),
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),

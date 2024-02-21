@@ -130,7 +130,7 @@ where
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
-                            waiter_latency.push(Some(end - begin));
+                            waiter_latency.push(end - begin);
                         }
 
                         let non_cs_loop = rng.gen_range(1..=8);
@@ -151,7 +151,7 @@ where
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        waiter_latency: Some(waiter_latency),
+                        waiter_latency: waiter_latency,
                         locktype: queue_name.to_owned(),
                         waiter_type: "".to_string(),
                         ..Default::default()
