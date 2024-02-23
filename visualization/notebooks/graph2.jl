@@ -16,7 +16,7 @@ end
 
 # ╔═╡ 3c5e052c-f11e-4a8a-932f-786bf70aa8de
 begin
-	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools
+	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, Makie, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools, FlexiMaps
 	
 	using AlgebraOfGraphics: density
 	CairoMakie.activate!(type="svg")
@@ -42,6 +42,11 @@ folder = "data"
 
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
 datasets = readdir("../$folder");
+
+# ╔═╡ d051df13-fdb5-4a79-bc01-62b7da79ce46
+md"""
+# DataSet
+"""
 
 # ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
 md"""
@@ -128,15 +133,18 @@ Thread Num $(@bind thread_num_response_time Select([2,4,8,16,32,64], default=16)
 """
 
 # ╔═╡ 73cb50ea-2b4b-46be-af5d-f0faca7763e0
-function range_tuple(x, length = 100000)
+function range_tuple(x, length = 10000)
 	start, stop = x
+
 	range(start, stop, length)
+	# maprange(log, start, stop, length=length)
 end;
 
 # ╔═╡ 3cdafbff-0b89-4371-9446-ef89e64f6eb9
 if analyze_response_time 
 	ecdf_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
 		dropmissing([:combiner_latency, :waiter_latency]; view=true)
 		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
 		groupby([:locktype])
@@ -150,13 +158,11 @@ if analyze_response_time
 	end;
 end;
 
-# ╔═╡ f9a073a0-f2bf-4454-9352-edf76ae4fc9b
-df1[1, :combiner_latency]
-
 # ╔═╡ 077e3609-a542-45ab-95be-a46ee49a43c9
 if analyze_response_time
 	ecdf_points = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
 		dropmissing([:combiner_latency, :waiter_latency]; view=true)
 		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
 		groupby([:locktype])
@@ -202,6 +208,48 @@ if analyze_response_time
 	draw(response_time_plt, figure=(;size=(1200,800)), axis=(;xscale=log))
 end
 
+# ╔═╡ 84a9bf82-521e-4f46-8b14-8356d6a886b8
+md"""
+# (Flatten) Response Time
+Enable Flatten Analysis (Maybe very slow) $(@bind flatten_latency_analysis CheckBox(false))
+
+Thread Num $(@bind flatten_thread_num_latency Select([2,4,8,16,32,64], default=16))
+"""
+
+# ╔═╡ 0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
+if flatten_latency_analysis
+	flatten_latency_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency)
+		groupby([:locktype, :cs_length])
+		@combine(:ecdf = ecdf(convert(Vector{Int}, SplitApplyCombine.flatten(vcat(:combiner_latency, :waiter_latency)))))
+		@transform(:points = range_tuple.(extrema.(:ecdf)))
+		@transform(@byrow :ecdf_value = :ecdf(:points))
+		DataFramesMeta.flatten([:points, :ecdf_value])
+	end;
+end;
+
+# ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+if flatten_latency_analysis
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :combiner_latency, :waiter_latency)
+		stack([:combiner_latency, :waiter_latency])
+		@rename(:response_type = :variable)
+	end
+end
+
+# ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
+if flatten_latency_analysis
+	flatten_latency_plt = data(flatten_latency_df) * mapping(:points, :ecdf_value, color=:cs_length => (x-> nonnumeric(x.nanos)), layout=:locktype) * (visual(Lines));
+end;
+
+
+# ╔═╡ 5f4e146a-bc79-4725-b5ad-a23a2971a5fa
+if flatten_latency_analysis
+	draw(flatten_latency_plt, figure=(;size=(1200,600)), axis=(;xscale=log))
+end
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -213,6 +261,7 @@ ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+FlexiMaps = "6394faf6-06db-4fa8-b750-35ccc60383f7"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
@@ -230,6 +279,7 @@ CairoMakie = "~0.11.8"
 ColorSchemes = "~3.24.0"
 DataFrames = "~1.6.1"
 DataFramesMeta = "~0.14.1"
+FlexiMaps = "~0.1.22"
 LazyArrays = "~1.8.3"
 Makie = "~0.20.7"
 Pluto = "~0.19.38"
@@ -246,7 +296,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.1"
 manifest_format = "2.0"
-project_hash = "d83aa0561e7d8a78972f823e0db112252d7a54c6"
+project_hash = "5381c24827c4938771005f2bad99f8f6738de06a"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -274,6 +324,25 @@ version = "1.2.3"
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
 uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 version = "0.4.5"
+
+[[deps.Accessors]]
+deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "LinearAlgebra", "MacroTools", "Test"]
+git-tree-sha1 = "cb96992f1bec110ad211b7e410e57ddf7944c16f"
+uuid = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
+version = "0.1.35"
+
+    [deps.Accessors.extensions]
+    AccessorsAxisKeysExt = "AxisKeys"
+    AccessorsIntervalSetsExt = "IntervalSets"
+    AccessorsStaticArraysExt = "StaticArrays"
+    AccessorsStructArraysExt = "StructArrays"
+
+    [deps.Accessors.weakdeps]
+    AxisKeys = "94b1ba4f-4ee9-5380-92f1-94cde586c3c5"
+    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
+    Requires = "ae029012-a4dd-5104-9daa-d747884805df"
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+    StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -541,6 +610,15 @@ deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
 version = "1.1.0+0"
 
+[[deps.CompositionsBase]]
+git-tree-sha1 = "802bb88cd69dfd1509f6670416bd4434015693ad"
+uuid = "a33af91c-f02d-484b-be07-31d278c5ca2b"
+version = "0.1.2"
+weakdeps = ["InverseFunctions"]
+
+    [deps.CompositionsBase.extensions]
+    CompositionsBaseInverseFunctionsExt = "InverseFunctions"
+
 [[deps.ConcurrentUtilities]]
 deps = ["Serialization", "Sockets"]
 git-tree-sha1 = "9c4708e3ed2b799e6124b5673a712dda0b596a9b"
@@ -590,6 +668,11 @@ deps = ["Chain", "DataFrames", "MacroTools", "OrderedCollections", "Reexport"]
 git-tree-sha1 = "6970958074cd09727b9200685b8631b034c0eb16"
 uuid = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 version = "0.14.1"
+
+[[deps.DataPipes]]
+git-tree-sha1 = "bca470e22fb942e15707dc6f1e829c1b0f684bf4"
+uuid = "02685ad9-2d12-40c3-9f73-c6aeda6a7ff5"
+version = "0.3.13"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -799,6 +882,17 @@ deps = ["Statistics"]
 git-tree-sha1 = "335bfdceacc84c5cdf16aadc768aa5ddfc5383cc"
 uuid = "53c48c17-4a7d-5ca2-90c5-79b7896eea93"
 version = "0.8.4"
+
+[[deps.FlexiMaps]]
+deps = ["Accessors", "DataPipes", "InverseFunctions"]
+git-tree-sha1 = "837a4984b24b7f3a3f95ff52005c92c254c6a051"
+uuid = "6394faf6-06db-4fa8-b750-35ccc60383f7"
+version = "0.1.22"
+weakdeps = ["Dictionaries", "StructArrays"]
+
+    [deps.FlexiMaps.extensions]
+    DictionariesExt = "Dictionaries"
+    StructArraysExt = "StructArrays"
 
 [[deps.Fontconfig_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Pkg", "Zlib_jll"]
@@ -1056,6 +1150,12 @@ weakdeps = ["Random", "RecipesBase", "Statistics"]
     IntervalSetsRandomExt = "Random"
     IntervalSetsRecipesBaseExt = "RecipesBase"
     IntervalSetsStatisticsExt = "Statistics"
+
+[[deps.InverseFunctions]]
+deps = ["Test"]
+git-tree-sha1 = "68772f49f54b479fa88ace904f6127f0a3bb2e46"
+uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
+version = "0.1.12"
 
 [[deps.InvertedIndices]]
 git-tree-sha1 = "0dc7b50b8d436461be01300fd8cd45aa0274b038"
@@ -1946,14 +2046,11 @@ deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Re
 git-tree-sha1 = "cef0472124fab0695b58ca35a77c6fb942fdab8a"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "1.3.1"
+weakdeps = ["ChainRulesCore", "InverseFunctions"]
 
     [deps.StatsFuns.extensions]
     StatsFunsChainRulesCoreExt = "ChainRulesCore"
     StatsFunsInverseFunctionsExt = "InverseFunctions"
-
-    [deps.StatsFuns.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.StatsModels]]
 deps = ["DataAPI", "DataStructures", "LinearAlgebra", "Printf", "REPL", "ShiftedArrays", "SparseArrays", "StatsAPI", "StatsBase", "StatsFuns", "Tables"]
@@ -2236,6 +2333,7 @@ version = "3.5.0+0"
 # ╠═3c5e052c-f11e-4a8a-932f-786bf70aa8de
 # ╠═a5a7824d-095f-4d68-bf22-96f0a93901a3
 # ╠═18b61f75-4981-4988-9523-24700ae73a54
+# ╠═d051df13-fdb5-4a79-bc01-62b7da79ce46
 # ╠═4e1ce063-adf1-4b92-941f-90f3d41dbddb
 # ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
 # ╠═b227af86-000c-43c8-b738-1dbada91dc92
@@ -2255,10 +2353,14 @@ version = "3.5.0+0"
 # ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
 # ╠═73cb50ea-2b4b-46be-af5d-f0faca7763e0
 # ╠═3cdafbff-0b89-4371-9446-ef89e64f6eb9
-# ╠═f9a073a0-f2bf-4454-9352-edf76ae4fc9b
 # ╠═077e3609-a542-45ab-95be-a46ee49a43c9
 # ╠═a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 # ╠═5f3d39d9-273d-48f7-a86e-211ec5c3bd81
+# ╠═84a9bf82-521e-4f46-8b14-8356d6a886b8
+# ╠═0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
+# ╠═6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+# ╠═c23027c6-026b-4577-acc1-332c0b135853
+# ╠═5f4e146a-bc79-4725-b5ad-a23a2971a5fa
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
