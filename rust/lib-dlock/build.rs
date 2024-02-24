@@ -19,9 +19,6 @@ fn main() {
         .join("wrapper.h");
     let headers_path_str = headers_path.to_str().expect("Path is not a valid string");
 
-    // This is the path to the static library file.
-    let lib_path = libdir_path.join("libdlocks.a");
-
     let c_code_path = PathBuf::from("../../c");
 
     // xmake build
