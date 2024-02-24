@@ -2,6 +2,7 @@ extern crate bindgen;
 
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
     // This is the directory where the `c` library is located.
@@ -20,6 +21,15 @@ fn main() {
 
     // This is the path to the static library file.
     let lib_path = libdir_path.join("libdlocks.a");
+
+    let c_code_path = PathBuf::from("../../c");
+
+    // xmake build
+
+    Command::new("xmake")
+        .current_dir(c_code_path)
+        .status()
+        .expect("failed to build c code");
 
     // Tell cargo to look for shared libraries in the specified directory
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());

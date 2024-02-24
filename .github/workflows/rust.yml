@@ -17,12 +17,16 @@ jobs:
         working-directory: ./rust
     steps:
       - uses: rui314/setup-mold@v1
-      - uses: actions/checkout@v3
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install latest nightly
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
-          override: true
           components: rustfmt, clippy
       - name: Load/Store Cache
         uses: Swatinem/rust-cache@v2
