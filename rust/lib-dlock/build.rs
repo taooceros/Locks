@@ -5,6 +5,15 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    let c_code_path = PathBuf::from("../../c");
+
+    // xmake build
+
+    Command::new("xmake")
+        .current_dir(c_code_path)
+        .status()
+        .expect("failed to build c code");
+
     // This is the directory where the `c` library is located.
     let libdir_path = PathBuf::from("../../c/build/linux/x86_64/release")
         // Canonicalize the path as `rustc-link-search` requires an absolute
@@ -18,15 +27,6 @@ fn main() {
         .expect("cannot canonicalize path")
         .join("wrapper.h");
     let headers_path_str = headers_path.to_str().expect("Path is not a valid string");
-
-    let c_code_path = PathBuf::from("../../c");
-
-    // xmake build
-
-    Command::new("xmake")
-        .current_dir(c_code_path)
-        .status()
-        .expect("failed to build c code");
 
     // Tell cargo to look for shared libraries in the specified directory
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
