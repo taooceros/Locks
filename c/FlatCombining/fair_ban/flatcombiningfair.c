@@ -4,7 +4,7 @@
 
 #include "flatcombiningfair.h"
 #include <common.h>
-#include <immintrin.h>
+#include <x86intrin.h>
 #include <rdtsc.h>
 #include <stdio.h>
 

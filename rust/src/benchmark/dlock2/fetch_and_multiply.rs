@@ -1,8 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
-    cell::{OnceCell, RefCell},
     fmt::Display,
-    hint::{black_box, spin_loop},
+    hint::{black_box},
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},

@@ -1,6 +1,5 @@
 use std::{
     arch::x86_64::__rdtscp,
-    cell::{OnceCell, RefCell},
     fmt::Display,
     hint::{black_box, spin_loop},
     path::Path,
@@ -12,14 +11,13 @@ use std::{
     time::Duration,
 };
 
-use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
+
 use itertools::izip;
 use libdlock::dlock2::{DLock2, DLock2Delegate};
 
 use crate::{
     benchmark::{
         bencher::Bencher,
-        helper::create_plain_writer,
         records::{write_results, Records},
     },
     lock_target::DLock2Target,

@@ -117,8 +117,8 @@ impl RecordsBuilder {
         self.cpu_id.append_value(row.cpu_id as u64);
         self.thread_num.append_value(row.thread_num as u64);
         self.cpu_num.append_value(row.cpu_num as u64);
-        self.loop_count.append_value(row.loop_count as u64);
-        self.num_acquire.append_value(row.num_acquire as u64);
+        self.loop_count.append_value(row.loop_count);
+        self.num_acquire.append_value(row.num_acquire);
         self.cs_length.append_value(row.cs_length.as_nanos() as u64);
         self.is_combiner
             .append_option(row.is_combiner.as_ref().map(|v| v.iter().copied()));

@@ -1,4 +1,4 @@
-use std::{default, num::ParseIntError, sync::OnceLock, time::Duration};
+use std::{num::ParseIntError, sync::OnceLock, time::Duration};
 
 use clap::{Args, Subcommand, ValueEnum};
 use strum::{Display, EnumIter, IntoEnumIterator};

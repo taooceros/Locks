@@ -1,8 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
-    collections::LinkedList,
-    hint::{black_box, spin_loop},
+    hint::{black_box},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -14,11 +13,11 @@ use std::{
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 
-use clap::ValueEnum;
+
 use libdlock::dlock2::DLock2Delegate;
 use rand::Rng;
-use spin_sleep::SpinSleeper;
-use strum::{Display, EnumIter};
+
+
 
 use crate::{
     benchmark::{

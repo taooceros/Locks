@@ -1,5 +1,5 @@
 #include <common.h>
-#include <immintrin.h>
+#include <x86intrin.h>
 #include <rdtsc.h>
 #include <stdatomic.h>
 #include <stdbool.h>

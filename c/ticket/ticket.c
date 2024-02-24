@@ -1,7 +1,7 @@
 // ticket lock
 
 #include "ticket.h"
-#include <immintrin.h>
+#include <x86intrin.h>
 #include <stdatomic.h>
 
 void ticket_init(ticket_lock_t* lock)

@@ -1,5 +1,5 @@
 #include "flatcombining.h"
-#include <emmintrin.h>
+#include <x86intrin.h>
 #include <stdatomic.h>
 
 void fc_init(fc_lock_t* lock)
