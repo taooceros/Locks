@@ -1,3 +1,4 @@
+#include "shared.h"
 #include <ccsynch.h>
 #include <stdatomic.h>
 
@@ -35,7 +36,7 @@ static inline node_t* retrieveNode(cc_synch_t* lock)
 	return node;
 }
 
-void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args)
+void* cc_synch_lock(cc_synch_t* lock, func_ptr_t delegate, void* args)
 {
 	node_t* nextNode;
 	node_t* currentNode;

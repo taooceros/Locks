@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use clap::ValueEnum;
 use libdlock::{
-    c_binding::flatcombining::CFlatCombining,
+    c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},
     dlock::{
         ccsynch::CCSynch, ccsynch_fair_ban::CCBan, fc::fclock::FcLock, fc_fair_ban::FcFairBanLock,
         fc_fair_ban_slice::FcFairBanSliceLock, fc_sl::FCSL, fc_sl_naive::FCSLNaive, BenchmarkType,
@@ -117,8 +117,10 @@ pub enum DLock2Target {
     SpinLock,
     /// Benchmark U-SCL
     USCL,
-    /// Benchmark C_FC
-    C_FC,
+    /// Benchmark Flat Combining (C)
+    FC_C,
+    /// Benchmark CCSynch (C)
+    CC_C,
 }
 
 impl DLock2Target {
@@ -128,7 +130,8 @@ impl DLock2Target {
             | DLock2Target::FCBan
             | DLock2Target::CC
             | DLock2Target::CCBan
-            | DLock2Target::C_FC => true,
+            | DLock2Target::FC_C
+            | DLock2Target::CC_C => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -147,7 +150,8 @@ impl DLock2Target {
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
-            DLock2Target::C_FC => CFlatCombining::new(data, f).into(),
+            DLock2Target::FC_C => CFlatCombining::new(data, f).into(),
+            DLock2Target::CC_C => CCCSynch::new(data, f).into(),
         })
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    c_binding::flatcombining::CFlatCombining,
+    c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},
     dlock2::{cc::CCSynch, fc::FC},
     spin_lock::RawSpinLock,
 };
@@ -48,4 +48,5 @@ where
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),
     C_FC(CFlatCombining<T, F, I>),
+    C_CC(CCCSynch<T, F, I>),
 }
