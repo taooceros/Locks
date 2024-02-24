@@ -1,3 +1,4 @@
+add_rules("plugin.compile_commands.autoupdate", {outputdir = ".vscode"})
 add_rules("mode.debug", "mode.release")
 
 add_links("pthread")
@@ -17,6 +18,7 @@ end
 add_includedirs("FlatCombining/original")
 add_includedirs("FlatCombining/fair_ban")
 add_includedirs("FlatCombining/fair_pq")
+add_includedirs("u-scl/")
 add_includedirs("CCsynch/")
 add_includedirs("RCL/")
 add_includedirs("ticket/")
@@ -31,7 +33,8 @@ add_files("shared/*.c",
           "FlatCombining/**/*.c",
           "CCsynch/*.c",
           "RCL/*.c",
-          "ticket/*.c")
+          "ticket/*.c",
+          "u-scl/*.c")
 
 target("example")
     set_kind("binary")
@@ -45,3 +48,6 @@ target("lock_test")
     add_files("unit_test/*.c")
     set_targetdir("tests")
     set_arch("x86_64")
+
+target("dlocks")
+    set_kind("static")

@@ -5,62 +5,31 @@ use std::path::PathBuf;
 
 fn main() {
     // This is the directory where the `c` library is located.
-    let libdir_path = PathBuf::from("u-scl")
+    let libdir_path = PathBuf::from("../../c/build/linux/x86_64/release")
         // Canonicalize the path as `rustc-link-search` requires an absolute
         // path.
         .canonicalize()
         .expect("cannot canonicalize path");
 
     // This is the path to the `c` headers file.
-    let headers_path = libdir_path.join("fairlock.h");
+    let headers_path = PathBuf::from("binding")
+        .canonicalize()
+        .expect("cannot canonicalize path")
+        .join("wrapper.h");
     let headers_path_str = headers_path.to_str().expect("Path is not a valid string");
 
-    // This is the path to the intermediate object file for our library.
-    let obj_path = libdir_path.join("fairlock.o");
     // This is the path to the static library file.
-    let lib_path = libdir_path.join("libfairlock.a");
+    let lib_path = libdir_path.join("libdlocks.a");
 
     // Tell cargo to look for shared libraries in the specified directory
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
 
-    // Tell cargo to tell rustc to link our `fairlock` library. Cargo will
-    // automatically know it must look for a `libfairlock.a` file.
-    println!("cargo:rustc-link-lib=fairlock");
+    // Tell cargo to tell rustc to link our `dlocks` library. Cargo will
+    // automatically know it must look for a `libdlocks.a` file.
+    println!("cargo:rustc-link-lib=dlocks");
 
     // Tell cargo to invalidate the built crate whenever the header changes.
     println!("cargo:rerun-if-changed={}", headers_path_str);
-
-    // Run `clang` to compile the `hello.c` file into a `hello.o` object file.
-    // Unwrap if it is not possible to spawn the process.
-    if !std::process::Command::new("gcc")
-        .arg("-O2")
-        .arg("-c")
-        .arg("-o")
-        .arg(&obj_path)
-        .arg(libdir_path.join("fairlock.c"))
-        .output()
-        .expect("could not spawn `gcc`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not compile object file");
-    }
-
-    // Run `ar` to generate the `libhello.a` file from the `hello.o` file.
-    // Unwrap if it is not possible to spawn the process.
-    if !std::process::Command::new("ar")
-        .arg("rcs")
-        .arg(lib_path)
-        .arg(obj_path)
-        .output()
-        .expect("could not spawn `ar`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not emit library file");
-    }
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
@@ -69,6 +38,7 @@ fn main() {
         // The input header we would like to generate
         // bindings for.
         .header(headers_path_str)
+        .clang_arg("-I../../c/shared")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))

@@ -17,6 +17,7 @@ use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use clap::ValueEnum;
 use libdlock::dlock2::DLock2Delegate;
 use rand::Rng;
+use spin_sleep::SpinSleeper;
 use strum::{Display, EnumIter};
 
 use crate::{
@@ -131,10 +132,10 @@ where
                             response_times.push(Some(Duration::from_nanos(end - begin)));
                         }
 
-                        let non_cs_loop = rng.gen_range(1..=8);
+                        let non_cs_loop = rng.gen_range(1..=64);
 
-                        for _ in 0..non_cs_loop {
-                            spin_loop()
+                        for i in 0..non_cs_loop {
+                            black_box(i);
                         }
 
                         loop_count += 1;
