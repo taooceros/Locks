@@ -34,5 +34,4 @@ void fc_init(fc_lock_t* lock);
 
 void* fc_lock(fc_lock_t* lock, void* (*func_ptr)(void*), void* arg);
 
-
 #endif /* LOCK_FLAT_COMBINING_H */

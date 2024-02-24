@@ -1,7 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::{OnceCell, RefCell},
-    hint::{black_box},
+    hint::black_box,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -13,11 +13,8 @@ use std::{
 
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 
-
 use libdlock::dlock2::DLock2Delegate;
 use rand::Rng;
-
-
 
 use crate::{
     benchmark::{
@@ -38,7 +35,7 @@ pub fn lockfree_queue<'a>(bencher: &Bencher, queues: Vec<LockFreeQueue>) {
     }
 }
 
-pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync>(
+pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync + 'static>(
     bencher: &Bencher,
     queue: impl Fn() -> Q,
     targets: impl Iterator<Item = &'a DLock2Target>,

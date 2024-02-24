@@ -1,4 +1,5 @@
 use crate::{
+    c_binding::flatcombining::CFlatCombining,
     dlock2::{cc::CCSynch, fc::FC},
     spin_lock::RawSpinLock,
 };
@@ -19,7 +20,8 @@ pub mod mutex;
 pub mod spinlock;
 pub mod uscl;
 
-pub trait DLock2Delegate<T, I> = Fn(&mut T, I) -> I + Send + Sync;
+pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
+impl<T, I, F> DLock2Delegate<T, I> for F where F: Fn(&mut T, I) -> I + Send + Sync {}
 
 // We probably should have a slightly more restrictive bound on the trait
 #[enum_dispatch(DLock2Impl<T, I, F>)]
@@ -34,8 +36,8 @@ pub unsafe trait DLock2<I>: Send + Sync {
 #[derive(Debug, Display)]
 pub enum DLock2Impl<T, I, F>
 where
-    T: Send + Sync,
-    I: Send,
+    T: Send + Sync + 'static,
+    I: Send + 'static,
     F: DLock2Delegate<T, I> + 'static,
 {
     FC(FC<T, I, F, RawSpinLock>),
@@ -45,4 +47,5 @@ where
     SpinLock(DLock2SpinLock<T, I, F>),
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),
+    C_FC(CFlatCombining<T, F, I>),
 }

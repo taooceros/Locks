@@ -2,14 +2,12 @@ use std::sync::Mutex;
 
 use clap::ValueEnum;
 use libdlock::{
-    dlock::ccsynch::CCSynch,
-    dlock::ccsynch_fair_ban::CCBan,
-    dlock::fc::fclock::FcLock,
-    dlock::fc_fair_ban::FcFairBanLock,
-    dlock::fc_fair_ban_slice::FcFairBanSliceLock,
-    dlock::fc_sl::FCSL,
-    dlock::fc_sl_naive::FCSLNaive,
-    dlock::{BenchmarkType, DLockType},
+    c_binding::flatcombining::CFlatCombining,
+    dlock::{
+        ccsynch::CCSynch, ccsynch_fair_ban::CCBan, fc::fclock::FcLock, fc_fair_ban::FcFairBanLock,
+        fc_fair_ban_slice::FcFairBanSliceLock, fc_sl::FCSL, fc_sl_naive::FCSLNaive, BenchmarkType,
+        DLockType,
+    },
     dlock2::{
         self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
         uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
@@ -119,12 +117,18 @@ pub enum DLock2Target {
     SpinLock,
     /// Benchmark U-SCL
     USCL,
+    /// Benchmark C_FC
+    C_FC,
 }
 
 impl DLock2Target {
     pub fn is_dlock(&self) -> bool {
         match self {
-            DLock2Target::FC | DLock2Target::FCBan | DLock2Target::CC | DLock2Target::CCBan => true,
+            DLock2Target::FC
+            | DLock2Target::FCBan
+            | DLock2Target::CC
+            | DLock2Target::CCBan
+            | DLock2Target::C_FC => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -132,7 +136,7 @@ impl DLock2Target {
     pub fn to_locktype<T, I, F>(&self, data: T, _: I, f: F) -> Option<DLock2Impl<T, I, F>>
     where
         T: Send + Sync,
-        I: Send,
+        I: Send + 'static,
         F: DLock2Delegate<T, I>,
     {
         Some::<DLock2Impl<T, I, F>>(match self {
@@ -143,6 +147,7 @@ impl DLock2Target {
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
+            DLock2Target::C_FC => CFlatCombining::new(data, f).into(),
         })
     }
 }
