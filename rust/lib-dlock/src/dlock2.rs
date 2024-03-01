@@ -7,13 +7,15 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    cc_ban::CCBan, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock, uscl::DLock2USCL,
+    cc_ban::CCBan, fc_ban::FCBan, fc_sl::FCSL, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
+    uscl::DLock2USCL,
 };
 
 pub mod cc;
 pub mod cc_ban;
 pub mod fc;
 pub mod fc_ban;
+pub mod fc_sl;
 pub mod rcl;
 
 pub mod mutex;
@@ -44,6 +46,7 @@ where
     FCBan(FCBan<T, I, F, RawSpinLock>),
     CC(CCSynch<T, I, F>),
     CCBan(CCBan<T, I, F>),
+    FC_SL(FCSL<T, I, F, RawSpinLock>),
     SpinLock(DLock2SpinLock<T, I, F>),
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),

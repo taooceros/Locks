@@ -111,6 +111,8 @@ pub enum DLock2Target {
     CC,
     /// Benchmark CCSynch (Ban)
     CCBan,
+    /// Benchmark FC-SL
+    FC_SL,
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
@@ -131,7 +133,8 @@ impl DLock2Target {
             | DLock2Target::CC
             | DLock2Target::CCBan
             | DLock2Target::FC_C
-            | DLock2Target::CC_C => true,
+            | DLock2Target::CC_C
+            | DLock2Target::FC_SL => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -147,6 +150,7 @@ impl DLock2Target {
             DLock2Target::FCBan => FCBan::new(data, f).into(),
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
             DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
+            DLock2Target::FC_SL => dlock2::fc_sl::FCSL::new(data, f).into(),
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
