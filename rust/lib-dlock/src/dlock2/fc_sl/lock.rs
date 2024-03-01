@@ -61,7 +61,7 @@ where
     }
 
     fn push_node(&self, node: &mut Node<I>) {
-        let usage = unsafe { __rdtscp(&mut 0) };
+        let usage = node.usage;
 
         let usage_node = UsageNode {
             usage,
@@ -81,7 +81,7 @@ where
     fn combine(&self) {
         #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
-        let begin: u64;
+        let mut begin: u64;
 
         unsafe {
             begin = __rdtscp(&mut aux);
@@ -108,6 +108,12 @@ where
                         )
                         .into(),
                     );
+
+                    let end = __rdtscp(&mut aux);
+
+                    node.usage += end - begin;
+
+                    begin = end;
 
                     node.complete.store(true, Release);
                 }
