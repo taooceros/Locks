@@ -2,7 +2,7 @@ extern crate bindgen;
 
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
+
 
 fn main() {
     // let c_code_path = PathBuf::from("../../c");
@@ -15,11 +15,6 @@ fn main() {
     //     .expect("failed to build c code");
 
     // This is the directory where the `c` library is located.
-    let libdir_path = PathBuf::from("../../c/build/linux/x86_64/release")
-        // Canonicalize the path as `rustc-link-search` requires an absolute
-        // path.
-        .canonicalize()
-        .expect("cannot canonicalize path");
 
     cc::Build::new()
         .define("CYCLE_PER_US", "2400")
