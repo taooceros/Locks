@@ -1,5 +1,4 @@
 use std::{
-    self,
     collections::{BTreeSet, BinaryHeap},
 };
 

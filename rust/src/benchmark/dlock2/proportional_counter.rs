@@ -11,9 +11,8 @@ use std::{
     time::Duration,
 };
 
-
 use itertools::izip;
-use libdlock::dlock2::{DLock2, DLock2Delegate};
+use libdlock::dlock2::DLock2;
 
 use crate::{
     benchmark::{
