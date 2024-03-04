@@ -35,6 +35,7 @@ jobs:
           components: rustfmt, clippy
       - uses: mbrobbel/rustfmt-check@master
         with:
+          args: --manifest-path=rust/Cargo.toml
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Load/Store Cache
         uses: Swatinem/rust-cache@v2
