@@ -30,6 +30,6 @@ pub fn benchmark(
         options.duration,
         options.verbose,
     );
-    
+
     bencher.benchmark();
 }

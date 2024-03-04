@@ -1,10 +1,4 @@
-use std::{
-    borrow::Borrow,
-    cell::{RefCell},
-    collections::HashMap,
-    path::Path,
-    time::Duration,
-};
+use std::{borrow::Borrow, cell::RefCell, collections::HashMap, path::Path, time::Duration};
 
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
