@@ -3,7 +3,7 @@ use std::{
     arch::x86_64::__rdtscp, cell::SyncUnsafeCell, hint::spin_loop, ptr::{self, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
 };
 
-use crossbeam::utils::Backoff;
+
 use thread_local::ThreadLocal;
 
 use super::node::Node;

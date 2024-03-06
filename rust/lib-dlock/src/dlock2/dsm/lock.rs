@@ -3,12 +3,11 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::{SyncUnsafeCell, UnsafeCell},
     hint::spin_loop,
-    mem::MaybeUninit,
-    ptr::{self, null_mut, NonNull},
+    ptr::{self, null_mut},
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
 
-use crossbeam::utils::Backoff;
+
 use debug_unwraps::DebugUnwrapExt;
 use thread_local::ThreadLocal;
 

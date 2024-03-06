@@ -1,11 +1,11 @@
 use std::{
     cell::SyncUnsafeCell,
     ffi::c_void,
-    mem::{self, transmute, MaybeUninit},
-    ptr::{self, null_mut},
+    mem::{MaybeUninit},
+    ptr::{self},
 };
 
-use libffi::high::{Closure1, ClosureOnce1};
+
 
 use crate::{dlock2::DLock2, dlock2::DLock2Delegate, fc_init, fc_lock, fc_lock_t};
 

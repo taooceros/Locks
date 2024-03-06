@@ -1,7 +1,7 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::{SyncUnsafeCell},
     mem::MaybeUninit,
-    sync::atomic::{AtomicBool, AtomicPtr},
+    sync::atomic::{AtomicBool},
 };
 
 use crossbeam::utils::CachePadded;
