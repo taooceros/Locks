@@ -111,8 +111,10 @@ pub enum DLock2Target {
     CC,
     /// Benchmark CCSynch (Ban)
     CCBan,
+    /// Benchmark DSMSynch
+    DSM,
     /// Benchmark FC-SL
-    FC_SL,
+    FcSl,
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
@@ -120,9 +122,9 @@ pub enum DLock2Target {
     /// Benchmark U-SCL
     USCL,
     /// Benchmark Flat Combining (C)
-    FC_C,
+    FcC,
     /// Benchmark CCSynch (C)
-    CC_C,
+    CcC,
 }
 
 impl DLock2Target {
@@ -132,9 +134,10 @@ impl DLock2Target {
             | DLock2Target::FCBan
             | DLock2Target::CC
             | DLock2Target::CCBan
-            | DLock2Target::FC_C
-            | DLock2Target::CC_C
-            | DLock2Target::FC_SL => true,
+            | DLock2Target::DSM
+            | DLock2Target::FcC
+            | DLock2Target::CcC
+            | DLock2Target::FcSl => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -150,12 +153,13 @@ impl DLock2Target {
             DLock2Target::FCBan => FCBan::new(data, f).into(),
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
             DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
-            DLock2Target::FC_SL => dlock2::fc_sl::FCSL::new(data, f).into(),
+            DLock2Target::DSM => dlock2::dsm::DSMSynch::new(data, f).into(),
+            DLock2Target::FcSl => dlock2::fc_sl::FCSL::new(data, f).into(),
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
-            DLock2Target::FC_C => CFlatCombining::new(data, f).into(),
-            DLock2Target::CC_C => CCCSynch::new(data, f).into(),
+            DLock2Target::FcC => CFlatCombining::new(data, f).into(),
+            DLock2Target::CcC => CCCSynch::new(data, f).into(),
         })
     }
 }
