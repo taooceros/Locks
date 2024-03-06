@@ -7,7 +7,6 @@ use std::{
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
 
-
 use debug_unwraps::DebugUnwrapExt;
 use thread_local::ThreadLocal;
 
@@ -24,7 +23,7 @@ struct ThreadData<T> {
 }
 
 #[derive(Debug)]
-pub struct DSMSynch<T, I, F>
+pub struct DSMSynch<T, I, F, const H: u32 = 64>
 where
     F: DLock2Delegate<T, I>,
     I: Send,
@@ -60,9 +59,7 @@ impl<T> AsMutPtr for Node<T> {
     }
 }
 
-const H: u32 = 64;
-
-unsafe impl<T, I, F> DLock2<I> for DSMSynch<T, I, F>
+unsafe impl<T, I, F, const H: u32> DLock2<I> for DSMSynch<T, I, F, H>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
@@ -82,9 +79,9 @@ where
         unsafe {
             let myNode = &(*thread_data.nodes.get())[(1 - toggled) as usize];
 
-            myNode.wait.store(true, Release);
-            myNode.completed.store(false, Release);
-            myNode.next.store(std::ptr::null_mut(), Release);
+            myNode.wait.store_release(true);
+            myNode.completed.store_release(false);
+            myNode.next.store_release(null_mut());
 
             // announce the request
             myNode.data.get().write(data);
@@ -96,14 +93,14 @@ where
             if !myPredNode.is_null() {
                 let predNode = myPredNode.as_mut().unwrap_unchecked();
 
-                predNode.next.store(myNode.as_mut_ptr(), Release);
+                predNode.next.store_release(myNode.as_mut_ptr());
 
                 while myNode.wait.load_acquire() {
                     spin_loop();
                 }
 
                 if myNode.completed.load_acquire() {
-                    return ptr::read(myNode.data.get());
+                    return myNode.data.get().read();
                 }
             }
 
@@ -120,7 +117,7 @@ where
                 counter += 1;
 
                 tmp_node.data.get().write((self.delegate)(
-                    self.data.get().as_mut().unwrap_unchecked(),
+                    self.data.get().as_mut().debug_unwrap_unchecked(),
                     tmp_node.data.get().read(),
                 ));
 
@@ -145,14 +142,23 @@ where
             }
 
             if tmp_node.next.load_acquire().is_null() {
+                // This ordering might be wrong?
                 if self
                     .tail
-                    .compare_exchange(tmp_node.as_mut_ptr(), null_mut(), Release, Relaxed)
+                    .compare_exchange(tmp_node.as_mut_ptr(), null_mut(), Acquire, Relaxed)
                     .is_ok()
                 {
-                    return myNode.data.get().read();
+                    // The completed should always be true and wait should always be false because no other node is avaliable in the list
+                    // It is not sure whether the acquire ordering is required because the current thread
+                    // should be the combinier which means it should handle its own node.
+                    if myNode.completed.load_acquire() {
+                        return myNode.data.get().read();
+                    }
+
+                    unreachable!("This should not happen");
                 }
 
+                // to wait for insertion and set the wait flag to be false
                 while tmp_node.next.load_acquire().is_null() {
                     spin_loop();
                 }
@@ -162,7 +168,7 @@ where
                 .next
                 .load_acquire()
                 .as_ref()
-                .unwrap_unchecked()
+                .debug_unwrap_unchecked()
                 .wait
                 .store(false, Release);
 
