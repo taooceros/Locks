@@ -2,14 +2,12 @@ use std::sync::Mutex;
 
 use clap::ValueEnum;
 use libdlock::{
-    dlock::ccsynch::CCSynch,
-    dlock::ccsynch_fair_ban::CCBan,
-    dlock::fc::fclock::FcLock,
-    dlock::fc_fair_ban::FcFairBanLock,
-    dlock::fc_fair_ban_slice::FcFairBanSliceLock,
-    dlock::fc_sl::FCSL,
-    dlock::fc_sl_naive::FCSLNaive,
-    dlock::{BenchmarkType, DLockType},
+    c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},
+    dlock::{
+        ccsynch::CCSynch, ccsynch_fair_ban::CCBan, fc::fclock::FcLock, fc_fair_ban::FcFairBanLock,
+        fc_fair_ban_slice::FcFairBanSliceLock, fc_sl::FCSL, fc_sl_naive::FCSLNaive, BenchmarkType,
+        DLockType,
+    },
     dlock2::{
         self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
         uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
@@ -113,18 +111,30 @@ pub enum DLock2Target {
     CC,
     /// Benchmark CCSynch (Ban)
     CCBan,
+    /// Benchmark FC-SL
+    FC_SL,
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
     SpinLock,
     /// Benchmark U-SCL
     USCL,
+    /// Benchmark Flat Combining (C)
+    FC_C,
+    /// Benchmark CCSynch (C)
+    CC_C,
 }
 
 impl DLock2Target {
     pub fn is_dlock(&self) -> bool {
         match self {
-            DLock2Target::FC | DLock2Target::FCBan | DLock2Target::CC | DLock2Target::CCBan => true,
+            DLock2Target::FC
+            | DLock2Target::FCBan
+            | DLock2Target::CC
+            | DLock2Target::CCBan
+            | DLock2Target::FC_C
+            | DLock2Target::CC_C
+            | DLock2Target::FC_SL => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -132,7 +142,7 @@ impl DLock2Target {
     pub fn to_locktype<T, I, F>(&self, data: T, _: I, f: F) -> Option<DLock2Impl<T, I, F>>
     where
         T: Send + Sync,
-        I: Send,
+        I: Send + 'static,
         F: DLock2Delegate<T, I>,
     {
         Some::<DLock2Impl<T, I, F>>(match self {
@@ -140,9 +150,12 @@ impl DLock2Target {
             DLock2Target::FCBan => FCBan::new(data, f).into(),
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
             DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
+            DLock2Target::FC_SL => dlock2::fc_sl::FCSL::new(data, f).into(),
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
+            DLock2Target::FC_C => CFlatCombining::new(data, f).into(),
+            DLock2Target::CC_C => CCCSynch::new(data, f).into(),
         })
     }
 }

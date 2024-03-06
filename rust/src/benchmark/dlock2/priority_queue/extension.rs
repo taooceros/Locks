@@ -1,7 +1,4 @@
-use std::{
-    self,
-    collections::{BTreeSet, BinaryHeap},
-};
+use std::collections::{BTreeSet, BinaryHeap};
 
 use libdlock::dlock2::DLock2;
 

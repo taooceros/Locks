@@ -16,6 +16,7 @@ mod unit_test;
 pub mod dlock;
 pub mod dlock2;
 pub mod parker;
+pub mod c_binding;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 

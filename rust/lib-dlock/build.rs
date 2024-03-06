@@ -2,24 +2,32 @@ extern crate bindgen;
 
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
+
 
 fn main() {
-    let c_code_path = PathBuf::from("../../c");
+    // let c_code_path = PathBuf::from("../../c");
 
     // xmake build
 
-    Command::new("xmake")
-        .current_dir(c_code_path)
-        .status()
-        .expect("failed to build c code");
+    // Command::new("xmake")
+    //     .current_dir(c_code_path)
+    //     .status()
+    //     .expect("failed to build c code");
 
     // This is the directory where the `c` library is located.
-    let libdir_path = PathBuf::from("../../c/build/linux/x86_64/release")
-        // Canonicalize the path as `rustc-link-search` requires an absolute
-        // path.
-        .canonicalize()
-        .expect("cannot canonicalize path");
+
+    cc::Build::new()
+        .define("CYCLE_PER_US", "2400")
+        .define("FC_THREAD_MAX_CYCLE", "CYCLE_PER_MS")
+        .define("_GNU_SOURCE", None)
+        .files([
+            "../../c/CCsynch/ccsynch.c",
+            "../../c/FlatCombining/original/flatcombining.c",
+            "../../c/u-scl/fairlock.c",
+        ])
+        .include("../../c/shared")
+        .opt_level(2)
+        .compile("dlock");
 
     // This is the path to the `c` headers file.
     let headers_path = PathBuf::from("binding")
@@ -27,16 +35,6 @@ fn main() {
         .expect("cannot canonicalize path")
         .join("wrapper.h");
     let headers_path_str = headers_path.to_str().expect("Path is not a valid string");
-
-    // Tell cargo to look for shared libraries in the specified directory
-    println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
-
-    // Tell cargo to tell rustc to link our `dlocks` library. Cargo will
-    // automatically know it must look for a `libdlocks.a` file.
-    println!("cargo:rustc-link-lib=dlocks");
-
-    // Tell cargo to invalidate the built crate whenever the header changes.
-    println!("cargo:rerun-if-changed={}", headers_path_str);
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for

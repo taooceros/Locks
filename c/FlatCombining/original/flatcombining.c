@@ -1,6 +1,7 @@
 #include "flatcombining.h"
-#include <x86intrin.h>
+#include <assert.h>
 #include <stdatomic.h>
+#include <x86intrin.h>
 
 void fc_init(fc_lock_t* lock)
 {
@@ -21,7 +22,7 @@ static void scanCombineApply(fc_lock_t* lock)
 		{
 			current->age = lock->pass;
 			current->response = current->delegate(current->args);
-			current->delegate = NULL;
+			atomic_store_explicit(&current->delegate, NULL, memory_order_release);
 		}
 		current = current->next;
 	}
@@ -100,7 +101,7 @@ acquire_lock_or_spin:
 	if(lock->flag)
 	{
 	spin_and_wait_or_retry:
-		while(node->delegate != NULL)
+		while(atomic_load_explicit(&node->delegate, memory_order_acquire) != NULL)
 		{
 			if(++counter > 100)
 			{

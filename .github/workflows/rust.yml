@@ -11,6 +11,7 @@ env:
 
 jobs:
   build:
+    permissions: write-all
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -22,9 +23,9 @@ jobs:
           version: latest
           platform: x64
       - uses: rui314/setup-mold@v1
-      - uses: xmake-io/github-action-setup-xmake@v1
-        with:
-          xmake-version: latest
+      # - uses: xmake-io/github-action-setup-xmake@v1
+      #   with:
+      #     xmake-version: latest
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -33,6 +34,10 @@ jobs:
         with:
           toolchain: nightly
           components: rustfmt, clippy
+      - uses: mbrobbel/rustfmt-check@master
+        with:
+          args: --manifest-path=rust/Cargo.toml
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Load/Store Cache
         uses: Swatinem/rust-cache@v2
         with:

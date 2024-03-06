@@ -35,6 +35,6 @@ typedef struct cc_synch
 
 void cc_synch_init(cc_synch_t* cc);
 
-void* cc_synch_lock(cc_synch_t* lock, void* delegate, void* args);
+void* cc_synch_lock(cc_synch_t* lock, func_ptr_t delegate, void* args);
 
 #endif //LOCKS_CCSYNCH_H

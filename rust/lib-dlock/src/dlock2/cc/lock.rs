@@ -1,9 +1,6 @@
 use crate::dlock2::DLock2;
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    ptr::{self, NonNull},
-    sync::atomic::{AtomicPtr, Ordering::*},
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, hint::spin_loop, ptr::{self, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
 };
 
 use crossbeam::utils::Backoff;
@@ -43,7 +40,7 @@ where
     }
 }
 
-const H: u32 = 16;
+const H: u32 = 64;
 
 unsafe impl<T, I, F> DLock2<I> for CCSynch<T, I, F>
 where
@@ -76,12 +73,13 @@ where
                 .store(current_ptr, Relaxed)
         }
 
-        let backoff = Backoff::new();
+        // let backoff = Backoff::new();
 
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
             // spin
-            backoff.snooze();
+            // backoff.snooze();
+            spin_loop()
         }
 
         // check whether the current node is completed

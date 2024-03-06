@@ -1,7 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     fmt::Display,
-    hint::{black_box},
+    hint::black_box,
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
