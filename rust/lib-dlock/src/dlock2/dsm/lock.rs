@@ -3,6 +3,7 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::{SyncUnsafeCell, UnsafeCell},
     hint::spin_loop,
+    mem::MaybeUninit,
     ptr::{self, null_mut},
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
@@ -84,7 +85,7 @@ where
             myNode.next.store_release(null_mut());
 
             // announce the request
-            myNode.data.get().write(data);
+            myNode.data.get().write(MaybeUninit::new(data));
 
             // insert the node into the queue
             let myPredNode = self.tail.swap(myNode.as_mut_ptr(), AcqRel);
@@ -100,7 +101,7 @@ where
                 }
 
                 if myNode.completed.load_acquire() {
-                    return myNode.data.get().read();
+                    return myNode.data.get().read().assume_init();
                 }
             }
 
@@ -116,10 +117,10 @@ where
             loop {
                 counter += 1;
 
-                tmp_node.data.get().write((self.delegate)(
+                tmp_node.data.get().write(MaybeUninit::new((self.delegate)(
                     self.data.get().as_mut().debug_unwrap_unchecked(),
-                    tmp_node.data.get().read(),
-                ));
+                    tmp_node.data.get().read().assume_init(),
+                )));
 
                 tmp_node.completed.store_release(true);
                 tmp_node.wait.store_release(false);
@@ -152,7 +153,7 @@ where
                     // It is not sure whether the acquire ordering is required because the current thread
                     // should be the combinier which means it should handle its own node.
                     if myNode.completed.load_acquire() {
-                        return myNode.data.get().read();
+                        return myNode.data.get().read().assume_init();
                     }
 
                     unreachable!("This should not happen");
@@ -181,7 +182,7 @@ where
                 *thread_data.combiner_time_stat.get() += end - begin;
             }
 
-            return myNode.data.get().read();
+            return myNode.data.get().read().assume_init();
         }
     }
 
