@@ -2,7 +2,7 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     ptr::{self, null_mut, NonNull},
-    sync::atomic::{AtomicPtr, AtomicU32, Ordering::*},
+    sync::atomic::{AtomicPtr, Ordering::*},
 };
 
 use crossbeam::utils::{Backoff, CachePadded};

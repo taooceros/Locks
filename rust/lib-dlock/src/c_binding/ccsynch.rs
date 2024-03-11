@@ -1,13 +1,13 @@
 use std::{
     cell::SyncUnsafeCell,
     ffi::c_void,
-    mem::{self, transmute, MaybeUninit},
-    ptr::{self, null_mut},
+    mem::{MaybeUninit},
+    ptr::{self},
 };
 
-use libffi::high::{Closure1, ClosureOnce1};
 
-use crate::{cc_synch_init, cc_synch_lock, cc_synch_t, dlock2::{DLock2, DLock2Delegate}, fc_init, fc_lock, fc_lock_t};
+
+use crate::{cc_synch_init, cc_synch_lock, cc_synch_t, dlock2::{DLock2, DLock2Delegate}};
 
 #[derive(Debug)]
 pub struct CCCSynch<T, F, I>
