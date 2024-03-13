@@ -257,11 +257,11 @@ fn start_benchmark(
                     let mut waiter_latency =
                         Vec::with_capacity(is_combiners.len() - combiner_count);
 
-                    for (latency, is_combiner) in zip(latencies, is_combiners.iter()) {
+                    for (latency, is_combiner) in zip(latencies.iter(), is_combiners.iter()) {
                         if *is_combiner {
-                            combiner_latency.push(latency);
+                            combiner_latency.push(*latency);
                         } else {
-                            waiter_latency.push(latency);
+                            waiter_latency.push(*latency);
                         }
                     }
 

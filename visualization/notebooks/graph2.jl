@@ -72,14 +72,12 @@ locknames = @distinct(df_origin, :locktype)[!, :locktype];
 md"""
 Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
 
-Wait Type: $(@bind waiter_type Select(["Spin Parker", "BlockParker"]))
-
 Include Other Lock $(@bind include_other_lock CheckBox(true))
 """
 
 # ╔═╡ acb5e252-26e7-4335-9ab0-d30ecba9427a
 df1 = @chain df_origin begin
-	@subset(:locktype .∈ Ref(locktypes), :waiter_type .== waiter_type .|| (include_other_lock .&& :waiter_type .== ""))
+	@subset(:locktype .∈ Ref(locktypes))
 end;
 
 # ╔═╡ 5587f88f-2b80-46c1-908e-64284e040576
@@ -107,11 +105,24 @@ draw(count_plt; figure=(; size=(1000, 600)),
 
 # ╔═╡ 5d719fea-c747-4e7a-a837-d1d043b7d655
 md"""
-# Hold Time
+# Per Thread Iteration
 """
 
 # ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
 @bind thread_num_hold_time Select(thread_nums; default=16)
+
+# ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
+begin
+	hold_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_hold_time)
+	end
+end;
+
+# ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
+per_iteration_plt = data(hold_time_df) * mapping(:id => nonnumeric, :loop_count, color=:locktype) * (visual(Lines) + visual(Scatter));
+
+# ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
+draw(per_iteration_plt, figure=(;size=(1400,600)))
 
 # ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
 md"""
@@ -120,20 +131,6 @@ md"""
 
 # ╔═╡ 3057df9f-c907-4228-add5-f97213b2c6b5
 @bind thread_num_combine_time Select(thread_nums; default=16)
-
-# ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
-begin
-	hold_time_df = @chain df1 begin
-		@subset(:thread_num .== thread_num_combine_time)
-		dropmissing(:hold_time)
-	end
-end;
-
-# ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
-hold_time_plt = data(hold_time_df) * mapping(:id => nonnumeric, :hold_time, color=:locktype) * (visual(Lines) + visual(Scatter));
-
-# ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
-draw(hold_time_plt, figure=(;size=(1400,600)))
 
 # ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
 begin
