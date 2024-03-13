@@ -1,12 +1,12 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    ptr::{self, null_mut, NonNull},
-    sync::atomic::{AtomicPtr, AtomicU32, Ordering::*},
+    ptr::{self},
+    sync::atomic::{AtomicPtr, Ordering::*},
 };
 
 use crossbeam::utils::{Backoff, CachePadded};
-use crossbeam_skiplist::{SkipMap, SkipSet};
+use crossbeam_skiplist::{SkipSet};
 use derivative::Derivative;
 use thread_local::ThreadLocal;
 

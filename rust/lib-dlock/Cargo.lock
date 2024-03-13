@@ -462,6 +462,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug_unwraps"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4035b0e7d016a076349f24ea97ddd9ae6c506bfb717bba52cd30616d10ecc1d2"
+
+[[package]]
 name = "deranged"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -800,12 +806,12 @@ dependencies = [
  "crossbeam",
  "crossbeam-skiplist",
  "csv",
+ "debug_unwraps",
  "derivative",
  "enum_dispatch",
  "fastrand",
  "intrusive-collections",
  "itertools 0.12.1",
- "libffi",
  "linux-futex",
  "num_cpus",
  "once_cell",
@@ -817,25 +823,6 @@ dependencies = [
  "strum",
  "thread_local",
  "trait-set",
-]
-
-[[package]]
-name = "libffi"
-version = "3.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce826c243048e3d5cec441799724de52e2d42f820468431fc3fceee2341871e2"
-dependencies = [
- "libc",
- "libffi-sys",
-]
-
-[[package]]
-name = "libffi-sys"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36115160c57e8529781b4183c2bb51fdc1f6d6d1ed345591d84be7703befb3c"
-dependencies = [
- "cc",
 ]
 
 [[package]]

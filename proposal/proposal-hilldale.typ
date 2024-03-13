@@ -28,25 +28,22 @@
     effectiveness of a novel delegation-styled locking mechanism that
     integrates the concepts of delegation and usage fairness. Prior research
     has identified challenges with scheduler subversion arising from locks that
-    adapt a no or strictly acquisition-level fairness, which is common in
-    current delegation-styled locks. Furthermore, some delegation locks will
-    elect a combiner from participants, which often compromise the combiner's
-    latency due to the additional workload it assumes for other threads. They
-    suggest treating lock usage as a resource, akin to CPU time slices,
-    warranting a usage-level fairness. I aim to enhance state-of-the-art
-    combining locks (#fc, #ccsync, #hsynch, and #dsmsync) and client-server
-    locks (#RCL and #ffwd) by incorporating a usage-fairness principle. The
-    straightforward "banning" strategy will be implemented to ensure a
-    proportional allocation of lock usage time across threads. A stochastic
-    methods will be employed to proportionally distribute the voluntary
-    workload based on lock usage. In addition, I plan to devise a new
-    scheduling strategy inherently aligned with the usage-fairness principle by
-    leveraging a concurrent relaxed Priority Queue. The efficacy of these
-    enhanced locking mechanisms will be tested through micro-benchmarks on
-    various commonly used Concurrent Objects complemented by an in-depth
-    latency analysis.
-     
-    #h(1fr) #total.words
+    adapt strict acquisition-level fairness, which is common in state of art
+    delegation-styled locks. Furthermore, some delegation locks dynamically
+    elect a combiner from participants. This often compromise the combiner's
+    latency as it introduces additional workload for the combiner. They suggest
+    treating lock usage as a resource, akin to CPU time slices, warranting a
+    usage-level fairness. I aim to enhance state-of-the-art combining locks (#fc, #ccsync, #hsynch,
+    and #dsmsync) and client-server locks (#RCL and #ffwd) by incorporating a
+    usage-fairness principle. The straightforward "banning" strategy will be
+    implemented to ensure a proportional allocation of lock usage time across
+    threads. A stochastic methods will be employed to proportionally distribute
+    the voluntary workload based on lock usage. In addition, I plan to devise a
+    new scheduling strategy inherently aligned with the usage-fairness
+    principle by leveraging a concurrent relaxed Priority Queue. The efficacy
+    of these enhanced locking mechanisms will be tested through
+    micro-benchmarks on various commonly used Concurrent Objects complemented
+    by an in-depth latency analysis.
   ],
 )
 
@@ -54,14 +51,16 @@
 
 = Introduction
 
-#indent In the current landscape of computational technology, the
-imperative to enhance Central Processing Unit (CPU) performance has
-transitioned from escalating clock speeds to multiplying core counts. This
-evolution has given rise to multi-core architectures, which have become
-ubiquitous across computer systems. The scalability of applications on such
-multi-core infrastructures is predicated on Amdahl's Law, which postulates
-that the theoretical maximum improvement achievable through parallelization
-is limited by the code that must remain sequential.
+#indent In the current landscape of computational technology, the focus to
+enhance Central Processing Unit (CPU) performance has transitioned from
+increasing clock speeds to multiplying core counts. This evolution has
+given rise to multi-core architectures, which have become ubiquitous across
+computer systems. The scalability of applications on such multi-core
+infrastructures is predicated on Amdahl's Law, which postulates that the
+theoretical maximum improvement achievable through parallelization is
+limited by the code that must remain sequential.
+
+
 
 A principal challenge in parallel computing is thread coordination via
 shared resources. Lock-based synchronization mechanisms are widely employed
@@ -104,18 +103,18 @@ within their critical sections, as the presence of a lock can disrupt the
 CPU's scheduling policy, which intends to allocate equitable processing
 time to concurrent threads. Envision a scenario where interactive threads
 engaging with users are in contention with batch threads performing
-background tasks, all synchronized by a lock. Absent a principle of usage
-fairness, the interactive threads may suffer from inordinate delays in lock
-acquisition, thereby subverting the CPU scheduler's objective of ensuring
-prompt response times for interactive tasks. Moreover, the issue is
-magnified in the context of delegation-styled locks, where the elected
-combiner thread may be burdened with an unequal share of work. If an
-interactive thread is chosen as the combiner, it could lead to severe
-latency issues for the user, thus diminishing the attractiveness of
+background tasks, all synchronized by a lock. In the absense of principle
+of usage fairness, the interactive threads may suffer from inordinate
+delays in lock acquisition, thereby subverting the CPU scheduler's
+objective of ensuring prompt response times for interactive tasks.
+Moreover, the issue is magnified in the context of delegation-styled locks,
+where the elected combiner thread may be burdened with an unequal share of
+work. If an interactive thread is chosen as the combiner, it could lead to
+severe latency issues for the user, thus diminishing the attractiveness of
 combining locks in systems with disparate workloads.
 
 To remedy this problem, I propose to integrate existing delegation-styled
-with the concept of _usage-fairness_ by employing the _banning_ strategy
+lock with the concept of _usage-fairness_ by employing the _banning_ strategy
 @scl_ref. By restricting access to the lock according to their usage, we
 can prevent any single thread from monopolizing CPU resources, thus
 upholding the principle of equitable computational opportunity amongst
@@ -137,11 +136,13 @@ acquire the lock. This methodology promises an equitable distribution of
 lock usage among threads over time given the assumption that all threads
 are actively contenting for the lock.
 
-To relax the assumption, I propose to develop a bespoke combining
-strategy that adheres to the usage-fairness principle analogous to the CFS
+To relax the assumption, I propose to develop a bespoke combining strategy
+that adheres to the usage-fairness principle analogous to the CFS
 (Completely Fair Scheduler) employed in the Linux kernel. The combiner will
 prioritize tasks that have consumed the least amount of lock usage, much
-like the CFS selects tasks with the minimum time slice used. Specifically, I plan to embrace some state of art concurrent priority queue and some relaxed variants to build a new combining strategy that is inherently aligned with the usage-fairness principle @spraylist_ref @shavit2000skiplist.
+like the CFS selects tasks with the minimum time slice used. The strategy's
+foundation will be the integration of sophisticated concurrent priority
+queues and their relaxed variants @spraylist_ref @shavit2000skiplist.
 
 == Experiment
 
@@ -209,6 +210,8 @@ yield a lock mechanism that is both equitable and efficient.
 #indent Total Project Hours: 550 (300 for Spring and Summer 2024 and 250
 for Fall 2024)
 
+
+
 == Spring 2024
 - Implementation of the delegation-styled lock that adapts usage-fairness
   principle based on banning.
@@ -242,4 +245,4 @@ runtime that adapts to lock-usage patterns.
 
 #set par(leading: 0.5em)
 #set block(above: 0em, below: 0.5em)
-#bibliography("literature.yml", style: "acm-sig-proceedings.csl")
+#bibliography("../reference/literature.yml", style: "../reference/acm-sig-proceedings.csl")

@@ -54,11 +54,8 @@ unsafe impl RawSimpleLock for RawSpinLock {
 #[derive(Debug)]
 pub struct SpinLock<T> {
     lock: RawSpinLock,
-    data: UnsafeCell<T>,
+    data: SyncUnsafeCell<T>,
 }
-
-unsafe impl<T: Send> Send for SpinLock<T> {}
-unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 unsafe impl<'s, T> Send for Guard<'s, T> {}
 unsafe impl<'s, T: Send + Sync> Sync for Guard<'s, T> {}
@@ -71,7 +68,7 @@ impl<T> SpinLock<T> {
     pub fn new(data: T) -> Self {
         Self {
             lock: RawSpinLock::new(),
-            data: UnsafeCell::new(data),
+            data: SyncUnsafeCell::new(data),
         }
     }
 

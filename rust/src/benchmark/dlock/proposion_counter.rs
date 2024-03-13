@@ -6,6 +6,7 @@ use itertools::Itertools;
 use std::cell::{OnceCell, RefCell};
 
 use std::fs::File;
+use std::hint::spin_loop;
 use std::path::Path;
 use std::thread::current;
 use zstd::stream::AutoFinishEncoder;
@@ -218,6 +219,10 @@ fn thread_job(
             }
             hold_time += timer.now().duration_since(begin);
         });
+
+        for _ in 1..8 {
+            spin_loop();
+        }
 
         if non_cs_duration > Duration::ZERO {
             spin_sleep::sleep(non_cs_duration);

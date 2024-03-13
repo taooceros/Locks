@@ -1,9 +1,12 @@
 use crate::dlock2::DLock2;
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, hint::spin_loop, ptr::{self, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
+    arch::x86_64::__rdtscp,
+    cell::SyncUnsafeCell,
+    hint::spin_loop,
+    ptr::{self, NonNull},
+    sync::atomic::{AtomicPtr, Ordering::*},
 };
 
-use crossbeam::utils::Backoff;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
@@ -16,7 +19,7 @@ struct ThreadData<T> {
 }
 
 #[derive(Debug)]
-pub struct CCSynch<T, I, F>
+pub struct CCSynch<T, I, F, const H: u32 = 64>
 where
     F: DLock2Delegate<T, I>,
 {
@@ -40,9 +43,7 @@ where
     }
 }
 
-const H: u32 = 64;
-
-unsafe impl<T, I, F> DLock2<I> for CCSynch<T, I, F>
+unsafe impl<T, I, F, const H: u32> DLock2<I> for CCSynch<T, I, F, H>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
