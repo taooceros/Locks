@@ -233,13 +233,13 @@ fn start_benchmark(
                                 let end = unsafe { __rdtscp(&mut aux) };
                                 latencies.push(end - begin);
                                 is_combiners.push(is_combiner);
-                            } else {
-                                unreachable!("Should not happen")
                             }
 
                             if stat_hold_time {
                                 hold_time += current_hold_time;
                             }
+                        } else {
+                            unreachable!();
                         }
 
                         loop_count += cs_loop;
