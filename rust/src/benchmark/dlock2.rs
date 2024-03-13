@@ -40,6 +40,7 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 non_cs_loops,
                 file_name,
                 include_lock_free,
+                stat_hold_time,
             } => proportional_counter(
                 bencher,
                 file_name.as_deref().unwrap_or_else(|| {
@@ -52,6 +53,7 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 cs_loops.iter().copied(),
                 non_cs_loops.iter().copied(),
                 *include_lock_free,
+                *stat_hold_time,
             ),
             DLock2Experiment::FetchAndMultiply { include_lock_free } => {
                 fetch_and_multiply(bencher, targets.iter(), *include_lock_free)

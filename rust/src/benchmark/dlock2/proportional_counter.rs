@@ -1,7 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     fmt::Display,
-    hint::{black_box, spin_loop},
+    hint::black_box,
     iter::zip,
     path::Path,
     sync::{
@@ -36,17 +36,8 @@ unsafe impl DLock2<Data> for FetchAddDlock2 {
         if let Data::Input {
             thread_id,
             data: loop_limit,
-            stat_response_time,
         } = input
         {
-            let timestamp = unsafe {
-                if stat_response_time {
-                    __rdtscp(&mut 0)
-                } else {
-                    0
-                }
-            };
-
             // it is very important to have black_box here
             let mut loop_limit = loop_limit;
 
@@ -58,8 +49,8 @@ unsafe impl DLock2<Data> for FetchAddDlock2 {
             }
 
             return Data::Output {
-                timestamp,
-                is_combiner: current().id() == thread_id,
+                hold_time: 0,
+                is_combiner: true,
                 data: last_value + 1,
             };
         }
@@ -85,46 +76,63 @@ pub fn proportional_counter<'a>(
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
     include_lock_free: bool,
+    stat_hold_time: bool,
 ) {
     for target in targets {
-        let lock = target.to_locktype(0usize, Data::default(), |data: &mut usize, input: Data| {
-            let data = black_box(data);
-            let input = black_box(input);
+        let lock = target.to_locktype(
+            0usize,
+            Data::default(),
+            move |data: &mut usize, input: Data| {
+                let data = black_box(data);
+                let input = black_box(input);
 
-            if let Data::Input {
-                thread_id,
-                data: loop_limit,
-                stat_response_time,
-            } = input
-            {
-                let timestamp = unsafe {
-                    if stat_response_time {
-                        __rdtscp(&mut 0)
+                if let Data::Input {
+                    thread_id,
+                    data: loop_limit,
+                } = input
+                {
+                    let timestamp = unsafe {
+                        if stat_hold_time {
+                            __rdtscp(&mut 0)
+                        } else {
+                            0
+                        }
+                    };
+
+                    // it is very important to have black_box here
+                    let mut loop_limit = black_box(loop_limit);
+
+                    while black_box(loop_limit) > 0 {
+                        *data += 1;
+                        loop_limit -= 1;
+                    }
+
+                    let hold_time = if stat_hold_time {
+                        let end = unsafe { __rdtscp(&mut 0) };
+                        end - timestamp
                     } else {
                         0
-                    }
-                };
+                    };
 
-                // it is very important to have black_box here
-                let mut loop_limit = black_box(loop_limit);
-
-                while black_box(loop_limit) > 0 {
-                    *data += 1;
-                    loop_limit -= 1;
+                    return Data::Output {
+                        hold_time,
+                        is_combiner: current().id() == thread_id,
+                        data: *data,
+                    };
                 }
 
-                return Data::Output {
-                    timestamp,
-                    is_combiner: current().id() == thread_id,
-                    data: *data,
-                };
-            }
-
-            panic!("Invalid input")
-        });
+                panic!("Invalid input")
+            },
+        );
 
         if let Some(lock) = lock {
-            let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
+            let records = start_benchmark(
+                bencher,
+                stat_hold_time,
+                cs_loop.clone(),
+                non_cs_loop.clone(),
+                lock,
+            );
             finish_benchmark(&bencher.output_path, file_name, records);
         }
     }
@@ -134,7 +142,13 @@ pub fn proportional_counter<'a>(
             data: AtomicUsize::new(0),
         };
 
-        let records = start_benchmark(bencher, cs_loop.clone(), non_cs_loop.clone(), lock);
+        let records = start_benchmark(
+            bencher,
+            stat_hold_time,
+            cs_loop.clone(),
+            non_cs_loop.clone(),
+            lock,
+        );
         finish_benchmark(&bencher.output_path, file_name, records);
     }
 }
@@ -146,10 +160,9 @@ pub enum Data {
     Input {
         data: usize,
         thread_id: ThreadId,
-        stat_response_time: bool,
     },
     Output {
-        timestamp: u64,
+        hold_time: u64,
         is_combiner: bool,
         data: usize,
     },
@@ -157,6 +170,7 @@ pub enum Data {
 
 fn start_benchmark(
     bencher: &Bencher,
+    stat_hold_time: bool,
     cs_loop: impl Iterator<Item = usize> + Clone,
     non_cs_loop: impl Iterator<Item = usize> + Clone,
     lock_target: impl DLock2<Data> + 'static + Display,
@@ -194,8 +208,9 @@ fn start_benchmark(
                     let data = Data::Input {
                         data: cs_loop,
                         thread_id: current().id(),
-                        stat_response_time,
                     };
+
+                    let mut hold_time = 0;
 
                     while !stop_signal.load(Ordering::Acquire) {
                         let begin = if stat_response_time {
@@ -208,13 +223,22 @@ fn start_benchmark(
 
                         num_acquire += 1;
 
-                        if stat_response_time {
-                            if let Data::Output { is_combiner, .. } = output {
+                        if let Data::Output {
+                            is_combiner,
+                            hold_time: current_hold_time,
+                            ..
+                        } = output
+                        {
+                            if stat_response_time {
                                 let end = unsafe { __rdtscp(&mut aux) };
                                 latencies.push(end - begin);
                                 is_combiners.push(is_combiner);
                             } else {
-                                panic!("Invalid output");
+                                unreachable!("Should not happen")
+                            }
+
+                            if stat_hold_time {
+                                hold_time += current_hold_time;
                             }
                         }
 
@@ -252,7 +276,7 @@ fn start_benchmark(
                         non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
                         combiner_latency: combiner_latency,
                         waiter_latency: waiter_latency,
-                        hold_time: Default::default(),
+                        hold_time: hold_time,
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),

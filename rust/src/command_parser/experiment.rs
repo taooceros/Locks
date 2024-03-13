@@ -70,6 +70,8 @@ pub enum DLock2Experiment {
         file_name: Option<String>,
         #[arg(long = "inlcude-lock-free", default_value_t = false)]
         include_lock_free: bool,
+        #[arg(long = "stat-hold-time", default_value_t = true)]
+        stat_hold_time: bool,
     },
     FetchAndMultiply {
         #[arg(long = "inlcude-lock-free", default_value_t = true)]
