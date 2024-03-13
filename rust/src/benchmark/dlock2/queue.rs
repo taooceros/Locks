@@ -58,7 +58,15 @@ pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync + 'static>(
         if let Some(lock) = lock {
             let lockname = format!("{}-queue", lock);
             let records = start_benchmark(bencher, lock, &lockname);
-            finish_benchmark(&bencher.output_path, "Queue", records);
+            finish_benchmark(
+                &bencher.output_path,
+                if bencher.stat_response_time {
+                    "Queue (latency)"
+                } else {
+                    "Queue"
+                },
+                records,
+            );
         }
     }
 }

@@ -202,7 +202,16 @@ pub fn fetch_and_multiply<'a>(
         });
 
         let records = start_benchmark(bencher, lock.clone());
-        finish_benchmark(&bencher.output_path, "FetchAndMultiply", records, lock);
+        finish_benchmark(
+            &bencher.output_path,
+            if bencher.stat_response_time {
+                "FetchAndMultiply (latency)"
+            } else {
+                "FetchAndMultiply"
+            },
+            records,
+            lock,
+        );
     }
 }
 
