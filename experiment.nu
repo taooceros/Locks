@@ -9,21 +9,28 @@ let threads = seq 1 6 | each { |it| 2 ** $it} | str join ","
 
 let base_duration = 1000
 
-let cs = seq $base_duration $base_duration ((3 * $base_duration)) | str join ","
+let simple_cs = "1000,3000"
 
 alias dlock2 = target/release/dlock d-lock2
 
 # echo $cs
 
-dlock2 counter-proportional -t $threads --cs $cs --stat-response-time -d 10
+for non_cs in (seq 1 6 | each { |it| 10 ** $it}) {
+    dlock2 counter-proportional -t $threads --cs $simple_cs --non-cs $non_cs -d 10 --file-name $"counter-proportional-($simple_cs)-($non_cs)"
+}
 
-let cs = seq $base_duration $base_duration ((8 * $base_duration)) | str join ","
-dlock2 counter-proportional -t $threads --cs $cs --stat-response-time -d 10
+dlock2 counter-proportional -t 8,16 --cs 1 --non-cs 0 -d 5 --stat-response-time --file-name "single-addition-latency"
+dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d 15 --file-name "single-addition"
 
-let noncs = $base_duration
-dlock2 counter-proportional -t $threads --cs $cs --non-cs $noncs --stat-response-time -d 10
 
-dlock2 counter-proportional -t 8 16 --stat-response-time --cs 1
+
+# let cs = seq $base_duration $base_duration ((8 * $base_duration)) | str join ","
+# dlock2 counter-proportional -t $threads --cs $cs --stat-response-time -d 10
+
+# let noncs = $base_duration
+# dlock2 counter-proportional -t $threads --cs $cs --non-cs $noncs --stat-response-time -d 10
+
+# dlock2 counter-proportional -t 8 16 --stat-response-time --cs 1
 
 dlock2 fetch-and-multiply -t $threads --stat-response-time
 

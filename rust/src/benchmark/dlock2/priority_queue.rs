@@ -134,8 +134,8 @@ where
 
                         let non_cs_loop = rng.gen_range(1..=8);
 
-                        for _ in 0..non_cs_loop {
-                            spin_loop()
+                        for i in 0..non_cs_loop {
+                            black_box(i);
                         }
 
                         loop_count += 1;
@@ -150,7 +150,7 @@ where
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        waiter_latency: waiter_latency,
+                        waiter_latency,
                         locktype: queue_name.to_owned(),
                         waiter_type: "".to_string(),
                         ..Default::default()
