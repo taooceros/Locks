@@ -237,4 +237,4 @@ patterns.
 
 #set par(leading: 0.5em)
 #set block(above: 0em, below: 0.5em)
-#bibliography("literature.yml", style: "acm-sig-proceedings.csl")
+#bibliography("../reference/literature.yml", style: "../reference/acm-sig-proceedings.csl")

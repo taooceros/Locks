@@ -2,6 +2,7 @@ use std::{
     arch::x86_64::__rdtscp,
     fmt::Display,
     hint::{black_box, spin_loop},
+    iter::zip,
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -11,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use bitvec::prelude::*;
 use itertools::izip;
 use libdlock::dlock2::DLock2;
 
@@ -183,8 +185,8 @@ fn start_benchmark(
                     core_affinity::set_for_current(core_id);
 
                     let stop_signal = stop_signal;
-                    let mut combiner_latency = vec![];
-                    let mut waiter_latency = vec![];
+                    let mut latencies = vec![];
+                    let mut is_combiners: BitVec<usize, Lsb0> = BitVec::new();
                     let mut loop_count = 0;
                     let mut num_acquire = 0;
                     let mut aux = 0;
@@ -209,12 +211,8 @@ fn start_benchmark(
                         if stat_response_time {
                             if let Data::Output { is_combiner, .. } = output {
                                 let end = unsafe { __rdtscp(&mut aux) };
-                                if is_combiner {
-                                    &mut combiner_latency
-                                } else {
-                                    &mut waiter_latency
-                                }
-                                .push(end - begin);
+                                latencies.push(end - begin);
+                                is_combiners.push(is_combiner);
                             } else {
                                 panic!("Invalid output");
                             }
@@ -223,8 +221,23 @@ fn start_benchmark(
                         loop_count += cs_loop;
 
                         for i in 0..non_cs_loop {
-                            spin_loop();
                             black_box(i);
+                        }
+                    }
+
+                    // make the branch prediction fail at the end
+
+                    let combiner_count = is_combiners.count_ones();
+
+                    let mut combiner_latency = Vec::with_capacity(combiner_count);
+                    let mut waiter_latency =
+                        Vec::with_capacity(is_combiners.len() - combiner_count);
+
+                    for (latency, is_combiner) in zip(latencies, is_combiners.iter()) {
+                        if *is_combiner {
+                            combiner_latency.push(latency);
+                        } else {
+                            waiter_latency.push(latency);
                         }
                     }
 
