@@ -13,14 +13,17 @@ let simple_cs = "1000,3000"
 
 alias dlock2 = target/release/dlock d-lock2
 
+let short_experiment_length = 1
+let long_experiment_length = 1
+
 # echo $cs
 
 for non_cs in (seq 1 6 | each { |it| 10 ** $it}) {
-    dlock2 counter-proportional -t $threads --cs $simple_cs --non-cs $non_cs -d 10 --file-name $"counter-proportional-($simple_cs)-($non_cs)"
+    dlock2 counter-proportional -t $threads --cs $simple_cs --non-cs $non_cs -d $long_experiment_length --file-name $"counter-proportional-($simple_cs)-($non_cs)"
 }
 
-dlock2 counter-proportional -t 8,16 --cs 1 --non-cs 0 -d 5 --stat-response-time --file-name "single-addition-latency"
-dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d 15 --file-name "single-addition"
+dlock2 counter-proportional -t 8,16 --cs 1 --non-cs 0 -d $short_experiment_length --stat-response-time --file-name "single-addition-latency"
+dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_length --file-name "single-addition"
 
 
 
