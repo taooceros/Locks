@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, BinaryHeap, LinkedList, VecDeque};
 
 use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
+use crate::experiment::*;
 use itertools::Itertools;
 
 use strum::IntoEnumIterator;
@@ -62,21 +63,21 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 lock_free_queues,
                 seq_queue_type,
             } => match seq_queue_type {
-                crate::experiment::SeqQueueType::LinkedList => {
+                SeqQueueType::LinkedList => {
                     queue::benchmark_queue(bencher, LinkedList::new, targets.iter())
                 }
-                crate::experiment::SeqQueueType::VecDeque => {
+                SeqQueueType::VecDeque => {
                     queue::benchmark_queue(bencher, VecDeque::new, targets.iter())
                 }
             },
             DLock2Experiment::PriorityQueue { sequencial_pq_type } => match sequencial_pq_type {
-                crate::experiment::SeqPQType::BTreeSet => {
+                SeqPQType::BTreeSet => {
                     priority_queue::benchmark_pq(bencher, BTreeSet::new, targets.iter())
                 }
-                crate::experiment::SeqPQType::BinaryHeap => {
+                SeqPQType::BinaryHeap => {
                     priority_queue::benchmark_pq(bencher, BinaryHeap::new, targets.iter())
                 }
-                crate::experiment::SeqPQType::PairingHeap => todo!(),
+                SeqPQType::PairingHeap => todo!(),
             },
         }
     }

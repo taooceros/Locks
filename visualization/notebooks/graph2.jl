@@ -38,7 +38,7 @@ html"""
 """
 
 # ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
-folder = "data"
+folder = "data/counter-proportional"
 
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
 datasets = readdir("../$folder");

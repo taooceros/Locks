@@ -27,7 +27,7 @@ pub struct Records {
 
 pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borrow<Vec<Records>>) {
     thread_local! {
-        static WRITERs: RefCell<HashMap<String, FileWriter<std::fs::File>>> = HashMap::new().into();
+        static WRITERS: RefCell<HashMap<String, FileWriter<std::fs::File>>> = HashMap::new().into();
     }
 
     let fields = SerdeArrowSchema::from_type::<Records>(TracingOptions::default())
@@ -38,7 +38,7 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
 
     let schema = Schema::new(fields);
 
-    WRITERs.with(move |cell| {
+    WRITERS.with(move |cell| {
         let mut map = cell.borrow_mut();
 
         let writer = if map.contains_key(file_name) {
