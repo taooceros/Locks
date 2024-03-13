@@ -1,3 +1,10 @@
+== TODO
+
++ Summary of what's being done (experiment data) and some plan
++ Assumption about thread is continuously acquirng the lock
++ Summer
++ Next Spring
+
 == Stochastic Backoff of Combiner (Flat Combining)
 
 Backoff by average critical section size
@@ -27,3 +34,10 @@ Something like SparyList @spraylist_ref.
 Assuming every thread is continuely acquiring the lock (and not quiting), we can use a fixed size array to store the publish node. Then the combiner just use arbitrary scheduling policy to access the node. If the node hasn't published job, we do exponential backoff for the node?
 
 #bibliography("../reference/literature.yml", style: "../reference/acm-sig-proceedings.csl")
+
+
+== Weekly Plan
+
+- Revise benchmark
+- Redone experiment
+- Write a experiment report

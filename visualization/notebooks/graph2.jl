@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.37
+# v0.19.39
 
 using Markdown
 using InteractiveUtils
@@ -82,6 +82,9 @@ df1 = @chain df_origin begin
 	@subset(:locktype .∈ Ref(locktypes), :waiter_type .== waiter_type .|| (include_other_lock .&& :waiter_type .== ""))
 end;
 
+# ╔═╡ 5587f88f-2b80-46c1-908e-64284e040576
+thread_nums = convert(Vector{Int}, unique(df1[!, :thread_num]))
+
 # ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
 md"""
 # Loop Count
@@ -102,13 +105,35 @@ count_plt = data(count_df) * mapping(:thread_num => float, :loop_count => float,
 draw(count_plt; figure=(; size=(1000, 600)),
     palettes=(; color=colors), axis=(; xticks=[2,4,8,16,32,64]))
 
+# ╔═╡ 5d719fea-c747-4e7a-a837-d1d043b7d655
+md"""
+# Hold Time
+"""
+
+# ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
+@bind thread_num_hold_time Select(thread_nums; default=16)
+
 # ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
 md"""
 # Combine Time
 """
 
 # ╔═╡ 3057df9f-c907-4228-add5-f97213b2c6b5
-@bind thread_num_combine_time Select([4,8,16,32,64])
+@bind thread_num_combine_time Select(thread_nums; default=16)
+
+# ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
+begin
+	hold_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_combine_time)
+		dropmissing(:hold_time)
+	end
+end;
+
+# ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
+hold_time_plt = data(hold_time_df) * mapping(:id => nonnumeric, :hold_time, color=:locktype) * (visual(Lines) + visual(Scatter));
+
+# ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
+draw(hold_time_plt, figure=(;size=(1400,600)))
 
 # ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
 begin
@@ -129,18 +154,46 @@ md"""
 # Response Time
 Enable Analysis $(@bind analyze_response_time CheckBox(false))
 
-Thread Num $(@bind thread_num_response_time Select([2,4,8,16,32,64], default=16))
+Thread Num $(@bind thread_num_response_time Select(thread_nums, default=16))
 """
 
-# ╔═╡ 73cb50ea-2b4b-46be-af5d-f0faca7763e0
-function range_tuple(x, length = 10000)
-	start, stop = x
+# ╔═╡ 4ebcc2b4-d5b1-4fa2-a180-707c1c868019
+if analyze_response_time 
+	locktypes2 = unique((@chain df1 begin
+		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+		dropmissing([:combiner_latency, :waiter_latency]; view=true)
+	end)[!, :locktype])
 
-	range(start, stop, length)
-	# maprange(log, start, stop, length=length)
-end;
+	response_time_dict = Dict()
+	
+	for locktype in locktypes2 
+		df5 = @chain df1 begin
+			@subset(:thread_num .== thread_num_response_time, :locktype .== locktype; view=true)
+			@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+			dropmissing([:combiner_latency, :waiter_latency]; view=true)
+			@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
+		end
+
+		cv1 = ApplyArray(vcat, df5[!, :combiner_latency]...)
+		cv2 = Array{Int}(undef, length(cv1))
+		copyto!(cv2, cv1)
+		sort!(cv2)
+
+		wv1 = ApplyArray(vcat, df5[!, :waiter_latency]...)
+		wv2 = Array{Int}(undef, length(wv1))
+		copyto!(wv2, wv1)
+		sort!(wv2)
+		
+		response_time_dict[locktype] = (ecdf(cv2), ecdf(wv2))
+	end
+
+	response_time_dict
+end
 
 # ╔═╡ 3cdafbff-0b89-4371-9446-ef89e64f6eb9
+# ╠═╡ disabled = true
+#=╠═╡
 if analyze_response_time 
 	ecdf_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
@@ -157,9 +210,17 @@ if analyze_response_time
 		# DataFramesMeta.flatten([:points, :ecdf_value, :w_ecdf_value])
 	end;
 end;
+  ╠═╡ =#
 
-# ╔═╡ 077e3609-a542-45ab-95be-a46ee49a43c9
+# ╔═╡ e673365d-f959-413e-a6e8-3a76a0e89841
 if analyze_response_time
+	function range_tuple(x, length = 300000)
+		start, stop = x
+	
+		range(start, stop, length)
+		# maprange(log, start, stop, length=length)
+	end;
+	
 	ecdf_points = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
 		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
@@ -173,6 +234,7 @@ if analyze_response_time
 		# DataFramesMeta.flatten([:points, :ecdf_value, :w_ecdf_value])
 	end;
 end;
+
 
 # ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═╡ disabled = true
@@ -198,8 +260,8 @@ if analyze_response_time
 	group = ["Combiner", "Waiter"]
 	
 	response_time_plt = data(ecdf_points) *
-		(mapping(:points, (:points, :locktype) => ((x, y)->ecdf_df[(locktype=y,)][1, :c_ecdf](x)), layout=:locktype) * visual(Lines, color = colors[1])
-		+ mapping(:points, (:points, :locktype) => ((x, y)->ecdf_df[(locktype=y,)][1, :w_ecdf](x)), layout=:locktype) * visual(Lines, color = colors[3]))
+		(mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][1](x)), layout=:locktype) * visual(Lines, color = colors[1])
+		+ mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][2](x)), layout=:locktype) * visual(Lines, color = colors[2]))
 	;
 end;
 
@@ -213,13 +275,13 @@ md"""
 # (Flatten) Response Time
 Enable Flatten Analysis (Maybe very slow) $(@bind flatten_latency_analysis CheckBox(false))
 
-Thread Num $(@bind flatten_thread_num_latency Select([2,4,8,16,32,64], default=16))
+Thread Num $(@bind flatten_thread_num_latency Select(thread_nums; default=16))
 """
 
 # ╔═╡ 0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
 if flatten_latency_analysis
 	flatten_latency_df = @chain df1 begin
-		@subset(:thread_num .== thread_num_response_time)
+		@subset(:thread_num .== flatten_thread_num_latency)
 		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency)
 		groupby([:locktype, :cs_length])
 		@combine(:ecdf = ecdf(convert(Vector{Int}, SplitApplyCombine.flatten(vcat(:combiner_latency, :waiter_latency)))))
@@ -236,8 +298,8 @@ if flatten_latency_analysis
 		@select(:locktype, :id, :combiner_latency, :waiter_latency)
 		stack([:combiner_latency, :waiter_latency])
 		@rename(:response_type = :variable)
-	end
-end
+	end;
+end;
 
 # ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
 if flatten_latency_analysis
@@ -294,7 +356,7 @@ StatsBase = "~0.34.2"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.1"
+julia_version = "1.10.2"
 manifest_format = "2.0"
 project_hash = "5381c24827c4938771005f2bad99f8f6738de06a"
 
@@ -2341,19 +2403,25 @@ version = "3.5.0+0"
 # ╠═6b907e00-187a-425a-b4f9-a8b079b7d897
 # ╠═b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
 # ╠═acb5e252-26e7-4335-9ab0-d30ecba9427a
+# ╠═5587f88f-2b80-46c1-908e-64284e040576
 # ╠═6009e94f-5ad1-45ae-bf5c-9d272c900d2c
 # ╠═a3f00b89-8ab0-4026-af69-6966947d2fe6
 # ╠═cdf3ef81-fd2d-450d-8e50-8e56fe629163
 # ╠═2b20fa2c-bb36-4f60-abce-5eb1c56ea700
+# ╠═5d719fea-c747-4e7a-a837-d1d043b7d655
+# ╠═2022ecc8-c3e6-473d-a54e-23e998a2ff21
+# ╠═f6034971-1b8d-4ec6-84e7-6d23454fecb5
+# ╠═81cd97f5-99a9-41b6-b801-bff8e08c4baf
+# ╠═34dfdb62-adb5-44e0-b128-86aabd480c7a
 # ╠═aa585e86-53f4-4340-80a5-b64ee56cc0bd
 # ╠═3057df9f-c907-4228-add5-f97213b2c6b5
 # ╠═8f0d38dc-3814-48e4-ad99-914a417f228a
 # ╠═4777ad7f-1dba-4217-b2a9-473a0fbf698a
 # ╠═905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
 # ╠═c2c4f06a-f723-436e-8e5a-5451924c144b
-# ╠═73cb50ea-2b4b-46be-af5d-f0faca7763e0
+# ╠═4ebcc2b4-d5b1-4fa2-a180-707c1c868019
 # ╠═3cdafbff-0b89-4371-9446-ef89e64f6eb9
-# ╠═077e3609-a542-45ab-95be-a46ee49a43c9
+# ╠═e673365d-f959-413e-a6e8-3a76a0e89841
 # ╠═a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 # ╠═5f3d39d9-273d-48f7-a86e-211ec5c3bd81
