@@ -94,11 +94,11 @@ where
     }
 
     fn push_node(&self, node: &Node<I>) {
-        unsafe {
-            self.waiting_nodes
-                .push(transmute((node, current().id().as_u64())));
-            node.active.store_release(true);
-        }
+        self.waiting_nodes.push((
+            AtomicPtr::new(node as *const _ as *mut Node<I>),
+            current().id().as_u64().into(),
+        ));
+        node.active.store_release(true);
     }
 
     fn push_if_unactive(&self, node: &mut Node<I>) {
@@ -188,7 +188,6 @@ where
                 }
             }
         }
-
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
