@@ -12,9 +12,13 @@
             "program": "${workspaceFolder}/rust/target/debug/dlock",
             "args": [
                 "d-lock2",
+                "-t",
+                "16",
                 "-l",
-                "fc",
-                "counter-proportional"
+                "fc-pq",
+                "counter-proportional",
+                "-d",
+                "5"
             ],
             "cwd": "${workspaceFolder}/rust"
         }

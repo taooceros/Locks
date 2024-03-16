@@ -4,20 +4,6 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "xmake",
-            "type": "shell",
-            "command": "xmake",
-            "args": [
-                "build",
-                "example"
-            ],
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
             "type": "cargo",
             "command": "build",
             "problemMatcher": [
@@ -25,6 +11,17 @@
             ],
             "group": "build",
             "label": "rust: cargo build",
+            "options": {
+                "cwd": "${workspaceFolder}/rust"
+            }
+        },
+        {
+            "label": "Bacon",
+            "group": "build",
+            "type": "shell",
+            "command": "bacon",
+            "problemMatcher": "$rustc-watch",
+            "isBackground": true,
             "options": {
                 "cwd": "${workspaceFolder}/rust"
             }

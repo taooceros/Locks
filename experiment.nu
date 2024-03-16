@@ -2,8 +2,6 @@ cd rust
 
 cargo build --release
 
-# target/release/dlock -e counter-ratio-one-three -d 30
-
 let threads = seq 1 6 | each { |it| 2 ** $it} | str join ","
 # echo $threads
 
