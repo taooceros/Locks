@@ -18,7 +18,7 @@ static void scanCombineApply(fc_lock_t* lock)
 
 	while(current != NULL)
 	{
-		if(current->delegate != NULL)
+		if(atomic_load_explicit(&current->delegate, memory_order_acquire) != NULL)
 		{
 			current->age = lock->pass;
 			current->response = current->delegate(current->args);

@@ -202,7 +202,16 @@ pub fn fetch_and_multiply<'a>(
         });
 
         let records = start_benchmark(bencher, lock.clone());
-        finish_benchmark(&bencher.output_path, "FetchAndMultiply", records, lock);
+        finish_benchmark(
+            &bencher.output_path,
+            if bencher.stat_response_time {
+                "FetchAndMultiply (latency)"
+            } else {
+                "FetchAndMultiply"
+            },
+            records,
+            lock,
+        );
     }
 }
 
@@ -292,8 +301,8 @@ fn start_benchmark<'a>(
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        combiner_latency: combiner_latency,
-                        waiter_latency: waiter_latency,
+                        combiner_latency,
+                        waiter_latency,
                         hold_time: Default::default(),
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),

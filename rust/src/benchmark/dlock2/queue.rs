@@ -16,11 +16,7 @@ use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use rand::Rng;
 
 use crate::{
-    benchmark::{
-        bencher::Bencher,
-        helper::create_plain_writer,
-        old_records::{Records, RecordsBuilder},
-    },
+    benchmark::{bencher::Bencher, helper::create_plain_writer, records::*},
     lock_target::DLock2Target,
 };
 
@@ -62,7 +58,15 @@ pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync + 'static>(
         if let Some(lock) = lock {
             let lockname = format!("{}-queue", lock);
             let records = start_benchmark(bencher, lock, &lockname);
-            finish_benchmark(&bencher.output_path, "Queue", records.iter());
+            finish_benchmark(
+                &bencher.output_path,
+                if bencher.stat_response_time {
+                    "Queue (latency)"
+                } else {
+                    "Queue"
+                },
+                records,
+            );
         }
     }
 }
@@ -124,7 +128,7 @@ where
 
                         if stat_response_time {
                             let end = unsafe { __rdtscp(&mut aux) };
-                            response_times.push(Some(Duration::from_nanos(end - begin)));
+                            response_times.push(end - begin);
                         }
 
                         let non_cs_loop = rng.gen_range(1..=64);
@@ -145,7 +149,7 @@ where
                         num_acquire,
                         cs_length: Duration::from_nanos(0),
                         non_cs_length: Some(Duration::from_nanos(0)),
-                        response_times: Some(response_times),
+                        waiter_latency: response_times,
                         locktype: queue_name.to_owned(),
                         waiter_type: "".to_string(),
                         ..Default::default()
@@ -165,57 +169,14 @@ where
     })
 }
 
-fn finish_benchmark<'a>(
-    output_path: &Path,
-    file_name: &str,
-    records: impl Iterator<Item = &'a Records> + Clone,
-) {
-    write_results(output_path, file_name, records.clone());
+fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
+    write_results(output_path, file_name, &records);
 
-    for record in records.clone() {
+    for record in records.iter() {
         println!("{}", record.loop_count);
     }
 
-    let total_loop_count: u64 = records.clone().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
-}
-
-fn write_results<'a>(
-    output_path: &Path,
-    file_name: &str,
-    results: impl Iterator<Item = &'a Records>,
-) {
-    thread_local! {
-        static WRITER: OnceCell<RefCell<FileWriter<std::fs::File>>> = OnceCell::new();
-    }
-
-    WRITER.with(|cell| {
-        let mut writer = cell
-            .get_or_init(|| {
-                let option =
-                    IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
-                // .try_with_compression(Some(CompressionType::ZSTD))
-                // .expect("Failed to create compression option");
-
-                RefCell::new(
-                    FileWriter::try_new_with_options(
-                        create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                            .expect("Failed to create writer"),
-                        RecordsBuilder::get_schema(),
-                        option,
-                    )
-                    .expect("Failed to create file writer"),
-                )
-            })
-            .borrow_mut();
-
-        let mut record_builder = RecordsBuilder::default();
-
-        record_builder.extend(results);
-
-        writer
-            .write(&record_builder.finish().into())
-            .expect("Failed to write");
-    });
 }

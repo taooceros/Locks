@@ -15,7 +15,7 @@ typedef struct fc_thread_node
 {
 	int age;
 	bool active;
-	func_ptr_t delegate;
+	_Atomic func_ptr_t delegate;
 	void* args;
 	void* response;
 	struct fc_thread_node* next;
