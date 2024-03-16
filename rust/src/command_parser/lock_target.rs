@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{fmt::Debug, sync::Mutex};
 
 use clap::ValueEnum;
 use libdlock::{
@@ -114,7 +114,9 @@ pub enum DLock2Target {
     /// Benchmark DSMSynch
     DSM,
     /// Benchmark FC-SL
-    FcSl,
+    FcSL,
+    /// Benchmark FC-PQ
+    FcPQ,
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
@@ -137,7 +139,8 @@ impl DLock2Target {
             | DLock2Target::DSM
             | DLock2Target::FcC
             | DLock2Target::CcC
-            | DLock2Target::FcSl => true,
+            | DLock2Target::FcSL
+            | DLock2Target::FcPQ => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -145,7 +148,7 @@ impl DLock2Target {
     pub fn to_locktype<T, I, F>(&self, data: T, _: I, f: F) -> Option<DLock2Impl<T, I, F>>
     where
         T: Send + Sync,
-        I: Send + 'static,
+        I: Send + Sync + Debug + 'static,
         F: DLock2Delegate<T, I>,
     {
         Some::<DLock2Impl<T, I, F>>(match self {
@@ -154,7 +157,8 @@ impl DLock2Target {
             DLock2Target::CC => dlock2::cc::CCSynch::new(data, f).into(),
             DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
             DLock2Target::DSM => dlock2::dsm::DSMSynch::new(data, f).into(),
-            DLock2Target::FcSl => dlock2::fc_sl::FCSL::new(data, f).into(),
+            DLock2Target::FcSL => dlock2::fc_sl::FCSL::new(data, f).into(),
+            DLock2Target::FcPQ => dlock2::fc_pq::FCPQ::new(data, f).into(),
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),

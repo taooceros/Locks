@@ -95,6 +95,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
+
+[[package]]
 name = "arrow"
 version = "50.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -794,6 +800,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "spin_sleep",
+ "stack-vec",
  "strum",
  "thread-priority",
  "trait-set",
@@ -1155,6 +1162,7 @@ checksum = "9cdc71e17332e86d2e1d38c1f99edcb6288ee11b815fb1a4b049eaa2114d369b"
 name = "libdlock"
 version = "0.1.0"
 dependencies = [
+ "arrayvec",
  "bindgen",
  "cc",
  "core_affinity",
@@ -1171,6 +1179,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quanta",
+ "ringbuffer",
  "strum",
  "thread_local",
  "trait-set",
@@ -1544,6 +1553,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
+name = "ringbuffer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3df6368f71f205ff9c33c076d170dd56ebf68e8161c733c0caa07a7a5509ed53"
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1688,6 +1703,12 @@ checksum = "368a978649eaf70006b082e79c832bd72556ac1393eaf564d686e919dca2347f"
 dependencies = [
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "stack-vec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "969d02b2cf038972b7f2d285f246044771da9fb8cc26a9d6b129236b784d3bd6"
 
 [[package]]
 name = "static_assertions"

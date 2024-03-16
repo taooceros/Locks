@@ -17,7 +17,9 @@ pub mod dlock;
 pub mod dlock2;
 pub mod parker;
 pub mod c_binding;
+pub mod sequential_priority_queue;
 mod atomic_extension;
+
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
