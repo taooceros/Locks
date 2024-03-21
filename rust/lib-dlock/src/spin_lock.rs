@@ -1,14 +1,17 @@
 use std::{
     cell::{SyncUnsafeCell, UnsafeCell},
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, MutexGuard,
+    },
 };
 
 use crossbeam::{atomic::AtomicConsume, utils::Backoff};
 
 use crate::{
-    dlock::guard::DLockGuard,
-    dlock::{DLock, DLockDelegate},
+    atomic_extension::AtomicExtension,
+    dlock::{guard::DLockGuard, DLock, DLockDelegate},
 };
 
 use super::RawSimpleLock;
@@ -27,21 +30,19 @@ unsafe impl RawSimpleLock for RawSpinLock {
 
     #[inline]
     fn try_lock(&self) -> bool {
-        if !self.flag.load_consume() {
-            self.flag
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-        } else {
-            false
-        }
+        self.flag
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
     }
 
     #[inline]
     fn lock(&self) {
-        let backoff = Backoff::new();
-
         while !self.try_lock() {
-            backoff.snooze();
+            let backoff = Backoff::new();
+
+            while self.flag.load_acquire() {
+                backoff.spin();
+            }
         }
     }
 

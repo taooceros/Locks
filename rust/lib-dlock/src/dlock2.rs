@@ -47,8 +47,8 @@ where
     I: Send + Sync + Debug + 'static,
     F: DLock2Delegate<T, I> + 'static,
 {
-    FC(FC<T, I, F, RawSpinLock>),
-    FCBan(FCBan<T, I, F, RawSpinLock>),
+    FC(FC<T, I, F>),
+    FCBan(FCBan<T, I, F>),
     CC(CCSynch<T, I, F>),
     DSM(DSMSynch<T, I, F>),
     CCBan(CCBan<T, I, F>),

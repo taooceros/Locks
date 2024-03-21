@@ -147,11 +147,12 @@ where
     }
 }
 
-unsafe impl<'a, T, I, F> DLock2<I> for FC<T, I, F, RawSpinLock>
+unsafe impl<'a, T, I, F, L> DLock2<I> for FC<T, I, F, L>
 where
     T: Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
+    L: RawSimpleLock + Send + Sync,
 {
     fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
