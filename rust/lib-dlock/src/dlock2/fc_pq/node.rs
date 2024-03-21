@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, mem::MaybeUninit, sync::atomic::AtomicBool};
+use std::{cell::SyncUnsafeCell, mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicU64}};
 
 use atomic_enum::atomic_enum;
 use crossbeam::utils::CachePadded;
@@ -13,7 +13,7 @@ pub enum ActiveState {
 
 #[derive(Debug)]
 pub struct Node<T> {
-    pub usage: u64,
+    pub usage: AtomicU64,
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<T>,
     pub complete: AtomicBool,
@@ -27,7 +27,7 @@ impl<T> Node<T> {
         T: Send,
     {
         Node {
-            usage: 0,
+            usage: AtomicU64::new(0),
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
             data: unsafe { MaybeUninit::uninit().assume_init() },

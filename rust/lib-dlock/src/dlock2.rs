@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::fmt::{Binary, Debug};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
@@ -53,7 +54,7 @@ where
     CCBan(CCBan<T, I, F>),
     FC_SL(FCSL<T, I, F, RawSpinLock>),
     FC_PQ_BTree(fc_pq::FCPQ<T, I, BTreeSet<UsageNode<'static, I>>, F, RawSpinLock>),
-    FC_PQ_BHeap(fc_pq::FCPQ<T, I, BinaryHeap<UsageNode<'static, I>>, F, RawSpinLock>),
+    FC_PQ_BHeap(fc_pq::FCPQ<T, I, BinaryHeap<Reverse<UsageNode<'static, I>>>, F, RawSpinLock>),
     SpinLock(DLock2SpinLock<T, I, F>),
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),

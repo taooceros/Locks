@@ -1,5 +1,5 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap};
-
 pub trait SequentialPriorityQueue<T>
 where
     T: PartialOrd + Ord + Eq,
@@ -11,7 +11,7 @@ where
     fn len(&self) -> usize;
 }
 
-impl<T> SequentialPriorityQueue<T> for BinaryHeap<T>
+impl<T> SequentialPriorityQueue<T> for BinaryHeap<Reverse<T>>
 where
     T: Ord,
 {
@@ -20,15 +20,15 @@ where
     }
 
     fn push(&mut self, item: T) {
-        self.push(item);
+        self.push(Reverse(item));
     }
 
     fn peek(&mut self) -> Option<&T> {
-        BinaryHeap::peek(self)
+        BinaryHeap::peek(self).map(|r| &r.0)
     }
 
     fn pop(&mut self) -> Option<T> {
-        self.pop()
+        self.pop().map(|r| r.0)
     }
 
     fn len(&self) -> usize {

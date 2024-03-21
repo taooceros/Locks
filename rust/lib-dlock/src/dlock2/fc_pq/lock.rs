@@ -121,7 +121,7 @@ where
         const H: usize = 64;
 
         // only one thread would combine so this is safe
-        let job_queue = unsafe { &mut *self.job_queue.get() };
+        let job_queue: &mut PQ = unsafe { &mut *self.job_queue.get() };
 
         if !self.waiting_nodes.empty() {
             let iterator = unsafe { self.waiting_nodes.iter() };
@@ -135,7 +135,7 @@ where
                 unsafe {
                     let node = &*node.load_acquire();
                     job_queue.push(UsageNode {
-                        usage: node.usage,
+                        usage: node.usage.load_acquire(),
                         tie_breaker: id,
                         node,
                     });
@@ -145,7 +145,7 @@ where
             assert!(count == size.0);
         }
 
-        let mut buffer = ConstGenericRingBuffer::<UsageNode<I>, 16>::new();
+        let mut buffer = ConstGenericRingBuffer::<UsageNode<I>, 4>::new();
 
         unsafe {
             for _ in 0..H {
@@ -160,6 +160,8 @@ where
                 let node = current.node;
 
                 if !node.complete.load(Acquire) {
+                    begin = __rdtscp(&mut aux);
+
                     node.data.get().write(
                         (self.delegate)(
                             self.data.get().as_mut().unwrap_unchecked(),
@@ -172,8 +174,6 @@ where
 
                     current.usage += end - begin;
 
-                    begin = end;
-
                     node.complete.store(true, Release);
 
                     job_queue.push(current);
@@ -182,6 +182,7 @@ where
                     if buffer.is_full() {
                         for node in buffer.drain() {
                             if node.node.complete.load(Acquire) {
+                                node.node.usage.store_release(node.usage);
                                 node.node.active.store_release(false);
                             } else {
                                 job_queue.push(node);
@@ -196,6 +197,7 @@ where
 
             for node in buffer.drain() {
                 if node.node.complete.load(Acquire) {
+                    node.node.usage.store_release(node.usage);
                     node.node.active.store_release(false);
                 } else {
                     job_queue.push(node);
