@@ -19,7 +19,6 @@ fn main() {
     cc::Build::new()
         .define("CYCLE_PER_US", "2400")
         .define("FC_THREAD_MAX_CYCLE", "CYCLE_PER_MS")
-        .define("_GNU_SOURCE", None)
         .files([
             "../../c/CCsynch/ccsynch.c",
             "../../c/FlatCombining/original/flatcombining.c",
@@ -27,6 +26,7 @@ fn main() {
         ])
         .include("../../c/shared")
         .opt_level(2)
+        .warnings(false)
         .compile("dlock");
 
     // This is the path to the `c` headers file.

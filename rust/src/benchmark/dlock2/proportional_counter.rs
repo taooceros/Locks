@@ -73,8 +73,8 @@ pub fn proportional_counter<'a>(
     bencher: &Bencher,
     file_name: &str,
     targets: impl Iterator<Item = &'a DLock2Target>,
-    cs_loop: impl Iterator<Item = usize> + Clone,
-    non_cs_loop: impl Iterator<Item = usize> + Clone,
+    cs_loop: impl Iterator<Item = u64> + Clone,
+    non_cs_loop: impl Iterator<Item = u64> + Clone,
     include_lock_free: bool,
     stat_hold_time: bool,
 ) {
@@ -158,7 +158,7 @@ pub enum Data {
     #[default]
     Nothing,
     Input {
-        data: usize,
+        data: u64,
         thread_id: ThreadId,
     },
     Output {
@@ -171,8 +171,8 @@ pub enum Data {
 fn start_benchmark(
     bencher: &Bencher,
     stat_hold_time: bool,
-    cs_loop: impl Iterator<Item = usize> + Clone,
-    non_cs_loop: impl Iterator<Item = usize> + Clone,
+    cs_loop: impl Iterator<Item = u64> + Clone,
+    non_cs_loop: impl Iterator<Item = u64> + Clone,
     lock_target: impl DLock2<Data> + 'static + Display,
 ) -> Vec<Records> {
     println!("Start benchmark for {}", lock_target);
@@ -272,8 +272,8 @@ fn start_benchmark(
                         cpu_num: bencher.num_cpu,
                         loop_count: loop_count as u64,
                         num_acquire,
-                        cs_length: Duration::from_nanos(cs_loop as u64),
-                        non_cs_length: Some(Duration::from_nanos(non_cs_loop as u64)),
+                        cs_length: cs_loop,
+                        non_cs_length: Some(non_cs_loop),
                         combiner_latency,
                         waiter_latency,
                         hold_time,
@@ -299,9 +299,9 @@ fn start_benchmark(
 fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
     write_results(output_path, file_name, &records);
 
-    // for record in records.clone() {
-    //     println!("{}", record.loop_count);
-    // }
+    for record in records.iter() {
+        println!("{}", record.loop_count);
+    }
 
     let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 

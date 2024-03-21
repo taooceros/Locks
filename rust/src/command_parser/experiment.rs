@@ -62,10 +62,10 @@ impl DLock1Experiment {
 #[derive(Debug, Clone, Display, Subcommand, EnumIter)]
 pub enum DLock2Experiment {
     CounterProportional {
-        #[arg(long = "cs", default_values_t = [1000usize], value_delimiter = ',')]
-        cs_loops: Vec<usize>,
-        #[arg(long = "non-cs", default_values_t = [0usize], value_delimiter = ',')]
-        non_cs_loops: Vec<usize>,
+        #[arg(long = "cs", default_values_t = [1000u64], value_delimiter = ',')]
+        cs_loops: Vec<u64>,
+        #[arg(long = "non-cs", default_values_t = [0u64], value_delimiter = ',')]
+        non_cs_loops: Vec<u64>,
         #[arg(long = "file-name")]
         file_name: Option<String>,
         #[arg(long = "inlcude-lock-free", default_value_t = false)]

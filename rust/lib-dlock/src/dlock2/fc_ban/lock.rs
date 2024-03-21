@@ -7,12 +7,12 @@ use std::{
 };
 
 use crossbeam::utils::{Backoff, CachePadded};
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
     dlock2::{DLock2, DLock2Delegate},
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use super::node::Node;
@@ -25,7 +25,7 @@ where
     T: Send + Sync,
     I: Send,
     F: Fn(&mut T, I) -> I,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
@@ -43,12 +43,12 @@ where
     T: Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             pass: AtomicU32::new(0),
-            combiner_lock: CachePadded::new(L::new()),
+            combiner_lock: CachePadded::new(L::INIT),
             avg_cs: SyncUnsafeCell::new(0),
             num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicI64::new(0),
@@ -206,8 +206,8 @@ where
                     if self.pass.load(Relaxed) % CLEAN_UP_AGE == 0 {
                         self.clean_unactive_node(&self.head, self.pass.load(Relaxed));
                     }
+                    self.combiner_lock.unlock();
                 }
-                self.combiner_lock.unlock();
 
                 if node.complete.load(Acquire) {
                     break 'outer;

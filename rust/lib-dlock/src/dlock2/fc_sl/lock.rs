@@ -6,14 +6,14 @@ use std::{
 };
 
 use crossbeam::utils::{Backoff, CachePadded};
-use crossbeam_skiplist::{SkipSet};
+use crossbeam_skiplist::SkipSet;
 use derivative::Derivative;
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
     dlock2::{DLock2, DLock2Delegate},
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use super::node::Node;
@@ -34,7 +34,7 @@ where
     T: Send + Sync,
     I: Send + 'static,
     F: Fn(&mut T, I) -> I,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     combiner_lock: CachePadded<L>,
     delegate: F,
@@ -48,11 +48,11 @@ where
     T: Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
-            combiner_lock: CachePadded::new(L::new()),
+            combiner_lock: CachePadded::new(L::INIT),
             delegate,
             data: SyncUnsafeCell::new(data),
             jobs: SkipSet::new(),
@@ -147,9 +147,10 @@ where
             self.push_if_unactive(node);
 
             if self.combiner_lock.try_lock() {
-                self.combine();
-                self.combiner_lock.unlock();
-
+                unsafe {
+                    self.combine();
+                    self.combiner_lock.unlock();
+                }
                 if node.complete.load(Acquire) {
                     break 'outer;
                 }

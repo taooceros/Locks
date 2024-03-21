@@ -1,40 +1,46 @@
-use std::ops::DerefMut;
+use std::{cell::SyncUnsafeCell, ops::DerefMut};
 
-use crate::spin_lock::SpinLock;
+use lock_api::RawMutex;
 
 use super::{DLock2, DLock2Delegate};
 
 #[derive(Debug)]
-pub struct DLock2SpinLock<T, I, F>
+pub struct DLock2Wrapper<T, I, F, L>
 where
     F: DLock2Delegate<T, I>,
+    L: RawMutex,
 {
     delegate: F,
-    data: SpinLock<T>,
+    data: SyncUnsafeCell<T>,
+    lock: L,
     phantom: std::marker::PhantomData<fn() -> I>,
 }
 
-impl<T, I, F> DLock2SpinLock<T, I, F>
+impl<T, I, F, L> DLock2Wrapper<T, I, F, L>
 where
     F: DLock2Delegate<T, I>,
+    L: RawMutex,
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             delegate,
-            data: SpinLock::new(data),
+            data: data.into(),
+            lock: L::INIT,
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-unsafe impl<T, I, F> DLock2<I> for DLock2SpinLock<T, I, F>
+unsafe impl<T, I, F, L> DLock2<I> for DLock2Wrapper<T, I, F, L>
 where
     T: Send + Sync,
+    I: Send,
+    L: RawMutex + Send + Sync,
     F: DLock2Delegate<T, I>,
 {
     fn lock(&self, data: I) -> I {
-        let mut lock_data = self.data.lock();
-        (self.delegate)(lock_data.deref_mut(), data)
+        self.lock.lock();
+        (self.delegate)(unsafe { self.data.get().as_mut().unwrap_unchecked() }, data)
     }
 
     #[cfg(feature = "combiner_stat")]

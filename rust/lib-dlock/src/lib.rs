@@ -17,19 +17,8 @@ pub mod dlock;
 pub mod dlock2;
 pub mod parker;
 pub mod c_binding;
+pub mod sequential_priority_queue;
 mod atomic_extension;
 
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
-pub unsafe trait RawSimpleLock {
-    fn new() -> Self;
-
-    /// Non-blocking: Try locking. If succeeding, return true, or false.
-    fn try_lock(&self) -> bool;
-
-    /// Blocking: Get locking or wait until getting locking
-    fn lock(&self);
-
-    /// Release lock
-    fn unlock(&self);
-}

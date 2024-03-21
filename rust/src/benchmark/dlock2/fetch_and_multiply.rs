@@ -299,14 +299,13 @@ fn start_benchmark<'a>(
                         cpu_num: bencher.num_cpu,
                         loop_count: loop_count as u64,
                         num_acquire,
-                        cs_length: Duration::from_nanos(0),
-                        non_cs_length: Some(Duration::from_nanos(0)),
                         combiner_latency,
                         waiter_latency,
                         hold_time: Default::default(),
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
+                        ..Default::default()
                     }
                 })
             })

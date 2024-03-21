@@ -135,7 +135,7 @@ $(@bind simple_counter_noncs_length PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(
 # ╔═╡ dd1db155-3cb2-4ccd-9c95-bb7488823683
 simple_counter_loop_df = @chain simple_counter_df begin
 	@subset(:locktype .∈ Ref(simple_counter_locks), :non_cs_length .∈ Ref(simple_counter_noncs_length); view=true)
-	groupby([:thread_num, :locktype, :non_cs_length])	
+	groupby([:thread_num, :locktype, :non_cs_length])
 	@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
 end;
 
@@ -145,7 +145,7 @@ let
 		mapping(:thread_num => float, :loop_count => float, color=:locktype, layout=:non_cs_length => nonnumeric) * 
 		(visual(Scatter) + visual(Lines; alpha = 0.5));
 	
-	draw(plt; figure=(;size=(1000,800)),
+	draw(plt; figure=(;size=(1200,800)),
     	palettes=(; color=colors), axis=(; xticks=[0,2,4,8,16,32,64], xscale=log))
 end
 
@@ -177,9 +177,12 @@ md"""
 """
 
 # ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
+# ╠═╡ disabled = true
+#=╠═╡
 md"""
 Select Dataset $(@bind dataset_name Select(datasets))
 """
+  ╠═╡ =#
 
 # ╔═╡ 78545e43-25f8-4b4e-8b37-20be86ac7035
 # ╠═╡ disabled = true
@@ -201,20 +204,28 @@ end
   ╠═╡ =#
 
 # ╔═╡ 6b907e00-187a-425a-b4f9-a8b079b7d897
+#=╠═╡
 locknames = @distinct(df_origin, :locktype)[!, :locktype];
+  ╠═╡ =#
 
 # ╔═╡ b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
+#=╠═╡
 md"""
 Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
 """
+  ╠═╡ =#
 
 # ╔═╡ acb5e252-26e7-4335-9ab0-d30ecba9427a
+#=╠═╡
 df1 = @chain df_origin begin
 	@subset(:locktype .∈ Ref(locktypes))
 end;
+  ╠═╡ =#
 
 # ╔═╡ 5587f88f-2b80-46c1-908e-64284e040576
+#=╠═╡
 thread_nums = convert(Vector{Int}, unique(df1[!, :thread_num]))
+  ╠═╡ =#
 
 # ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
 md"""
@@ -222,12 +233,14 @@ md"""
 """
 
 # ╔═╡ a3f00b89-8ab0-4026-af69-6966947d2fe6
+#=╠═╡
 begin
 	count_df = @chain df1 begin
 		groupby([:thread_num, :locktype, :waiter_type])	
 		@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
 	end
 end;
+  ╠═╡ =#
 
 # ╔═╡ cdf3ef81-fd2d-450d-8e50-8e56fe629163
 # ╠═╡ disabled = true
@@ -247,51 +260,70 @@ md"""
 """
 
 # ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
+#=╠═╡
 @bind thread_num_hold_time Select(thread_nums; default=16)
+  ╠═╡ =#
 
 # ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
+#=╠═╡
 begin
 	hold_time_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_hold_time)
 	end
 end;
+  ╠═╡ =#
 
 # ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
+#=╠═╡
 per_iteration_plt = data(hold_time_df) * mapping(:id => nonnumeric, :loop_count, color=:locktype) * (visual(Lines) + visual(Scatter));
+  ╠═╡ =#
 
 # ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
+#=╠═╡
 draw(per_iteration_plt, figure=(;size=(1400,600)))
+  ╠═╡ =#
 
 # ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
+#=╠═╡
 md"""
 # Combine Time
 
 $(@bind thread_num_combine_time Select(thread_nums; default=16))
 """
+  ╠═╡ =#
 
 # ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
+#=╠═╡
 begin
 	combine_time_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_combine_time)
 		dropmissing(:combine_time)
 	end
 end;
+  ╠═╡ =#
 
 # ╔═╡ 4777ad7f-1dba-4217-b2a9-473a0fbf698a
+#=╠═╡
 combine_time_plt = data(combine_time_df) * mapping(:id => nonnumeric, :combine_time, color=:locktype) * (visual(Lines) + visual(Scatter));
+  ╠═╡ =#
 
 # ╔═╡ 905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
+#=╠═╡
 draw(combine_time_plt, figure=(;size=(1400,600)))
+  ╠═╡ =#
 
 # ╔═╡ c2c4f06a-f723-436e-8e5a-5451924c144b
+#=╠═╡
 md"""
 # Response Time
 Enable Analysis $(@bind analyze_response_time CheckBox(false))
 
 Thread Num $(@bind thread_num_response_time Select(thread_nums, default=16))
 """
+  ╠═╡ =#
 
 # ╔═╡ 4ebcc2b4-d5b1-4fa2-a180-707c1c868019
+#=╠═╡
 if analyze_response_time 
 	locktypes2 = unique((@chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
@@ -324,6 +356,7 @@ if analyze_response_time
 
 	response_time_dict;
 end;
+  ╠═╡ =#
 
 # ╔═╡ 3cdafbff-0b89-4371-9446-ef89e64f6eb9
 # ╠═╡ disabled = true
@@ -347,6 +380,7 @@ end;
   ╠═╡ =#
 
 # ╔═╡ e673365d-f959-413e-a6e8-3a76a0e89841
+#=╠═╡
 if analyze_response_time
 	function range_tuple(x, length = 300000)
 		start, stop = x
@@ -369,6 +403,7 @@ if analyze_response_time
 	end;
 end;
 
+  ╠═╡ =#
 
 # ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═╡ disabled = true
@@ -390,6 +425,7 @@ end
   ╠═╡ =#
 
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
+#=╠═╡
 if analyze_response_time
 	group = ["Combiner", "Waiter"]
 	
@@ -398,21 +434,27 @@ if analyze_response_time
 		+ mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][2](x)), layout=:locktype) * visual(Lines, color = colors[2]))
 	;
 end;
+  ╠═╡ =#
 
 # ╔═╡ 5f3d39d9-273d-48f7-a86e-211ec5c3bd81
+#=╠═╡
 if analyze_response_time
 	draw(response_time_plt, figure=(;size=(1200,800)), axis=(;xscale=log))
 end
+  ╠═╡ =#
 
 # ╔═╡ 84a9bf82-521e-4f46-8b14-8356d6a886b8
+#=╠═╡
 md"""
 # (Flatten) Response Time
 Enable Flatten Analysis (Maybe very slow) $(@bind flatten_latency_analysis CheckBox(false))
 
 Thread Num $(@bind flatten_thread_num_latency Select(thread_nums; default=16))
 """
+  ╠═╡ =#
 
 # ╔═╡ 0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
+#=╠═╡
 if flatten_latency_analysis
 	flatten_latency_df = @chain df1 begin
 		@subset(:thread_num .== flatten_thread_num_latency)
@@ -424,8 +466,10 @@ if flatten_latency_analysis
 		DataFramesMeta.flatten([:points, :ecdf_value])
 	end;
 end;
+  ╠═╡ =#
 
 # ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+#=╠═╡
 if flatten_latency_analysis
 	df2 = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time)
@@ -434,17 +478,22 @@ if flatten_latency_analysis
 		@rename(:response_type = :variable)
 	end;
 end;
+  ╠═╡ =#
 
 # ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
+#=╠═╡
 if flatten_latency_analysis
 	flatten_latency_plt = data(flatten_latency_df) * mapping(:points, :ecdf_value, color=:cs_length => (x-> nonnumeric(x.nanos)), layout=:locktype) * (visual(Lines));
 end;
 
+  ╠═╡ =#
 
 # ╔═╡ 5f4e146a-bc79-4725-b5ad-a23a2971a5fa
+#=╠═╡
 if flatten_latency_analysis
 	draw(flatten_latency_plt, figure=(;size=(1200,600)), axis=(;xscale=log))
 end
+  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2558,8 +2607,8 @@ version = "3.5.0+0"
 # ╔═╡ Cell order:
 # ╟─3872be19-d39d-4a5f-be9e-5625ca45bf2d
 # ╟─32fe4de7-887b-4f4f-b7b6-6d10d9c5a0b6
-# ╠═3c5e052c-f11e-4a8a-932f-786bf70aa8de
-# ╠═059160d7-741d-49f6-86b1-864d5d2fd7e2
+# ╟─3c5e052c-f11e-4a8a-932f-786bf70aa8de
+# ╟─059160d7-741d-49f6-86b1-864d5d2fd7e2
 # ╟─a5a7824d-095f-4d68-bf22-96f0a93901a3
 # ╟─18b61f75-4981-4988-9523-24700ae73a54
 # ╟─d0a1530c-d95e-4c30-9569-56c82b686392
@@ -2570,12 +2619,12 @@ version = "3.5.0+0"
 # ╟─d699d3ed-4cb9-45da-9069-753b9288ccb4
 # ╟─a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
 # ╟─dd1db155-3cb2-4ccd-9c95-bb7488823683
-# ╠═a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
+# ╟─a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
 # ╟─c9aee179-eebe-4e12-8976-ee131aaf029e
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 # ╟─d051df13-fdb5-4a79-bc01-62b7da79ce46
 # ╟─4e1ce063-adf1-4b92-941f-90f3d41dbddb
-# ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
+# ╟─78545e43-25f8-4b4e-8b37-20be86ac7035
 # ╟─071f1e64-9af0-4135-9cc6-d86febcb4d76
 # ╟─6b907e00-187a-425a-b4f9-a8b079b7d897
 # ╟─b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
@@ -2590,7 +2639,7 @@ version = "3.5.0+0"
 # ╟─f6034971-1b8d-4ec6-84e7-6d23454fecb5
 # ╟─81cd97f5-99a9-41b6-b801-bff8e08c4baf
 # ╟─34dfdb62-adb5-44e0-b128-86aabd480c7a
-# ╠═aa585e86-53f4-4340-80a5-b64ee56cc0bd
+# ╟─aa585e86-53f4-4340-80a5-b64ee56cc0bd
 # ╟─8f0d38dc-3814-48e4-ad99-914a417f228a
 # ╟─4777ad7f-1dba-4217-b2a9-473a0fbf698a
 # ╟─905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2

@@ -1,3 +1,7 @@
+use std::cmp::Reverse;
+use std::fmt::{Binary, Debug};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+
 use crate::{
     c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},
     dlock2::{cc::CCSynch, fc::FC},
@@ -7,8 +11,7 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_sl::FCSL, mutex::DLock2Mutex,
-    spinlock::DLock2SpinLock, uscl::DLock2USCL,
+    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mutex::DLock2Mutex, spinlock::DLock2Wrapper, uscl::DLock2USCL
 };
 
 pub mod cc;
@@ -22,6 +25,7 @@ pub mod rcl;
 pub mod mutex;
 pub mod spinlock;
 pub mod uscl;
+pub mod fc_pq;
 
 pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
 impl<T, I, F> DLock2Delegate<T, I> for F where F: Fn(&mut T, I) -> I + Send + Sync {}
@@ -40,16 +44,18 @@ pub unsafe trait DLock2<I>: Send + Sync {
 pub enum DLock2Impl<T, I, F>
 where
     T: Send + Sync + 'static,
-    I: Send + 'static,
+    I: Send + Sync + Debug + 'static,
     F: DLock2Delegate<T, I> + 'static,
 {
-    FC(FC<T, I, F, RawSpinLock>),
-    FCBan(FCBan<T, I, F, RawSpinLock>),
+    FC(FC<T, I, F>),
+    FCBan(FCBan<T, I, F>),
     CC(CCSynch<T, I, F>),
     DSM(DSMSynch<T, I, F>),
     CCBan(CCBan<T, I, F>),
     FC_SL(FCSL<T, I, F, RawSpinLock>),
-    SpinLock(DLock2SpinLock<T, I, F>),
+    FC_PQ_BTree(fc_pq::FCPQ<T, I, BTreeSet<UsageNode<'static, I>>, F, RawSpinLock>),
+    FC_PQ_BHeap(fc_pq::FCPQ<T, I, BinaryHeap<Reverse<UsageNode<'static, I>>>, F, RawSpinLock>),
+    SpinLock(DLock2Wrapper<T, I, F, RawSpinLock>),
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),
     C_FC(CFlatCombining<T, F, I>),
