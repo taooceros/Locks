@@ -4,13 +4,13 @@ use std::{
 };
 
 use crossbeam::{atomic::AtomicConsume, utils::CachePadded};
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
     dlock::{DLock, DLockDelegate, DLockGuard},
     parker::{Parker, State},
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use self::node::Node;
@@ -23,7 +23,7 @@ const CLEAN_UP_AGE: u32 = 50;
 #[derive(Debug)]
 pub struct FcFairBanLock<T, L, P>
 where
-    L: RawSimpleLock,
+    L: RawMutex,
     P: Parker,
 {
     pass: AtomicU32,
@@ -40,7 +40,7 @@ impl<T, P: Parker> FcFairBanLock<T, RawSpinLock, P> {
     pub fn new(data: T) -> Self {
         Self {
             pass: AtomicU32::new(0),
-            combiner_lock: CachePadded::new(RawSpinLock::new()),
+            combiner_lock: CachePadded::new(RawSpinLock::INIT),
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
@@ -193,7 +193,9 @@ impl<T, P: Parker> DLock<T> for FcFairBanLock<T, RawSpinLock, P> {
                     }
                 }
 
-                self.combiner_lock.unlock();
+                unsafe {
+                    self.combiner_lock.unlock();
+                }
             }
 
             match node.parker.wait_timeout(Duration::from_micros(1)) {

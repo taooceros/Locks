@@ -6,13 +6,10 @@ use std::{
 };
 
 use crossbeam::utils::{Backoff, CachePadded};
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
-use crate::{
-    dlock2::{DLock2, DLock2Delegate},
-    spin_lock::RawSpinLock,
-    RawSimpleLock,
-};
+use crate::dlock2::{DLock2, DLock2Delegate};
 
 use super::node::Node;
 
@@ -24,7 +21,7 @@ where
     T: Send + Sync,
     I: Send,
     F: Fn(&mut T, I) -> I,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pass: SyncUnsafeCell<u32>,
     combiner_lock: CachePadded<L>,
@@ -39,12 +36,12 @@ where
     T: Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
             pass: SyncUnsafeCell::new(0),
-            combiner_lock: CachePadded::new(L::new()),
+            combiner_lock: CachePadded::new(L::INIT),
             delegate,
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
@@ -152,7 +149,7 @@ where
     T: Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
-    L: RawSimpleLock + Send + Sync,
+    L: RawMutex + Send + Sync,
 {
     fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
@@ -173,8 +170,9 @@ where
                     if pass % CLEAN_UP_AGE == 0 {
                         self.clean_unactive_node(&self.head, pass);
                     }
+
+                    self.combiner_lock.unlock();
                 }
-                self.combiner_lock.unlock();
 
                 if node.complete.load(Acquire) {
                     break 'outer;

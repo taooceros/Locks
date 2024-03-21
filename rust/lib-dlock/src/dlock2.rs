@@ -11,7 +11,7 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mutex::DLock2Mutex, spinlock::DLock2SpinLock, uscl::DLock2USCL
+    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mutex::DLock2Mutex, spinlock::DLock2Wrapper, uscl::DLock2USCL
 };
 
 pub mod cc;
@@ -55,7 +55,7 @@ where
     FC_SL(FCSL<T, I, F, RawSpinLock>),
     FC_PQ_BTree(fc_pq::FCPQ<T, I, BTreeSet<UsageNode<'static, I>>, F, RawSpinLock>),
     FC_PQ_BHeap(fc_pq::FCPQ<T, I, BinaryHeap<Reverse<UsageNode<'static, I>>>, F, RawSpinLock>),
-    SpinLock(DLock2SpinLock<T, I, F>),
+    SpinLock(DLock2Wrapper<T, I, F, RawSpinLock>),
     Mutex(DLock2Mutex<T, I, F>),
     USCL(DLock2USCL<T, I, F>),
     C_FC(CFlatCombining<T, F, I>),

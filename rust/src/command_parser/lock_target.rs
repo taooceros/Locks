@@ -14,7 +14,7 @@ use libdlock::{
     },
     dlock2::{
         self, fc::FC, fc_ban::FCBan, fc_pq::UsageNode, mutex::DLock2Mutex,
-        spinlock::DLock2SpinLock, uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
+        spinlock::DLock2Wrapper, uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
     spin_lock::SpinLock,
@@ -171,7 +171,7 @@ impl DLock2Target {
             DLock2Target::FcPqBHeap => {
                 dlock2::fc_pq::FCPQ::<T, I, BinaryHeap<_>, F>::new(data, f).into()
             }
-            DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
+            DLock2Target::SpinLock => DLock2Wrapper::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
             DLock2Target::FcC => CFlatCombining::new(data, f).into(),

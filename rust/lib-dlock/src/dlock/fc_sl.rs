@@ -5,6 +5,7 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 use crossbeam_skiplist::SkipMap;
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -12,7 +13,6 @@ use crate::{
     dlock::{DLock, DLockDelegate},
     parker::Parker,
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use self::node::Node;
@@ -31,7 +31,7 @@ struct Usage {
 #[derive(Debug)]
 pub struct FCSL<T, L, P>
 where
-    L: RawSimpleLock,
+    L: RawMutex,
     P: Parker + 'static,
 {
     combiner_lock: CachePadded<L>,
@@ -47,7 +47,7 @@ where
 {
     pub fn new(data: T) -> Self {
         Self {
-            combiner_lock: CachePadded::new(RawSpinLock::new()),
+            combiner_lock: CachePadded::new(RawSpinLock::INIT),
             data: SyncUnsafeCell::new(data),
             local_node: ThreadLocal::new(),
             jobs: SkipMap::new(),
@@ -121,7 +121,7 @@ where
             node.should_combine.store(true, Release);
             node.parker.wake();
         } else {
-            self.combiner_lock.unlock()
+            unsafe { self.combiner_lock.unlock() }
         }
 
         #[cfg(feature = "combiner_stat")]

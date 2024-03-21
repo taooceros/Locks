@@ -4,6 +4,7 @@ use std::{
 };
 
 use crossbeam::{atomic::AtomicConsume, utils::CachePadded};
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -11,7 +12,6 @@ use crate::{
     dlock::{DLock, DLockDelegate},
     parker::{Parker, State},
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use self::node::Node;
@@ -26,7 +26,7 @@ const COMBINER_SLICE: i64 = (COMBINER_SLICE_MS.as_nanos() as i64) * 2400;
 #[derive(Debug)]
 pub struct FcFairBanSliceLock<T, L, P>
 where
-    L: RawSimpleLock,
+    L: RawMutex,
     P: Parker,
 {
     pass: AtomicU32,
@@ -44,7 +44,7 @@ impl<T, P: Parker> FcFairBanSliceLock<T, RawSpinLock, P> {
     pub fn new(data: T) -> Self {
         Self {
             pass: AtomicU32::new(1),
-            combiner_lock: CachePadded::new(RawSpinLock::new()),
+            combiner_lock: CachePadded::new(RawSpinLock::INIT),
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
@@ -199,16 +199,15 @@ impl<T, P: Parker> DLock<T> for FcFairBanSliceLock<T, RawSpinLock, P> {
 
             if self.combiner_lock.try_lock() {
                 // combiner
+                unsafe {
+                    self.combine(node);
 
-                self.combine(node);
-
-                if self.pass.load_consume() % CLEAN_UP_PERIOD == 0 {
-                    unsafe {
+                    if self.pass.load_consume() % CLEAN_UP_PERIOD == 0 {
                         self.clean_unactive_node(&self.head, self.pass.load_consume());
                     }
-                }
 
-                self.combiner_lock.unlock();
+                    self.combiner_lock.unlock();
+                }
             }
 
             // combiner break

@@ -1,4 +1,5 @@
 use derivative::Derivative;
+use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -21,7 +22,6 @@ use crate::{
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use arrayvec::ArrayVec;
@@ -64,7 +64,7 @@ where
     I: Send + 'static,
     PQ: SequentialPriorityQueue<UsageNode<'static, I>> + Debug,
     F: Fn(&mut T, I) -> I,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     combiner_lock: CachePadded<L>,
     delegate: F,
@@ -80,11 +80,11 @@ where
     I: Send,
     PQ: SequentialPriorityQueue<UsageNode<'static, I>> + Debug,
     F: DLock2Delegate<T, I>,
-    L: RawSimpleLock,
+    L: RawMutex,
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
-            combiner_lock: CachePadded::new(L::new()),
+            combiner_lock: CachePadded::new(L::INIT),
             delegate,
             job_queue: PQ::new().into(),
             waiting_nodes: ConcurrentRingBuffer::new(),
@@ -216,12 +216,13 @@ where
     }
 }
 
-unsafe impl<T, PQ, I, F> DLock2<I> for FCPQ<T, I, PQ, F, RawSpinLock>
+unsafe impl<T, PQ, I, F, L> DLock2<I> for FCPQ<T, I, PQ, F, L>
 where
     T: Send + Sync,
     PQ: SequentialPriorityQueue<UsageNode<'static, I>> + Debug + Send + Sync,
     I: Send,
     F: DLock2Delegate<T, I>,
+    L: RawMutex + Send + Sync,
 {
     fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
@@ -236,7 +237,10 @@ where
 
             if self.combiner_lock.try_lock() {
                 self.combine();
-                self.combiner_lock.unlock();
+
+                unsafe {
+                    self.combiner_lock.unlock();
+                }
 
                 if node.complete.load(Acquire) {
                     break 'outer;

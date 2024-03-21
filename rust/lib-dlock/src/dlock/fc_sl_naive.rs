@@ -5,6 +5,7 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 use crossbeam_skiplist::SkipMap;
+use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -12,7 +13,6 @@ use crate::{
     dlock::{DLock, DLockDelegate},
     parker::{Parker, State},
     spin_lock::RawSpinLock,
-    RawSimpleLock,
 };
 
 use self::node::Node;
@@ -31,7 +31,7 @@ struct Usage {
 #[derive(Debug)]
 pub struct FCSLNaive<T, L, P>
 where
-    L: RawSimpleLock,
+    L: RawMutex,
     P: Parker + 'static,
 {
     combiner_lock: CachePadded<L>,
@@ -47,7 +47,7 @@ where
 {
     pub fn new(data: T) -> Self {
         Self {
-            combiner_lock: CachePadded::new(RawSpinLock::new()),
+            combiner_lock: CachePadded::new(RawSpinLock::INIT),
             data: SyncUnsafeCell::new(data),
             local_node: ThreadLocal::new(),
             jobs: SkipMap::new(),
@@ -131,10 +131,12 @@ impl<T: 'static, P: Parker> DLock<T> for FCSLNaive<T, RawSpinLock, P> {
 
         loop {
             if self.combiner_lock.try_lock() {
-                // combiner
-                self.combine();
+                unsafe {
+                    // combiner
+                    self.combine();
 
-                self.combiner_lock.unlock();
+                    self.combiner_lock.unlock();
+                }
             }
 
             match node.parker.wait_timeout(Duration::from_micros(10)) {
