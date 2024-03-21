@@ -39,7 +39,7 @@ where
     F: DLock2Delegate<T, I>,
 {
     fn lock(&self, data: I) -> I {
-        let mut lock_data = self.lock.lock();
+        self.lock.lock();
         (self.delegate)(unsafe { self.data.get().as_mut().unwrap_unchecked() }, data)
     }
 
