@@ -1,10 +1,15 @@
-use std::{
-    cell::{SyncUnsafeCell},
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool},
-};
+use std::{cell::SyncUnsafeCell, mem::MaybeUninit, sync::atomic::AtomicBool};
 
+use atomic_enum::atomic_enum;
 use crossbeam::utils::CachePadded;
+
+#[atomic_enum]
+#[derive(PartialEq)]
+pub enum ActiveState {
+    Inactive,
+    Attempted,
+    Active,
+}
 
 #[derive(Debug)]
 pub struct Node<T> {

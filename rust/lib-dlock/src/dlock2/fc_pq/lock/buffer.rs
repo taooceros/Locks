@@ -6,15 +6,20 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crossbeam::utils::CachePadded;
+use crossbeam::utils::{Backoff, CachePadded};
 
 use crate::atomic_extension::AtomicExtension;
 
 #[derive(Debug)]
 pub struct ConcurrentRingBuffer<T, const N: usize> {
-    pub buffer: SyncUnsafeCell<[MaybeUninit<T>; N]>,
+    pub buffer: SyncUnsafeCell<[MaybeUninit<Entry<T>>; N]>,
     pub head: CachePadded<AtomicUsize>,
     pub tail: CachePadded<AtomicUsize>,
+}
+
+struct Entry<T> {
+    value: SyncUnsafeCell<T>,
+    valid: CachePadded<AtomicUsize>,
 }
 
 unsafe impl<T: Send, const N: usize> Sync for ConcurrentRingBuffer<T, N> {}
@@ -27,11 +32,22 @@ impl<T: 'static, const N: usize> Default for ConcurrentRingBuffer<T, N> {
 
 impl<T: 'static, const N: usize> ConcurrentRingBuffer<T, N> {
     pub fn new() -> Self {
-        Self {
+        let mut buffer = Self {
             buffer: unsafe { MaybeUninit::uninit().assume_init() },
             head: AtomicUsize::new(0).into(),
             tail: AtomicUsize::new(0).into(),
+        };
+
+        unsafe {
+            for entry in buffer.buffer.get_mut().iter_mut() {
+                entry.write(Entry {
+                    value: MaybeUninit::uninit().assume_init(),
+                    valid: AtomicUsize::new(0).into(),
+                });
+            }
         }
+
+        buffer
     }
 
     pub fn push(&self, value: T) {
@@ -57,7 +73,17 @@ impl<T: 'static, const N: usize> ConcurrentRingBuffer<T, N> {
             // invariant: any previous value in this location should be already consumed
 
             unsafe {
-                (*self.buffer.get())[tail % N].write(value);
+                let entry = (*self.buffer.get())[tail % N].assume_init_mut();
+
+                let backoff = Backoff::new();
+
+                // 1 if the entry is used by the other thread
+                while entry.valid.load_acquire() != 0 {
+                    backoff.snooze();
+                }
+
+                entry.value.get().write(value);
+                entry.valid.store_release(1);
             }
 
             return;
@@ -72,9 +98,10 @@ impl<T: 'static, const N: usize> ConcurrentRingBuffer<T, N> {
     /// Iterate over the buffer.
     /// The iterator will not be invalidated by concurrent insertions.
     /// Drop the iterator to allow further insertions
-    pub fn iter(&self) -> BufferIterator<T, N> {
+    /// Only one thread can hold the iterator at a time
+    pub unsafe fn iter(&self) -> BufferIterator<T, N> {
         let head = self.head.load(Ordering::Relaxed);
-        let tail = self.tail.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
 
         BufferIterator {
             buffer: self,
@@ -93,6 +120,11 @@ pub struct BufferIterator<'a, T, const N: usize> {
 impl<'a, T, const N: usize> Iterator for BufferIterator<'a, T, N> {
     type Item = T;
 
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.limit - self.head;
+        (size, Some(size))
+    }
+
     fn next(&mut self) -> Option<Self::Item> {
         // one scan at most
         if self.head == self.limit {
@@ -101,10 +133,18 @@ impl<'a, T, const N: usize> Iterator for BufferIterator<'a, T, N> {
 
         let buffer = unsafe { &*self.buffer.buffer.get() };
 
+        let entry = unsafe { buffer[self.head % N].assume_init_ref() };
+
+        while entry.valid.load_acquire() == 0 {
+            spin_loop();
+        }
+
         // take ownership of the item in the buffer
-        let value = unsafe { buffer[self.head % N].as_ptr().read() };
+        let value = unsafe { entry.value.get().read() };
 
         self.head += 1;
+
+        entry.valid.store_release(0);
 
         Some(value)
     }

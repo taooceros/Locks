@@ -299,9 +299,9 @@ fn start_benchmark(
 fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
     write_results(output_path, file_name, &records);
 
-    // for record in records.clone() {
-    //     println!("{}", record.loop_count);
-    // }
+    for record in records.iter() {
+        println!("{}", record.loop_count);
+    }
 
     let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 

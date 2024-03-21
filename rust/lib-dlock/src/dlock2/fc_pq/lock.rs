@@ -1,7 +1,7 @@
 use derivative::Derivative;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::current;
 use std::{
     arch::x86_64::__rdtscp,
@@ -15,7 +15,7 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
-use crate::rand;
+use crate::{__jmp_buf, rand};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
@@ -94,11 +94,11 @@ where
     }
 
     fn push_node(&self, node: &Node<I>) {
+        node.active.store(true, Release);
         self.waiting_nodes.push((
             AtomicPtr::new(node as *const _ as *mut Node<I>),
             current().id().as_u64().into(),
         ));
-        node.active.store_release(true);
     }
 
     fn push_if_unactive(&self, node: &mut Node<I>) {
@@ -118,16 +118,22 @@ where
             begin = __rdtscp(&mut aux);
         }
 
-        const H: usize = 32;
+        const H: usize = 64;
 
         // only one thread would combine so this is safe
         let job_queue = unsafe { &mut *self.job_queue.get() };
 
         if !self.waiting_nodes.empty() {
-            for (node, id) in self.waiting_nodes.iter() {
+            let iterator = unsafe { self.waiting_nodes.iter() };
+
+            let size = iterator.size_hint();
+
+            let mut count = 0;
+
+            for (node, id) in iterator {
+                count += 1;
                 unsafe {
                     let node = &*node.load_acquire();
-                    node.active.store_release(true);
                     job_queue.push(UsageNode {
                         usage: node.usage,
                         tie_breaker: id,
@@ -135,9 +141,11 @@ where
                     });
                 }
             }
+
+            assert!(count == size.0);
         }
 
-        let mut buffer = ConstGenericRingBuffer::<_, 16>::new();
+        let mut buffer = ConstGenericRingBuffer::<UsageNode<I>, 16>::new();
 
         unsafe {
             for _ in 0..H {
@@ -173,7 +181,11 @@ where
                     // if the buffer is full then push the nodes back to the job queue
                     if buffer.is_full() {
                         for node in buffer.drain() {
-                            job_queue.push(node);
+                            if node.node.complete.load(Acquire) {
+                                node.node.active.store_release(false);
+                            } else {
+                                job_queue.push(node);
+                            }
                         }
                     }
 
@@ -182,8 +194,10 @@ where
                 }
             }
 
-            if !buffer.is_empty() {
-                for node in buffer.drain() {
+            for node in buffer.drain() {
+                if node.node.complete.load(Acquire) {
+                    node.node.active.store_release(false);
+                } else {
                     job_queue.push(node);
                 }
             }

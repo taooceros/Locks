@@ -1,4 +1,8 @@
-use std::{fmt::Debug, sync::Mutex};
+use std::{
+    collections::{BTreeSet, BinaryHeap},
+    fmt::Debug,
+    sync::Mutex,
+};
 
 use clap::ValueEnum;
 use libdlock::{
@@ -9,8 +13,8 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2SpinLock,
-        uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
+        self, fc::FC, fc_ban::FCBan, fc_pq::UsageNode, mutex::DLock2Mutex,
+        spinlock::DLock2SpinLock, uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
     spin_lock::SpinLock,
@@ -115,8 +119,10 @@ pub enum DLock2Target {
     DSM,
     /// Benchmark FC-SL
     FcSL,
-    /// Benchmark FC-PQ
-    FcPQ,
+    /// Benchmark FC-PQ (BTree)
+    FcPqBTree,
+    /// Benchmark FC-PQ (BinaryHeap)
+    FcPqBHeap,
     /// Benchmark Mutex
     Mutex,
     /// Benchmark Spinlock
@@ -140,7 +146,8 @@ impl DLock2Target {
             | DLock2Target::FcC
             | DLock2Target::CcC
             | DLock2Target::FcSL
-            | DLock2Target::FcPQ => true,
+            | DLock2Target::FcPqBHeap
+            | DLock2Target::FcPqBTree => true,
             DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
         }
     }
@@ -158,7 +165,12 @@ impl DLock2Target {
             DLock2Target::CCBan => dlock2::cc_ban::CCBan::new(data, f).into(),
             DLock2Target::DSM => dlock2::dsm::DSMSynch::new(data, f).into(),
             DLock2Target::FcSL => dlock2::fc_sl::FCSL::new(data, f).into(),
-            DLock2Target::FcPQ => dlock2::fc_pq::FCPQ::new(data, f).into(),
+            DLock2Target::FcPqBTree => {
+                dlock2::fc_pq::FCPQ::<T, I, BTreeSet<_>, F>::new(data, f).into()
+            }
+            DLock2Target::FcPqBHeap => {
+                dlock2::fc_pq::FCPQ::<T, I, BinaryHeap<_>, F>::new(data, f).into()
+            }
             DLock2Target::SpinLock => DLock2SpinLock::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
