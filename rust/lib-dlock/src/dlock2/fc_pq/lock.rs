@@ -160,6 +160,8 @@ where
                 let node = current.node;
 
                 if !node.complete.load(Acquire) {
+                    // alternatively we can potentially save one __rdtscp by using `end` here
+                    // which would result in a slightly inaccurate usage
                     begin = __rdtscp(&mut aux);
 
                     node.data.get().write(
