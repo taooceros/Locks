@@ -35,11 +35,11 @@ dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_le
 
 # dlock2 counter-proportional -t 8 16 --stat-response-time --cs 1
 
-dlock2 fetch-and-multiply -t $threads --stat-response-time -d $short_experiment_length
-dlock2 fetch-and-multiply -t $threads -d $long_experiment_length
+# dlock2 fetch-and-multiply -t $threads --stat-response-time -d $short_experiment_length
+# dlock2 fetch-and-multiply -t $threads -d $long_experiment_length
 
-dlock2 queue -t $threads --stat-response-time -d $short_experiment_length
-dlock2 queue -t $threads -d $long_experiment_length
+# dlock2 queue -t $threads --stat-response-time -d $short_experiment_length
+# dlock2 queue -t $threads -d $long_experiment_length
 
-dlock2 priority-queue -t $threads --stat-response-time -d $short_experiment_length
-dlock2 priority-queue -t $threads -d $long_experiment_length
+# dlock2 priority-queue -t $threads --stat-response-time -d $short_experiment_length
+# dlock2 priority-queue -t $threads -d $long_experiment_length
