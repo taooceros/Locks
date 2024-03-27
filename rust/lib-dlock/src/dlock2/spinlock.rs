@@ -41,6 +41,7 @@ where
     fn lock(&self, data: I) -> I {
         self.lock.lock();
         let output = (self.delegate)(unsafe { self.data.get().as_mut().unwrap_unchecked() }, data);
+        println!("DLock2Wrapper::lock() output: {:?}", output);
         unsafe {
             self.lock.unlock();
         }
