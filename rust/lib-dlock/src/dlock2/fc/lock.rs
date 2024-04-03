@@ -199,11 +199,7 @@ where
         unsafe {
             self.local_node
                 .get()
-                .unwrap()
-                .get()
-                .read()
-                .combiner_time_stat
-                .into()
+                .map(|x| (*x.get()).combiner_time_stat)
         }
     }
 }

@@ -67,6 +67,7 @@ pub fn benchmark_pq<'a, S: SequentialPriorityQueue<u64> + Send + Sync + 'static>
             let records = start_benchmark(bencher, queue, &lockname);
             finish_benchmark(
                 &bencher.output_path,
+                &lockname,
                 if bencher.stat_response_time {
                     "Priority Queue (latency)"
                 } else {
@@ -178,9 +179,20 @@ where
     })
 }
 
-fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: impl Borrow<Vec<Records>>) {
-    let records = records.borrow();
-    write_results(output_path, file_name, records);
+fn finish_benchmark<'a>(
+    output_path: &Path,
+    pq_name: &str,
+    file_name: &str,
+    records: impl AsRef<Vec<Records>>,
+) {
+    let folder = output_path.join(pq_name);
+
+    if !folder.exists() {
+        std::fs::create_dir_all(&folder).unwrap();
+    }
+
+    let records = records.as_ref();
+    write_results(&folder, file_name, records);
 
     for record in records.iter() {
         println!("{}", record.loop_count);

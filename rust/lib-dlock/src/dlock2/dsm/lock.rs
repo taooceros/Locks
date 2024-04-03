@@ -191,11 +191,7 @@ where
         unsafe {
             self.local_node
                 .get()
-                .expect("No thread local node found")
-                .combiner_time_stat
-                .get()
-                .read()
-                .into()
+                .map(|node| *node.combiner_time_stat.get())
         }
     }
 }

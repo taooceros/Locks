@@ -231,15 +231,6 @@ where
 
     #[cfg(feature = "combiner_stat")]
     fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .unwrap()
-                .get()
-                .as_ref()
-                .unwrap()
-                .combiner_time_stat
-                .into()
-        }
+        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
     }
 }

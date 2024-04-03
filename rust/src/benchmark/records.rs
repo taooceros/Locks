@@ -7,6 +7,8 @@ use serde_arrow::schema::{SchemaLike, SerdeArrowSchema, TracingOptions};
 
 use crate::benchmark::helper::create_plain_writer;
 
+use super::bencher::Bencher;
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Records {
     pub id: usize,
@@ -16,6 +18,7 @@ pub struct Records {
     pub loop_count: u64,
     pub num_acquire: u64,
     pub cs_length: u64,
+    pub duration: u64,
     pub non_cs_length: Option<u64>,
     pub combiner_latency: Vec<u64>,
     pub waiter_latency: Vec<u64>,
@@ -23,6 +26,17 @@ pub struct Records {
     pub combine_time: Option<u64>,
     pub locktype: String,
     pub waiter_type: String,
+}
+
+impl Records {
+    pub fn from_bencher(bencher: &Bencher) -> Self {
+        Self {
+            cpu_num: bencher.num_cpu,
+            thread_num: bencher.num_thread,
+            duration: bencher.duration,
+            ..Default::default()
+        }
+    }
 }
 
 pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borrow<Vec<Records>>) {
@@ -41,8 +55,11 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
     WRITERS.with(move |cell| {
         let mut map = cell.borrow_mut();
 
-        let writer = if map.contains_key(file_name) {
-            map.get_mut(file_name)
+        let file_path = output_path.join(format!("{file_name}.arrow"));
+        let file_path_str = file_path.to_str().unwrap();
+
+        let writer = if map.contains_key(file_path_str) {
+            map.get_mut(file_path_str)
         } else {
             let option =
                 IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
@@ -52,8 +69,7 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
             map.insert(
                 file_name.to_owned(),
                 FileWriter::try_new_with_options(
-                    create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                        .expect("Failed to create writer"),
+                    create_plain_writer(file_path).expect("Failed to create writer"),
                     &schema,
                     option,
                 )
