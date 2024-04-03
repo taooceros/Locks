@@ -312,7 +312,7 @@ fn finish_benchmark<'a>(
     }
 
     let records = records.as_ref();
-    
+
     write_results(&folder, file_name, records);
 
     for record in records.iter() {
