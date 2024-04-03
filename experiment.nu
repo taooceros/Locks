@@ -23,7 +23,7 @@ for non_cs in (seq 1 5 | each { |it| 10 ** $it}) {
 }
 
 dlock2 counter-proportional -t 8,16 --cs 1 --non-cs 0 -d $short_experiment_length --stat-response-time --file-name "single-addition-latency"
-dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_length --file-name "single-addition"
+dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_length
 
 
 
