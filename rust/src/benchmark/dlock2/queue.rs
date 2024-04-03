@@ -1,6 +1,5 @@
 use std::{
     arch::x86_64::__rdtscp,
-    cell::{OnceCell, RefCell},
     hint::black_box,
     path::Path,
     sync::{
@@ -11,12 +10,11 @@ use std::{
     time::Duration,
 };
 
-use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-
+use arrow::record_batch;
 use rand::Rng;
 
 use crate::{
-    benchmark::{bencher::Bencher, helper::create_plain_writer, records::*},
+    benchmark::{bencher::Bencher, records::*},
     lock_target::DLock2Target,
 };
 
@@ -56,10 +54,11 @@ pub fn benchmark_queue<'a, Q: SequentialQueue<u64> + Send + Sync + 'static>(
         );
 
         if let Some(lock) = lock {
-            let lockname = format!("{}-queue", lock);
-            let records = start_benchmark(bencher, lock, &lockname);
+            let queue_name = format!("{}-queue", lock);
+            let records = start_benchmark(bencher, lock, &queue_name);
             finish_benchmark(
                 &bencher.output_path,
+                &queue_name,
                 if bencher.stat_response_time {
                     "Queue (latency)"
                 } else {
@@ -143,16 +142,13 @@ where
                     Records {
                         id,
                         cpu_id: core_id.id,
-                        thread_num: bencher.num_thread,
-                        cpu_num: bencher.num_cpu,
-                        loop_count: loop_count as u64,
+                        loop_count,
                         num_acquire,
-                        cs_length: 0,
                         non_cs_length: Some(0),
                         waiter_latency: response_times,
                         locktype: queue_name.to_owned(),
                         waiter_type: "".to_string(),
-                        ..Default::default()
+                        ..Records::from_bencher(bencher)
                     }
                 })
             })
@@ -169,8 +165,21 @@ where
     })
 }
 
-fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
-    write_results(output_path, file_name, &records);
+fn finish_benchmark<'a>(
+    output_path: &Path,
+    queue_name: &str,
+    file_name: &str,
+    records: impl AsRef<Vec<Records>>,
+) {
+    let folder = output_path.join(queue_name);
+
+    if !folder.exists() {
+        std::fs::create_dir_all(&folder).unwrap();
+    }
+
+    let records = records.as_ref();
+
+    write_results(&folder, file_name, records);
 
     for record in records.iter() {
         println!("{}", record.loop_count);

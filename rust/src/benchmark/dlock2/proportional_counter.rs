@@ -34,7 +34,7 @@ unsafe impl DLock2<Data> for FetchAddDlock2 {
         let input = black_box(input);
 
         if let Data::Input {
-            thread_id,
+            thread_id: _,
             data: loop_limit,
         } = input
         {
@@ -126,14 +126,16 @@ pub fn proportional_counter<'a>(
         );
 
         if let Some(lock) = lock {
+            let lock = Arc::new(lock);
+
             let records = start_benchmark(
                 bencher,
                 stat_hold_time,
                 cs_loop.clone(),
                 non_cs_loop.clone(),
-                lock,
+                lock.clone(),
             );
-            finish_benchmark(&bencher.output_path, file_name, records);
+            finish_benchmark(&bencher.output_path, &lock.to_string(), file_name, records);
         }
     }
 
@@ -147,9 +149,9 @@ pub fn proportional_counter<'a>(
             stat_hold_time,
             cs_loop.clone(),
             non_cs_loop.clone(),
-            lock,
+            Arc::new(lock),
         );
-        finish_benchmark(&bencher.output_path, file_name, records);
+        finish_benchmark(&bencher.output_path, "Fetch&Add", file_name, records);
     }
 }
 
@@ -168,17 +170,19 @@ pub enum Data {
     },
 }
 
-fn start_benchmark(
+fn start_benchmark<L>(
     bencher: &Bencher,
     stat_hold_time: bool,
     cs_loop: impl Iterator<Item = u64> + Clone,
     non_cs_loop: impl Iterator<Item = u64> + Clone,
-    lock_target: impl DLock2<Data> + 'static + Display,
-) -> Vec<Records> {
-    println!("Start benchmark for {}", lock_target);
+    lock: Arc<L>,
+) -> Vec<Records>
+where
+    L: DLock2<Data> + 'static + Display,
+{
+    println!("Start benchmark for {}", lock);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
-    let lock_ref = Arc::new(lock_target);
 
     let core_ids = core_affinity::get_core_ids().unwrap();
     let core_ids = core_ids.iter().take(bencher.num_thread);
@@ -190,7 +194,7 @@ fn start_benchmark(
             .take(bencher.num_thread)
             .enumerate()
             .map(|(id, (cs_loop, non_cs_loop, core_id))| {
-                let lock_ref = lock_ref.clone();
+                let lock_ref = lock.clone();
                 let core_id = *core_id;
                 let stop_signal = stop_signal.clone();
                 let stat_response_time = bencher.stat_response_time;
@@ -268,9 +272,7 @@ fn start_benchmark(
                     Records {
                         id,
                         cpu_id: core_id.id,
-                        thread_num: bencher.num_thread,
-                        cpu_num: bencher.num_cpu,
-                        loop_count: loop_count as u64,
+                        loop_count,
                         num_acquire,
                         cs_length: cs_loop,
                         non_cs_length: Some(non_cs_loop),
@@ -280,6 +282,7 @@ fn start_benchmark(
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
+                        ..Records::from_bencher(bencher)
                     }
                 })
             })
@@ -296,8 +299,21 @@ fn start_benchmark(
     })
 }
 
-fn finish_benchmark<'a>(output_path: &Path, file_name: &str, records: Vec<Records>) {
-    write_results(output_path, file_name, &records);
+fn finish_benchmark<'a>(
+    output_path: &Path,
+    file_name: &str,
+    lock_name: &str,
+    records: impl AsRef<Vec<Records>>,
+) {
+    let folder = output_path.join(lock_name);
+
+    if !folder.exists() {
+        std::fs::create_dir_all(&folder).unwrap();
+    }
+
+    let records = records.as_ref();
+
+    write_results(&folder, file_name, records);
 
     for record in records.iter() {
         println!("{}", record.loop_count);
