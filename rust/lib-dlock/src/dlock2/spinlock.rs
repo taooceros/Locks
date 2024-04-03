@@ -40,7 +40,11 @@ where
 {
     fn lock(&self, data: I) -> I {
         self.lock.lock();
-        (self.delegate)(unsafe { self.data.get().as_mut().unwrap_unchecked() }, data)
+        let output = (self.delegate)(unsafe { self.data.get().as_mut().unwrap_unchecked() }, data);
+        unsafe {
+            self.lock.unlock();
+        }
+        output
     }
 
     #[cfg(feature = "combiner_stat")]
