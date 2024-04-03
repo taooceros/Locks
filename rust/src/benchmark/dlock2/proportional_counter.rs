@@ -14,7 +14,7 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::dlock2::DLock2;
+use libdlock::{dlock2::DLock2, FILENAME_MAX};
 
 use crate::{
     benchmark::{
@@ -135,7 +135,7 @@ pub fn proportional_counter<'a>(
                 non_cs_loop.clone(),
                 lock.clone(),
             );
-            finish_benchmark(&bencher.output_path, &lock.to_string(), file_name, records);
+            finish_benchmark(&bencher.output_path, file_name, &lock.to_string(), records);
         }
     }
 
@@ -151,7 +151,7 @@ pub fn proportional_counter<'a>(
             non_cs_loop.clone(),
             Arc::new(lock),
         );
-        finish_benchmark(&bencher.output_path, "Fetch&Add", file_name, records);
+        finish_benchmark(&bencher.output_path, file_name, "Fetch&Add", records);
     }
 }
 
@@ -312,7 +312,7 @@ fn finish_benchmark<'a>(
     }
 
     let records = records.as_ref();
-
+    
     write_results(&folder, file_name, records);
 
     for record in records.iter() {

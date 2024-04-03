@@ -55,8 +55,11 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
     WRITERS.with(move |cell| {
         let mut map = cell.borrow_mut();
 
-        let writer = if map.contains_key(file_name) {
-            map.get_mut(file_name)
+        let file_path = output_path.join(format!("{file_name}.arrow"));
+        let file_path_str = file_path.to_str().unwrap();
+
+        let writer = if map.contains_key(file_path_str) {
+            map.get_mut(file_path_str)
         } else {
             let option =
                 IpcWriteOptions::try_new(8, false, arrow::ipc::MetadataVersion::V5).unwrap();
@@ -66,8 +69,7 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
             map.insert(
                 file_name.to_owned(),
                 FileWriter::try_new_with_options(
-                    create_plain_writer(output_path.join(format!("{file_name}.arrow")))
-                        .expect("Failed to create writer"),
+                    create_plain_writer(file_path).expect("Failed to create writer"),
                     &schema,
                     option,
                 )
