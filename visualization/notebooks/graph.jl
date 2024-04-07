@@ -41,7 +41,7 @@ html"""
 colors = ["#003C96", "#11A69C", "#924AF7", "#D17711", "#0081FE", "#FF5383", "#00AB55", "#400387", "#F2681F", "#005062", "#DE2C62", "#660E00"];
 
 # ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
-folder = "data"
+folder = "output"
 
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
 datasets = readdir("../$folder");
@@ -110,12 +110,35 @@ md"""
 We will hold an interactive result view to demonstrate the result.
 """
 
+# ╔═╡ d28bb0be-c40f-4c5a-a15f-324a3304857b
+Arrow.Table("../output/FC/counter cs [1] noncs [0].arrow")[:thread_num]
+
+# ╔═╡ c8a7a955-9425-4da2-a946-6043a0758408
+begin
+	simple_counter_df = DataFrame()
+	
+	let
+		arrow_files = [] 
+		for (root, dirs, files) in walkdir("../output")
+		    for file in files
+				if startswith(file, "counter")
+		       		push!(arrow_files, joinpath(root, file))
+				end
+		    end
+		end
+
+		simple_counter_df = reduce(vcat, @chain arrow_files begin
+			map(x->DataFrame(Arrow.Table(x)), _)
+		end)
+	end
+end
+
 # ╔═╡ 3503720e-b0c0-4914-9a11-17b821951a44
 begin
 	counter_folder = "../data/counter-proportional"
 	counter_files = readdir(counter_folder)
 	counter_files_simple = filter(x-> occursin("1000, 3000", x), counter_files)
-	simple_counter_df = reduce(vcat, DataFrame(Arrow.Table(joinpath(counter_folder, file))) for file in counter_files_simple)
+	# simple_counter_df = reduce(vcat, DataFrame(Arrow.Table(joinpath(counter_folder, file))) for file in counter_files_simple)
 
 	counter_locknames = unique(simple_counter_df[!, :locktype])
 	simple_counter_noncs = sort(unique(simple_counter_df[!, :non_cs_length]))
@@ -463,25 +486,6 @@ end;
 
   ╠═╡ =#
 
-# ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
-# ╠═╡ disabled = true
-#=╠═╡
-if analyze_response_time
-	df2 = @chain df1 begin
-		@subset(:thread_num .== thread_num_response_time)
-		@select(:locktype, :id, :job_length, :is_combiner, :response_time)
-		@transform(@byrow :response_time = Dates.value.(:response_time))
-		@transform(@byrow :c_r = zip(:is_combiner, :response_time))
-		@transform(@byrow begin
-			:combine_response = Iterators.filter((y->y[1]), :c_r)
-			:response = Iterators.filter((y->!y[1]), :c_r)
-		end)
-		stack([:combine_response, :response])
-		@rename(:response_type = :variable)
-	end
-end
-  ╠═╡ =#
-
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
 #=╠═╡
 if analyze_response_time
@@ -526,18 +530,6 @@ if flatten_latency_analysis
 end;
   ╠═╡ =#
 
-# ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
-#=╠═╡
-if flatten_latency_analysis
-	df2 = @chain df1 begin
-		@subset(:thread_num .== thread_num_response_time)
-		@select(:locktype, :id, :combiner_latency, :waiter_latency)
-		stack([:combiner_latency, :waiter_latency])
-		@rename(:response_type = :variable)
-	end;
-end;
-  ╠═╡ =#
-
 # ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
 #=╠═╡
 if flatten_latency_analysis
@@ -551,6 +543,37 @@ end;
 if flatten_latency_analysis
 	draw(flatten_latency_plt, figure=(;size=(1200,600)), axis=(;xscale=log))
 end
+  ╠═╡ =#
+
+# ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
+# ╠═╡ disabled = true
+#=╠═╡
+if analyze_response_time
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :job_length, :is_combiner, :response_time)
+		@transform(@byrow :response_time = Dates.value.(:response_time))
+		@transform(@byrow :c_r = zip(:is_combiner, :response_time))
+		@transform(@byrow begin
+			:combine_response = Iterators.filter((y->y[1]), :c_r)
+			:response = Iterators.filter((y->!y[1]), :c_r)
+		end)
+		stack([:combine_response, :response])
+		@rename(:response_type = :variable)
+	end
+end
+  ╠═╡ =#
+
+# ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+#=╠═╡
+if flatten_latency_analysis
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :combiner_latency, :waiter_latency)
+		stack([:combiner_latency, :waiter_latency])
+		@rename(:response_type = :variable)
+	end;
+end;
   ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2674,7 +2697,9 @@ version = "3.5.0+0"
 # ╟─4effc63c-e191-4708-890f-44bf0e3a0ea7
 # ╟─7ca2625c-3681-4eb1-a7a2-487978716a0c
 # ╟─5c2a9187-b5ae-4a4b-ad40-a3d063f4ab99
-# ╟─3503720e-b0c0-4914-9a11-17b821951a44
+# ╠═d28bb0be-c40f-4c5a-a15f-324a3304857b
+# ╠═c8a7a955-9425-4da2-a946-6043a0758408
+# ╠═3503720e-b0c0-4914-9a11-17b821951a44
 # ╟─de0bec11-fc0b-4e68-8ec2-1c4c9435cb7a
 # ╟─a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
 # ╠═f764b6a1-f943-44bd-a629-6a957c7ec869

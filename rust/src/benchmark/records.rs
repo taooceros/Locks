@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cell::RefCell, collections::HashMap, path::Path, time::Duration};
+use std::{borrow::Borrow, cell::{RefCell, RefMut}, collections::HashMap, fs::File, path::Path, time::Duration};
 
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
@@ -53,8 +53,8 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
     let schema = Schema::new(fields);
 
     WRITERS.with(move |cell| {
-        let mut map = cell.borrow_mut();
-
+        let mut map : RefMut<HashMap<String, FileWriter<File>>> = cell.borrow_mut();
+        
         let file_path = output_path.join(format!("{file_name}.arrow"));
         let file_path_str = file_path.to_str().unwrap();
 
@@ -67,7 +67,7 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
             // .expect("Failed to create compression option");
 
             map.insert(
-                file_name.to_owned(),
+                file_path_str.to_owned(),
                 FileWriter::try_new_with_options(
                     create_plain_writer(file_path).expect("Failed to create writer"),
                     &schema,
