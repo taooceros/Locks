@@ -11,8 +11,8 @@ let simple_cs = "1000,3000"
 
 alias dlock2 = target/release/dlock d-lock2
 
-let short_experiment_length = 3
-let long_experiment_length = 8
+let short_experiment_length = 5
+let long_experiment_length = 15
 
 # echo $cs
 
