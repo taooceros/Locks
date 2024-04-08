@@ -129,9 +129,17 @@ begin
 		end)
 	end
 	counter_locknames = unique(simple_counter_df[!, :locktype])
+	filter!(x->(!(x in ["C_FC", "C_CC"])), counter_locknames)
+	
 	simple_counter_noncs = sort(unique(simple_counter_df[!, :non_cs_length]))
 	simple_counter_threads = sort(unique(simple_counter_df[!, :thread_num]))
-end;
+
+	md"""
+	### Result
+	
+	We will hold an interactive result view to demonstrate the result.
+	"""
+end
 
 # ╔═╡ de0bec11-fc0b-4e68-8ec2-1c4c9435cb7a
 md"""
@@ -164,6 +172,11 @@ let
     	palettes=(; color=colors), axis=(; xticks=[0,2,4,8,16,32,64], xscale=log, limits = (1, nothing, 0, nothing)))
 end
 
+# ╔═╡ d830cb2b-f599-47e4-83f9-3d4dd1ba6876
+md"""
+##### Figure: Throughput Comparison of each lock
+"""
+
 # ╔═╡ c9aee179-eebe-4e12-8976-ee131aaf029e
 md"""
 The experiment demonstrate the comparison of throughput for each locks with varying size of non-critical section. The result shows that the size of non-critical section has minimal impact on the overall throughput for all locks but `Mutex` and `U-SCL` until hitting a large enough non-critical section (10000) which has the possibility that all threads would not try to acquire the critical section for a certain amount of time. These performance degration is recovered when the contention increases (thread number increase).
@@ -176,10 +189,6 @@ In most other configuration, `FlatCombining` outperform other locks, which repro
 
 `FlatCombining-Skiplist` is an implementation that utilizes a concurrent-skiplist to replace the FIFO queue in `CC-Synch`/`DSM-Synch` with the election strategy presented in `FlatCombining`. The performance is generally bad because the overhead of skiplist, but still outperform other locks that doesn't employ delegation strategy.
 
-"""
-
-# ╔═╡ 74ef35e1-acd1-4d83-aeb4-e9ae77565dff
-md"""
 """
 
 # ╔═╡ e7d00699-c7cc-4e27-ab4f-fd3ff7f60258
@@ -202,43 +211,76 @@ simple_counter_fairness_df = @chain simple_counter_df begin
 	@subset(:locktype .∈ Ref(simple_counter_fairness_locks), :duration .!= 0, :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
 end;
 
+# ╔═╡ dd696bcb-11f4-4b24-a533-0f4daf3f4f86
+md"""
+##### Figure: Thread level Throughput Comparison with different non-critical section
+"""
+
 # ╔═╡ f6f8234c-b3c9-40a4-89bf-a6493233a377
 let
 	plt = data(simple_counter_fairness_df) *
-		mapping(:id, :loop_count, color=:locktype, markersize=:cs_length => (x->x/200), col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
-		(visual(Scatter) + visual(Lines; alpha = 0.5));
+		mapping(:id, :loop_count, color=:locktype, markersize=:cs_length => (x->(x+3000)/500), col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
+		(visual(Scatter; alpha=0.8) + visual(Lines; alpha=0.5));
 
 	height = length(simple_counter_fairness_thread_num) * 400
+	width = length(simple_counter_fairness_noncs_length) * 600 + 400
 	
-	draw(plt; figure=(;size=(1600,height)),
-    	palettes=(; color=colors), axis=(;), facet=(;linkxaxes=:none, linkyaxes=:none))
+	fig = draw(plt; figure=(;size=(width, height)),
+    	palettes=(; color=colors), axis=(;xlabel="Thread Id (each column represent one non-critical section)", ylabel="Throughput", limits=(nothing, nothing, 0, nothing)), facet=(;linkxaxes=:none, linkyaxes=:none))
 end
+
+# ╔═╡ 5baa0231-e4e3-4104-b556-19026fb61623
+md"""
+##### Figure: Box Plot of throughput per for each lock
+"""
 
 # ╔═╡ 176d3440-f271-4355-b2c1-2cc1da1517bd
 let
 	plt = data(simple_counter_fairness_df) *
-		mapping(:locktype, :loop_count, color=:cs_length => nonnumeric, col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
-		(visual(BoxPlot) + visual(Scatter));
+		mapping(:locktype, :loop_count => (x->x+1), color=:cs_length => nonnumeric, col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
+		(visual(BoxPlot));
 
-	width = min(200+ (150 + 50 * length(simple_counter_fairness_locks)) * length(simple_counter_fairness_noncs_length), 1500)
+	width = 200+ (150 + 30 * length(simple_counter_fairness_locks)) * length(simple_counter_fairness_noncs_length)
 	height = length(simple_counter_fairness_thread_num) * 300
 	
-	draw(plt; figure=(;size=(width,height)),
+	fig = draw(plt; figure=(;size=(width,height)),
     	palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
 end
+
+# ╔═╡ 20a389c2-52aa-4b2b-8c83-e02688a985d0
+md"""
+##### Analysis
+
+We can see that most delegation styled lock has demonstrated (amortized) acquisition fairness. The throughput comparison of threads are proportional to the critical section. On the other hand, _Mutex_ and _SpinLock_ has demosntrated the potential to starve thread, which is expected. As noted in __SCL__, the disproportional workload will be amplified with non-fair lock.
+
+The fair variant of delegation styled locks based on banning strategy have demonstrate the fairness guarantee comparable to _U-SCL_, while maintaining high performance. On the other hand, the current implmentation fails to provide fairness guarantee if only two threads are contending for the lock, while `U-SCL` is able to both perform well and provide fairness. The reason is not so clear yet, but potential reason include:
+
+1. Combiner are unable to insert their work to the job queue when it is combining, which might yield additional unfairness if the thread with smaller critical section becomes the combiner.
+2. The current banning algorithm different than the one use in `U-SCL`, which bans every thread even though they hasn't entered the critical section for a while. This is probably not a good practice and should be fixed.
+
+Other fair variant of delegation styled locks, such as `FC_PQ_BTree`/`FC_PQ_BHeap` and `FC_SL` also demonstrate significant unfairness when only two threads are competing. The major reason for these unfainess is likely to attribute to the small contention, which makes it hard for the coordinator to reorder the job sequence.
+
+Both of these priority queue based fair variant are using simple heuristic similar to `CFS` by counting the usage of each thread toward the lock and reorder jobs. When the thread number is low, it is unlikely that the waiter can insert its second job before the combiner decides to switch to job from another threads, which yield to the unfairness.
+
+"""
 
 # ╔═╡ 0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 md"""
 ### Conclusion
 
-The experiment demonstrate the performance comparison of multiple delegation-styled locks, `U-SCL` and some other commonly seen lock. It shows the performance improvement of delegation-styled lock with reduced the data movement. The experiment also demonstrate the behavior of each lock under different contention level.
+The experiment demonstrate the performance comparison of multiple delegation-styled locks, `U-SCL` and some other commonly seen lock. It shows the performance improvement of delegation-styled lock with reduced the data movement. The experiment also demonstrate the behavior of each lock under different contention level. It shows that delegation-styled lock performance are less impacted by the contention level compared to traditional lock such as `Mutex` and `SpinLock`.
+
+This experiment also demonstrate that the acquirstion fairness  of delegation-styled lock, and the usage fairness for fair variant delegation styled lock under larger contention. It shows that it is possible to achieve usage fairness with mininmal performance panelty for delegation-styled locks.
 
 """
 
 # ╔═╡ d051df13-fdb5-4a79-bc01-62b7da79ce46
+# ╠═╡ disabled = true
+#=╠═╡
 md"""
 # DataSet
 """
+  ╠═╡ =#
 
 # ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
 # ╠═╡ disabled = true
@@ -285,6 +327,9 @@ Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
   ╠═╡ =#
 
 # ╔═╡ acb5e252-26e7-4335-9ab0-d30ecba9427a
+# ╠═╡ disabled = true
+# ╠═╡ skip_as_script = true
+#=╠═╡
 df1 = @chain df_origin begin
 	@subset(:locktype .∈ Ref(locktypes))
 end;
@@ -293,9 +338,12 @@ end;
 thread_nums = convert(Vector{Int}, unique(df1[!, :thread_num]))
 
 # ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
+# ╠═╡ disabled = true
+#=╠═╡
 md"""
 # Loop Count
 """
+  ╠═╡ =#
 
 # ╔═╡ a3f00b89-8ab0-4026-af69-6966947d2fe6
 begin
@@ -318,9 +366,12 @@ draw(count_plt; figure=(; size=(1000, 600)),
   ╠═╡ =#
 
 # ╔═╡ 5d719fea-c747-4e7a-a837-d1d043b7d655
+# ╠═╡ disabled = true
+#=╠═╡
 md"""
 # Per Thread Iteration
 """
+  ╠═╡ =#
 
 # ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
 @bind thread_num_hold_time Select(thread_nums; default=16)
@@ -2649,13 +2700,12 @@ version = "3.5.0+0"
 # ╠═f764b6a1-f943-44bd-a629-6a957c7ec869
 # ╠═a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
 # ╟─c9aee179-eebe-4e12-8976-ee131aaf029e
-# ╟─74ef35e1-acd1-4d83-aeb4-e9ae77565dff
 # ╟─e7d00699-c7cc-4e27-ab4f-fd3ff7f60258
 # ╟─2bbc641c-1c88-4101-b9b8-f3699302cc7f
 # ╟─f6f8234c-b3c9-40a4-89bf-a6493233a377
 # ╟─176d3440-f271-4355-b2c1-2cc1da1517bd
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
-# ╟─d051df13-fdb5-4a79-bc01-62b7da79ce46
+# ╠═d051df13-fdb5-4a79-bc01-62b7da79ce46
 # ╟─4e1ce063-adf1-4b92-941f-90f3d41dbddb
 # ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
 # ╠═15ff182b-e29f-4521-8490-4467738c7f32
