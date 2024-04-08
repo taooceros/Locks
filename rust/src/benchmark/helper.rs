@@ -2,7 +2,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
     os::unix::prelude::PermissionsExt,
-    path::PathBuf,
+    path::{self, Path, PathBuf},
 };
 
 use zstd::{stream::AutoFinishEncoder, Encoder};
@@ -17,7 +17,9 @@ pub fn create_zstd_writer(
     Ok(encoder.auto_finish())
 }
 
-pub fn create_plain_writer(path: PathBuf) -> Result<File, std::io::Error> {
+pub fn create_plain_writer(path: impl AsRef<Path>) -> Result<File, std::io::Error> {
+    let path = path.as_ref();
+
     if !path.parent().expect("Failed to get parent").exists() {
         std::fs::create_dir_all(path.parent().expect("Failed to get parent"))?;
     }

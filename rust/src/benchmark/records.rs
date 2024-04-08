@@ -69,14 +69,14 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
             map.insert(
                 file_path_str.to_owned(),
                 FileWriter::try_new_with_options(
-                    create_plain_writer(file_path).expect("Failed to create writer"),
+                    create_plain_writer(&file_path).expect("Failed to create writer"),
                     &schema,
                     option,
                 )
                 .expect("Failed to create file writer"),
             );
 
-            map.get_mut(file_name)
+            map.get_mut(file_path_str)
         };
 
         let batch = RecordBatch::try_new(schema.into(), arrays).unwrap();
