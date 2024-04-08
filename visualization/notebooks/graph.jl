@@ -41,10 +41,10 @@ html"""
 colors = ["#003C96", "#11A69C", "#924AF7", "#D17711", "#0081FE", "#FF5383", "#00AB55", "#400387", "#F2681F", "#005062", "#DE2C62", "#660E00"];
 
 # ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
-folder = "data"
+folder = "../data"
 
 # ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
-datasets = readdir("../$folder");
+datasets = readdir(folder);
 
 # ╔═╡ d0a1530c-d95e-4c30-9569-56c82b686392
 md"""
@@ -103,13 +103,31 @@ We have performed the experiment for different length of non-critical section to
 
 """
 
-# ╔═╡ 3503720e-b0c0-4914-9a11-17b821951a44
-begin
-	counter_folder = "../data/counter-proportional"
-	counter_files = readdir(counter_folder)
-	counter_files_simple = filter(x-> occursin("1000, 3000", x), counter_files)
-	simple_counter_df = reduce(vcat, DataFrame(Arrow.Table(joinpath(counter_folder, file))) for file in counter_files_simple)
+# ╔═╡ 5c2a9187-b5ae-4a4b-ad40-a3d063f4ab99
+md"""
+### Result
 
+We will hold an interactive result view to demonstrate the result.
+"""
+
+# ╔═╡ c8a7a955-9425-4da2-a946-6043a0758408
+begin
+	simple_counter_df = nothing
+	
+	let
+		arrow_files = [] 
+		for (root, dirs, files) in walkdir(folder)
+		    for file in files
+				if startswith(file, "counter cs [1000, 3000]") && !endswith(root, "C_CC") && !endswith(root, "C_FC")
+		       		push!(arrow_files, joinpath(root, file))
+				end
+		    end
+		end
+
+		simple_counter_df = reduce(vcat, @chain arrow_files begin
+			map(x->DataFrame(Arrow.Table(x)), _)
+		end)
+	end
 	counter_locknames = unique(simple_counter_df[!, :locktype])
 	filter!(x->(!(x in ["C_FC", "C_CC"])), counter_locknames)
 	
@@ -151,7 +169,7 @@ let
 		(visual(Scatter) + visual(Lines; alpha = 0.5));
 	
 	draw(plt; figure=(;size=(1200,800)),
-    	palettes=(; color=colors), axis=(; xticks=[0,2,4,8,16,32,64], xscale=log, limits = (1, nothing, 0, 4e9)))
+    	palettes=(; color=colors), axis=(; xticks=[0,2,4,8,16,32,64], xscale=log, limits = (1, nothing, 0, nothing)))
 end
 
 # ╔═╡ d830cb2b-f599-47e4-83f9-3d4dd1ba6876
@@ -190,8 +208,8 @@ $(@bind simple_counter_fairness_thread_num PlutoUI.MultiCheckBoxNotebook.MultiCh
 
 # ╔═╡ 2bbc641c-1c88-4101-b9b8-f3699302cc7f
 simple_counter_fairness_df = @chain simple_counter_df begin
-		@subset(:locktype .∈ Ref(simple_counter_fairness_locks), :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
-	end;
+	@subset(:locktype .∈ Ref(simple_counter_fairness_locks), :duration .!= 0, :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
+end;
 
 # ╔═╡ dd696bcb-11f4-4b24-a533-0f4daf3f4f86
 md"""
@@ -315,12 +333,9 @@ Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
 df1 = @chain df_origin begin
 	@subset(:locktype .∈ Ref(locktypes))
 end;
-  ╠═╡ =#
 
 # ╔═╡ 5587f88f-2b80-46c1-908e-64284e040576
-#=╠═╡
 thread_nums = convert(Vector{Int}, unique(df1[!, :thread_num]))
-  ╠═╡ =#
 
 # ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
 # ╠═╡ disabled = true
@@ -331,14 +346,12 @@ md"""
   ╠═╡ =#
 
 # ╔═╡ a3f00b89-8ab0-4026-af69-6966947d2fe6
-#=╠═╡
 begin
 	count_df = @chain df1 begin
 		groupby([:thread_num, :locktype, :waiter_type])	
 		@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
 	end
 end;
-  ╠═╡ =#
 
 # ╔═╡ cdf3ef81-fd2d-450d-8e50-8e56fe629163
 # ╠═╡ disabled = true
@@ -361,70 +374,51 @@ md"""
   ╠═╡ =#
 
 # ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
-#=╠═╡
 @bind thread_num_hold_time Select(thread_nums; default=16)
-  ╠═╡ =#
 
 # ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
-#=╠═╡
 begin
 	hold_time_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_hold_time)
 	end
 end;
-  ╠═╡ =#
 
 # ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
-#=╠═╡
 per_iteration_plt = data(hold_time_df) * mapping(:id => nonnumeric, :loop_count, color=:locktype) * (visual(Lines) + visual(Scatter));
-  ╠═╡ =#
 
 # ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
-#=╠═╡
 draw(per_iteration_plt, figure=(;size=(1400,600)))
-  ╠═╡ =#
 
 # ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
-#=╠═╡
 md"""
 # Combine Time
 
 $(@bind thread_num_combine_time Select(thread_nums; default=16))
 """
-  ╠═╡ =#
 
 # ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
-#=╠═╡
 begin
 	combine_time_df = @chain df1 begin
 		@subset(:thread_num .== thread_num_combine_time)
 		dropmissing(:combine_time)
 	end
 end;
-  ╠═╡ =#
 
 # ╔═╡ 4777ad7f-1dba-4217-b2a9-473a0fbf698a
-#=╠═╡
 combine_time_plt = data(combine_time_df) * mapping(:id => nonnumeric, :combine_time, color=:locktype) * (visual(Lines) + visual(Scatter));
-  ╠═╡ =#
 
 # ╔═╡ 905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
-#=╠═╡
 draw(combine_time_plt, figure=(;size=(1400,600)))
-  ╠═╡ =#
 
 # ╔═╡ c2c4f06a-f723-436e-8e5a-5451924c144b
-#=╠═╡
 md"""
 # Response Time
 Enable Analysis $(@bind analyze_response_time CheckBox(false))
 
 Thread Num $(@bind thread_num_response_time Select(thread_nums, default=16))
 """
-  ╠═╡ =#
 
 # ╔═╡ 4ebcc2b4-d5b1-4fa2-a180-707c1c868019
-#=╠═╡
 if analyze_response_time 
 	locktypes2 = unique((@chain df1 begin
 		@subset(:thread_num .== thread_num_response_time; view=true)
@@ -457,7 +451,6 @@ if analyze_response_time
 
 	response_time_dict;
 end;
-  ╠═╡ =#
 
 # ╔═╡ 3cdafbff-0b89-4371-9446-ef89e64f6eb9
 # ╠═╡ disabled = true
@@ -481,7 +474,6 @@ end;
   ╠═╡ =#
 
 # ╔═╡ e673365d-f959-413e-a6e8-3a76a0e89841
-#=╠═╡
 if analyze_response_time
 	function range_tuple(x, length = 300000)
 		start, stop = x
@@ -504,7 +496,6 @@ if analyze_response_time
 	end;
 end;
 
-  ╠═╡ =#
 
 # ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
 # ╠═╡ disabled = true
@@ -526,7 +517,6 @@ end
   ╠═╡ =#
 
 # ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
-#=╠═╡
 if analyze_response_time
 	group = ["Combiner", "Waiter"]
 	
@@ -535,27 +525,21 @@ if analyze_response_time
 		+ mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][2](x)), layout=:locktype) * visual(Lines, color = colors[2]))
 	;
 end;
-  ╠═╡ =#
 
 # ╔═╡ 5f3d39d9-273d-48f7-a86e-211ec5c3bd81
-#=╠═╡
 if analyze_response_time
 	draw(response_time_plt, figure=(;size=(1200,800)), axis=(;xscale=log))
 end
-  ╠═╡ =#
 
 # ╔═╡ 84a9bf82-521e-4f46-8b14-8356d6a886b8
-#=╠═╡
 md"""
 # (Flatten) Response Time
 Enable Flatten Analysis (Maybe very slow) $(@bind flatten_latency_analysis CheckBox(false))
 
 Thread Num $(@bind flatten_thread_num_latency Select(thread_nums; default=16))
 """
-  ╠═╡ =#
 
 # ╔═╡ 0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
-#=╠═╡
 if flatten_latency_analysis
 	flatten_latency_df = @chain df1 begin
 		@subset(:thread_num .== flatten_thread_num_latency)
@@ -567,10 +551,8 @@ if flatten_latency_analysis
 		DataFramesMeta.flatten([:points, :ecdf_value])
 	end;
 end;
-  ╠═╡ =#
 
 # ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
-#=╠═╡
 if flatten_latency_analysis
 	df2 = @chain df1 begin
 		@subset(:thread_num .== thread_num_response_time)
@@ -579,22 +561,17 @@ if flatten_latency_analysis
 		@rename(:response_type = :variable)
 	end;
 end;
-  ╠═╡ =#
 
 # ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
-#=╠═╡
 if flatten_latency_analysis
 	flatten_latency_plt = data(flatten_latency_df) * mapping(:points, :ecdf_value, color=:cs_length => (x-> nonnumeric(x.nanos)), layout=:locktype) * (visual(Lines));
 end;
 
-  ╠═╡ =#
 
 # ╔═╡ 5f4e146a-bc79-4725-b5ad-a23a2971a5fa
-#=╠═╡
 if flatten_latency_analysis
 	draw(flatten_latency_plt, figure=(;size=(1200,600)), axis=(;xscale=log))
 end
-  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2715,21 +2692,18 @@ version = "3.5.0+0"
 # ╟─d0a1530c-d95e-4c30-9569-56c82b686392
 # ╟─4de305e8-70fc-44f5-9181-c9e55a47c77c
 # ╟─4effc63c-e191-4708-890f-44bf0e3a0ea7
-# ╠═7ca2625c-3681-4eb1-a7a2-487978716a0c
-# ╟─3503720e-b0c0-4914-9a11-17b821951a44
+# ╟─7ca2625c-3681-4eb1-a7a2-487978716a0c
+# ╟─5c2a9187-b5ae-4a4b-ad40-a3d063f4ab99
+# ╠═c8a7a955-9425-4da2-a946-6043a0758408
 # ╟─de0bec11-fc0b-4e68-8ec2-1c4c9435cb7a
 # ╟─a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
-# ╟─f764b6a1-f943-44bd-a629-6a957c7ec869
-# ╟─a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
-# ╟─d830cb2b-f599-47e4-83f9-3d4dd1ba6876
+# ╠═f764b6a1-f943-44bd-a629-6a957c7ec869
+# ╠═a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
 # ╟─c9aee179-eebe-4e12-8976-ee131aaf029e
 # ╟─e7d00699-c7cc-4e27-ab4f-fd3ff7f60258
 # ╟─2bbc641c-1c88-4101-b9b8-f3699302cc7f
-# ╟─dd696bcb-11f4-4b24-a533-0f4daf3f4f86
-# ╠═f6f8234c-b3c9-40a4-89bf-a6493233a377
-# ╟─5baa0231-e4e3-4104-b556-19026fb61623
+# ╟─f6f8234c-b3c9-40a4-89bf-a6493233a377
 # ╟─176d3440-f271-4355-b2c1-2cc1da1517bd
-# ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 # ╠═d051df13-fdb5-4a79-bc01-62b7da79ce46
 # ╟─4e1ce063-adf1-4b92-941f-90f3d41dbddb

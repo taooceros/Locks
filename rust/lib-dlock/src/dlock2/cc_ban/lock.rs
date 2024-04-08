@@ -3,8 +3,9 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     cmp::max,
+    ops::AddAssign,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicI64, AtomicPtr, Ordering::*},
+    sync::atomic::{AtomicI64, AtomicPtr, AtomicU64, Ordering::*},
 };
 
 use crossbeam::utils::Backoff;
@@ -30,7 +31,7 @@ where
     tail: AtomicPtr<Node<I>>,
     avg_cs: SyncUnsafeCell<i64>,
     num_exec: SyncUnsafeCell<i64>,
-    num_waiting_threads: AtomicI64,
+    num_waiting_threads: AtomicU64,
     local_node: ThreadLocal<ThreadData<I>>,
 }
 
@@ -46,7 +47,7 @@ where
             local_node: ThreadLocal::new(),
             avg_cs: SyncUnsafeCell::new(0),
             num_exec: SyncUnsafeCell::new(0),
-            num_waiting_threads: AtomicI64::new(0),
+            num_waiting_threads: AtomicU64::new(0),
         }
     }
 
@@ -58,7 +59,11 @@ where
             //     self.avg_cs.load_consume()
             // );
 
-            data.banned_until.get().write(panelty);
+            data.banned_until
+                .get()
+                .as_mut()
+                .unwrap_unchecked()
+                .add_assign(panelty);
         }
     }
 }
@@ -73,9 +78,15 @@ where
     fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| {
             self.num_waiting_threads.fetch_add(1, Relaxed);
+
+            let current_tsc = unsafe {
+                let mut aux = 0;
+                __rdtscp(&mut aux)
+            };
+
             ThreadData {
                 node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
-                banned_until: 0.into(),
+                banned_until: current_tsc.into(),
                 combiner_time_stat: 0.into(),
             }
         });
@@ -146,9 +157,6 @@ where
 
         let mut work_begin = begin;
 
-        let mut num_exec = unsafe { self.num_exec.get().read() };
-        let mut avg_cs = unsafe { self.avg_cs.get().read() };
-
         while let Some(next_nonnull) = next_ptr {
             if counter >= H {
                 break;
@@ -170,14 +178,11 @@ where
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);
 
-                let cs = (work_end - work_begin) as i64;
-
-                num_exec += 1;
-                avg_cs += (cs - avg_cs) / (num_exec);
-                tmp_node.panelty.get().write(
-                    work_begin
-                        + (max((cs * (self.num_waiting_threads.load(Relaxed))) - avg_cs, 0) as u64),
-                );
+                let cs = work_end - work_begin;;
+                tmp_node
+                    .panelty
+                    .get()
+                    .write(cs * (self.num_waiting_threads.load(Relaxed)));
 
                 work_begin = work_end;
             }

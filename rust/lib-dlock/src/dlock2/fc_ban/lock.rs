@@ -2,6 +2,7 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     cmp::max,
+    ops::{Add, AddAssign},
     ptr::{self, null_mut, NonNull},
     sync::atomic::{AtomicI64, AtomicPtr, AtomicU32, Ordering::*},
 };
@@ -126,13 +127,12 @@ where
                         let work_end = __rdtscp(&mut aux);
                         let cs = (work_end - work_begin) as i64;
 
-                        num_exec += 1;
-                        avg_cs += (cs - avg_cs) / (num_exec);
-                        current.banned_until.get().write(
-                            work_begin
-                                + (max((cs * (self.num_waiting_threads.load(Relaxed))) - avg_cs, 0)
-                                    as u64),
-                        );
+                        current
+                            .banned_until
+                            .get()
+                            .as_mut()
+                            .unwrap_unchecked()
+                            .add_assign((cs * (self.num_waiting_threads.load(Relaxed))) as u64);
 
                         work_begin = work_end;
                     }
@@ -190,7 +190,14 @@ where
     F: DLock2Delegate<T, I>,
 {
     fn lock(&self, data: I) -> I {
-        let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
+        let node = self.local_node.get_or(|| {
+            let mut node = Node::new();
+            let mut aux = 0;
+            unsafe {
+                node.banned_until = __rdtscp(&mut aux).into();
+            }
+            SyncUnsafeCell::new(node)
+        });
 
         let node = unsafe { &mut *node.get() };
 
