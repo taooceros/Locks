@@ -1,4 +1,11 @@
-use std::{borrow::Borrow, cell::{RefCell, RefMut}, collections::HashMap, fs::File, path::Path, time::Duration};
+use std::{
+    borrow::Borrow,
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    fs::File,
+    path::Path,
+    time::Duration,
+};
 
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
@@ -53,8 +60,8 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
     let schema = Schema::new(fields);
 
     WRITERS.with(move |cell| {
-        let mut map : RefMut<HashMap<String, FileWriter<File>>> = cell.borrow_mut();
-        
+        let mut map: RefMut<HashMap<String, FileWriter<File>>> = cell.borrow_mut();
+
         let file_path = output_path.join(format!("{file_name}.arrow"));
         let file_path_str = file_path.to_str().unwrap();
 
