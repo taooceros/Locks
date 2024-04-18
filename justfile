@@ -14,10 +14,10 @@ run2 locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
-    cargo run --release-with-debug -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+    cargo run --profile=release-with-debug -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
 
 run1 locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
-    cargo run --release-with-debug -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+    cargo run --profile=release-with-debug -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
