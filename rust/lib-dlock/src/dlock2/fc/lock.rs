@@ -183,7 +183,7 @@ where
                     if node.complete.load(Acquire) {
                         break 'outer;
                     }
-                    backoff.snooze();
+                    backoff.spin();
                     if backoff.is_completed() {
                         continue 'outer;
                     }
