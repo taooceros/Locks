@@ -80,7 +80,7 @@ where
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
             // spin
-            backoff.snooze();
+            // backoff.snooze();
             // spin_loop()
         }
 
