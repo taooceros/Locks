@@ -8,6 +8,8 @@ default_non_cs := "0"
 default_arg := "--cs " + default_cs + " --non-cs " + default_non_cs
 
 build:
+    #!/usr/bin/env zsh
+    cd ./rust
     cargo build --profile=release-with-debug
 
 run2 locks="" *additional_arg=default_arg: build
