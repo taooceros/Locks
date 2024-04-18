@@ -7,6 +7,7 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
+use crossbeam::utils::Backoff;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
