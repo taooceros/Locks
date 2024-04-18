@@ -74,13 +74,13 @@ where
                 .store(current_ptr, Relaxed)
         }
 
-        // let backoff = Backoff::new();
+        let backoff = Backoff::new();
 
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
             // spin
-            // backoff.snooze();
-            spin_loop()
+            backoff.snooze();
+            // spin_loop()
         }
 
         // check whether the current node is completed
