@@ -14,7 +14,10 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::{dlock2::DLock2, FILENAME_MAX};
+use libdlock::{
+    dlock2::{CombinerStatistics, DLock2},
+    FILENAME_MAX,
+};
 
 use crate::{
     benchmark::{
@@ -58,7 +61,8 @@ unsafe impl DLock2<Data> for FetchAddDlock2 {
         panic!("Invalid input")
     }
 
-    fn get_combine_time(&self) -> std::option::Option<u64> {
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_stat(&self) -> std::option::Option<&CombinerStatistics> {
         None
     }
 }
@@ -269,6 +273,8 @@ where
                         }
                     }
 
+                    let combiner_stat = lock_ref.get_combine_stat();
+
                     Records {
                         id,
                         cpu_id: core_id.id,
@@ -279,7 +285,7 @@ where
                         combiner_latency,
                         waiter_latency,
                         hold_time,
-                        combine_time: lock_ref.get_combine_time(),
+                        combine_time: combiner_stat.map(|s| s.combine_time.iter().sum()),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
                         ..Records::from_bencher(bencher)

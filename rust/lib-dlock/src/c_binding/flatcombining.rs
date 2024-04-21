@@ -1,11 +1,9 @@
 use std::{
     cell::SyncUnsafeCell,
     ffi::c_void,
-    mem::{MaybeUninit},
+    mem::MaybeUninit,
     ptr::{self},
 };
-
-
 
 use crate::{dlock2::DLock2, dlock2::DLock2Delegate, fc_init, fc_lock, fc_lock_t};
 
@@ -51,6 +49,7 @@ where
         }
     }
 }
+use crate::dlock2::CombinerStatistics;
 
 unsafe impl<T, F, I> DLock2<I> for CFlatCombining<T, F, I>
 where
@@ -59,7 +58,7 @@ where
     I: Send + 'static,
 {
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
         None
     }
 

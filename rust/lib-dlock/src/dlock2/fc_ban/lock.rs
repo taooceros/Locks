@@ -1,3 +1,4 @@
+use crate::dlock2::CombinerStatistics;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -95,6 +96,9 @@ where
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        #[cfg(feature = "combiner_stat")]
+        let mut combine_count = 0;
+
         unsafe {
             begin = __rdtscp(&mut aux);
         }
@@ -127,6 +131,8 @@ where
                         let work_end = __rdtscp(&mut aux);
                         let cs = (work_end - work_begin) as i64;
 
+                        combine_count += 1;
+
                         current
                             .banned_until
                             .get()
@@ -151,7 +157,17 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            let combiner_statistics = &mut self
+                .local_node
+                .get()
+                .unwrap()
+                .get()
+                .as_mut()
+                .unwrap()
+                .combiner_stat;
+            combiner_statistics.combine_time.push(end - begin);
+
+            combiner_statistics.combine_size.push(combine_count);
         }
     }
 
@@ -237,7 +253,11 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+        unsafe {
+            self.local_node
+                .get()
+                .map(|x| &x.get().as_ref().unwrap().combiner_stat)
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
-use std::fmt::{Binary, Debug};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::fmt::{Binary, Debug};
 
 use crate::{
     c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},
@@ -11,7 +11,8 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mutex::DLock2Mutex, spinlock::DLock2Wrapper, uscl::DLock2USCL
+    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mutex::DLock2Mutex,
+    spinlock::DLock2Wrapper, uscl::DLock2USCL,
 };
 
 pub mod cc;
@@ -22,10 +23,10 @@ pub mod fc_ban;
 pub mod fc_sl;
 pub mod rcl;
 
+pub mod fc_pq;
 pub mod mutex;
 pub mod spinlock;
 pub mod uscl;
-pub mod fc_pq;
 
 pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
 impl<T, I, F> DLock2Delegate<T, I> for F where F: Fn(&mut T, I) -> I + Send + Sync {}
@@ -36,7 +37,13 @@ pub unsafe trait DLock2<I>: Send + Sync {
     fn lock(&self, data: I) -> I;
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64>;
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics>;
+}
+
+#[derive(Debug, Default)]
+pub struct CombinerStatistics {
+    pub combine_size: Vec<u32>,
+    pub combine_time: Vec<u64>,
 }
 
 #[enum_dispatch]

@@ -1,3 +1,4 @@
+use crate::dlock2::CombinerStatistics;
 use crate::{atomic_extension::AtomicExtension, dlock2::DLock2};
 use std::{
     arch::x86_64::__rdtscp,
@@ -20,7 +21,7 @@ struct ThreadData<T> {
     toggle: AtomicU8,
 
     #[cfg(feature = "combiner_stat")]
-    combiner_time_stat: SyncUnsafeCell<u64>,
+    combiner_stat: SyncUnsafeCell<CombinerStatistics>,
 }
 
 #[derive(Debug)]
@@ -70,7 +71,7 @@ where
         let thread_data = self.local_node.get_or(|| ThreadData {
             nodes: Default::default(),
             toggle: AtomicU8::new(0),
-            combiner_time_stat: 0.into(),
+            combiner_stat: SyncUnsafeCell::new(CombinerStatistics::default()),
         });
         let mut aux = 0;
 
@@ -178,8 +179,9 @@ where
             #[cfg(feature = "combiner_stat")]
             {
                 let end = __rdtscp(&mut aux);
-
-                *thread_data.combiner_time_stat.get() += end - begin;
+                let combiner_statistics = thread_data.combiner_stat.get().as_mut().unwrap();
+                combiner_statistics.combine_time.push(end - begin);
+                combiner_statistics.combine_size.push(counter);
             }
 
             return myNode.data.get().read().assume_init();
@@ -187,11 +189,11 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
         unsafe {
             self.local_node
                 .get()
-                .map(|node| *node.combiner_time_stat.get())
+                .map(|node| node.combiner_stat.get().as_ref().unwrap())
         }
     }
 }

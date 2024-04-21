@@ -1,4 +1,4 @@
-use crate::dlock2::DLock2;
+use crate::dlock2::{CombinerStatistics, DLock2};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -16,7 +16,7 @@ use crate::{dlock2::DLock2Delegate, parker::Parker};
 #[derive(Debug)]
 struct ThreadData<T> {
     node: AtomicPtr<Node<T>>,
-    combiner_time_stat: SyncUnsafeCell<u64>,
+    combiner_stat: SyncUnsafeCell<CombinerStatistics>,
 }
 
 #[derive(Debug)]
@@ -52,7 +52,7 @@ where
     fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| ThreadData {
             node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
-            combiner_time_stat: 0.into(),
+            combiner_stat: SyncUnsafeCell::new(CombinerStatistics::default()),
         });
         let mut aux = 0;
         // use thread local node as next node
@@ -128,18 +128,24 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            *thread_data.combiner_time_stat.get() += end - begin;
+            (*thread_data.combiner_stat.get())
+                .combine_time
+                .push(end - begin);
+
+            (*thread_data.combiner_stat.get())
+                .combine_size
+                .push(counter);
         }
 
         return unsafe { ptr::read(current_node.data.get()) };
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
         unsafe {
             self.local_node
                 .get()
-                .map(|local_node| (*local_node.combiner_time_stat.get()).into())
+                .map(|local_node| local_node.combiner_stat.get().as_ref().unwrap())
         }
     }
 }

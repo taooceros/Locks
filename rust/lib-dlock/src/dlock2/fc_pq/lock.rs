@@ -12,6 +12,7 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
+use crate::dlock2::CombinerStatistics;
 use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
@@ -112,6 +113,10 @@ where
     fn combine(&self) {
         #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
+
+        #[cfg(feature = "combiner_stat")]
+        let mut combine_size = 0;
+
         let mut begin: u64;
 
         unsafe {
@@ -178,6 +183,8 @@ where
 
                     node.complete.store(true, Release);
 
+                    combine_size += 1;
+
                     job_queue.push(current);
                 } else {
                     // if the buffer is full then push the nodes back to the job queue
@@ -211,7 +218,10 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            let combiner_stat = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
+            
+            combiner_stat.combine_time.push(end - begin);
+            combiner_stat.combine_size.push(combine_size);
         }
     }
 }
@@ -263,11 +273,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .map(|x| (*x.get()).combiner_time_stat)
-        }
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+        unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

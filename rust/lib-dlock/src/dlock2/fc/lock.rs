@@ -5,6 +5,7 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
+use crate::dlock2::CombinerStatistics;
 use crossbeam::utils::{Backoff, CachePadded};
 use lock_api::RawMutex;
 use thread_local::ThreadLocal;
@@ -86,6 +87,9 @@ where
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        #[cfg(feature = "combiner_stat")]
+        let mut count = 0;
+
         unsafe {
             begin = __rdtscp(&mut aux);
         }
@@ -104,6 +108,8 @@ where
                 }
 
                 current.complete.store(true, Release);
+
+                count += 1;
             }
 
             current_ptr = NonNull::new(current.next.load(Acquire));
@@ -113,7 +119,17 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            let combiner_statistics = &mut self
+                .local_node
+                .get()
+                .unwrap()
+                .get()
+                .as_mut()
+                .unwrap()
+                .combiner_stat;
+            combiner_statistics.combine_time.push(end - begin);
+
+            combiner_statistics.combine_size.push(count);
         }
     }
 
@@ -197,7 +213,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+        unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

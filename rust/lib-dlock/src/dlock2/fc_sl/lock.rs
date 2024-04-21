@@ -1,3 +1,4 @@
+use crate::dlock2::CombinerStatistics;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -87,9 +88,15 @@ where
             begin = __rdtscp(&mut aux);
         }
 
-        const H: usize = 64;
+        let mut combine_count = 0;
 
-        for _ in 0..H {
+        const H: u32 = 64;
+
+        loop {
+            if combine_count >= H {
+                break;
+            }
+
             let current = self.jobs.pop_front();
 
             if current.is_none() {
@@ -116,6 +123,8 @@ where
                     begin = end;
 
                     node.complete.store(true, Release);
+
+                    combine_count += 1;
                 }
             }
         }
@@ -124,7 +133,9 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            let combiner_statistics = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
+            combiner_statistics.combine_time.push(end - begin);
+            combiner_statistics.combine_size.push(combine_count);
         }
     }
 }
@@ -172,11 +183,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .map(|x| (*x.get()).combiner_time_stat)
-        }
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+        unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

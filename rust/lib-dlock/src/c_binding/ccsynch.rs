@@ -1,13 +1,14 @@
 use std::{
     cell::SyncUnsafeCell,
     ffi::c_void,
-    mem::{MaybeUninit},
+    mem::MaybeUninit,
     ptr::{self},
 };
 
-
-
-use crate::{cc_synch_init, cc_synch_lock, cc_synch_t, dlock2::{DLock2, DLock2Delegate}};
+use crate::{
+    cc_synch_init, cc_synch_lock, cc_synch_t,
+    dlock2::{DLock2, DLock2Delegate},
+};
 
 #[derive(Debug)]
 pub struct CCCSynch<T, F, I>
@@ -51,6 +52,7 @@ where
         }
     }
 }
+use crate::dlock2::CombinerStatistics;
 
 unsafe impl<T, F, I> DLock2<I> for CCCSynch<T, F, I>
 where
@@ -59,7 +61,7 @@ where
     I: Send + 'static,
 {
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
         None
     }
 

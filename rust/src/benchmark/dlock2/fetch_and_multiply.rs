@@ -83,6 +83,7 @@ impl AtomicF64 {
         }
     }
 }
+use libdlock::dlock2::CombinerStatistics;
 
 pub struct FetchAndMultiplyDLock2 {
     data: AtomicF64,
@@ -148,7 +149,7 @@ unsafe impl DLock2<Data> for FetchAndMultiplyDLock2 {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
         None
     }
 }
@@ -292,6 +293,8 @@ fn start_benchmark<'a>(
                         }
                     }
 
+                    let combiner_stat = lock_ref.get_combine_stat();
+
                     Records {
                         id,
                         cpu_id: core_id.id,
@@ -302,7 +305,7 @@ fn start_benchmark<'a>(
                         combiner_latency,
                         waiter_latency,
                         hold_time: Default::default(),
-                        combine_time: lock_ref.get_combine_time(),
+                        combine_time: combiner_stat.map(|s| s.combine_time.iter().sum()),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
                         ..Default::default()
