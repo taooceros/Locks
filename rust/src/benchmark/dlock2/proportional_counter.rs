@@ -14,9 +14,7 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::{
-    dlock2::{CombinerStatistics, DLock2},
-};
+use libdlock::dlock2::{CombinerStatistics, DLock2};
 
 use crate::{
     benchmark::{

@@ -1,6 +1,6 @@
 use std::{
     arch::x86_64::__rdtscp,
-    hint::{black_box},
+    hint::black_box,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
