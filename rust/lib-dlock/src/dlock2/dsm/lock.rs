@@ -1,5 +1,6 @@
 use crate::dlock2::CombinerStatistics;
 use crate::{atomic_extension::AtomicExtension, dlock2::DLock2};
+use std::ops::AddAssign;
 use std::{
     arch::x86_64::__rdtscp,
     cell::{SyncUnsafeCell, UnsafeCell},
@@ -25,7 +26,7 @@ struct ThreadData<T> {
 }
 
 #[derive(Debug)]
-pub struct DSMSynch<T, I, F, const H: u32 = 64>
+pub struct DSMSynch<T, I, F, const H: usize = 64>
 where
     F: DLock2Delegate<T, I>,
     I: Send,
@@ -61,7 +62,7 @@ impl<T> AsMutPtr for Node<T> {
     }
 }
 
-unsafe impl<T, I, F, const H: u32> DLock2<I> for DSMSynch<T, I, F, H>
+unsafe impl<T, I, F, const H: usize> DLock2<I> for DSMSynch<T, I, F, H>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
@@ -113,7 +114,7 @@ where
 
             let mut tmp_node = myNode;
 
-            let mut counter: u32 = 0;
+            let mut counter = 0;
 
             loop {
                 counter += 1;
@@ -181,7 +182,7 @@ where
                 let end = __rdtscp(&mut aux);
                 let combiner_statistics = thread_data.combiner_stat.get().as_mut().unwrap();
                 combiner_statistics.combine_time.push(end - begin);
-                combiner_statistics.combine_size.push(counter);
+                combiner_statistics.combine_size.entry(counter).or_default().add_assign(1);
             }
 
             return myNode.data.get().read().assume_init();

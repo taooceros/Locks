@@ -72,7 +72,7 @@ where
     }
 }
 
-const H: u32 = 16;
+const H: usize = 16;
 
 unsafe impl<T, I, F> DLock2<I> for CCBan<T, I, F>
 where
@@ -155,7 +155,7 @@ where
 
         let mut tmp_node = current_node;
 
-        let mut counter: u32 = 0;
+        let mut counter: usize = 0;
 
         let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
 
@@ -209,7 +209,7 @@ where
 
             stat.combine_time.push(end - begin);
 
-            stat.combine_size.push(counter);
+            *stat.combine_size.entry(counter).or_default() += 1;
         }
 
         return unsafe { current_node.data.get().read() };

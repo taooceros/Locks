@@ -2,7 +2,8 @@ use crate::dlock2::CombinerStatistics;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    ptr::{self},
+    ops::AddAssign,
+    ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -90,7 +91,7 @@ where
 
         let mut combine_count = 0;
 
-        const H: u32 = 64;
+        const H: usize = 64;
 
         loop {
             if combine_count >= H {
@@ -135,7 +136,11 @@ where
 
             let combiner_statistics = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
             combiner_statistics.combine_time.push(end - begin);
-            combiner_statistics.combine_size.push(combine_count);
+            combiner_statistics
+                .combine_size
+                .entry(combine_count)
+                .or_default()
+                .add_assign(1)
         }
     }
 }

@@ -219,9 +219,9 @@ where
             let end = __rdtscp(&mut aux);
 
             let combiner_stat = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
-            
+
             combiner_stat.combine_time.push(end - begin);
-            combiner_stat.combine_size.push(combine_size);
+            *combiner_stat.combine_size.entry(combine_size).or_default() += 1;
         }
     }
 }

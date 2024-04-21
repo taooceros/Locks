@@ -1,8 +1,5 @@
 use std::{
-    arch::x86_64::__rdtscp,
-    cell::SyncUnsafeCell,
-    ptr::{self, null_mut, NonNull},
-    sync::atomic::{AtomicPtr, Ordering::*},
+    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, ops::AddAssign, ptr::{self, null_mut, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
 };
 
 use crate::dlock2::CombinerStatistics;
@@ -129,7 +126,11 @@ where
                 .combiner_stat;
             combiner_statistics.combine_time.push(end - begin);
 
-            combiner_statistics.combine_size.push(count);
+            combiner_statistics
+                .combine_size
+                .entry(count)
+                .or_default()
+                .add_assign(1);
         }
     }
 

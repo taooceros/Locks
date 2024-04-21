@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
 use std::fmt::{Binary, Debug};
 
 use crate::{
@@ -42,7 +42,7 @@ pub unsafe trait DLock2<I>: Send + Sync {
 
 #[derive(Debug, Default)]
 pub struct CombinerStatistics {
-    pub combine_size: Vec<u32>,
+    pub combine_size: HashMap<usize, u64>,
     pub combine_time: Vec<u64>,
 }
 

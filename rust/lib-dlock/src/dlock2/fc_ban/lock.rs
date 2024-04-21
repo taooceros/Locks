@@ -167,7 +167,7 @@ where
                 .combiner_stat;
             combiner_statistics.combine_time.push(end - begin);
 
-            combiner_statistics.combine_size.push(combine_count);
+            combiner_statistics.combine_size.entry(combine_count).or_default().add_assign(1);
         }
     }
 

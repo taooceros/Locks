@@ -3,6 +3,7 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     hint::spin_loop,
+    ops::AddAssign,
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering::*},
 };
@@ -20,7 +21,7 @@ struct ThreadData<T> {
 }
 
 #[derive(Debug)]
-pub struct CCSynch<T, I, F, const H: u32 = 64>
+pub struct CCSynch<T, I, F, const H: usize = 64>
 where
     F: DLock2Delegate<T, I>,
 {
@@ -44,7 +45,7 @@ where
     }
 }
 
-unsafe impl<T, I, F, const H: u32> DLock2<I> for CCSynch<T, I, F, H>
+unsafe impl<T, I, F, const H: usize> DLock2<I> for CCSynch<T, I, F, H>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
@@ -96,7 +97,7 @@ where
 
         let mut tmp_node = current_node;
 
-        let mut counter: u32 = 0;
+        let mut counter = 0;
 
         let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
 
@@ -134,7 +135,9 @@ where
 
             (*thread_data.combiner_stat.get())
                 .combine_size
-                .push(counter);
+                .entry(counter)
+                .or_default()
+                .add_assign(1);
         }
 
         return unsafe { ptr::read(current_node.data.get()) };
