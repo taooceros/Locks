@@ -179,12 +179,14 @@ where
                 }
             } else {
                 let backoff = Backoff::new();
+                let mut count = 8;
                 loop {
                     if node.complete.load(Acquire) {
                         break 'outer;
                     }
-                    backoff.snooze();
-                    if backoff.is_completed() {
+                    backoff.spin();
+                    count -= 1;
+                    if count < 0 {
                         continue 'outer;
                     }
                 }
@@ -196,10 +198,6 @@ where
 
     #[cfg(feature = "combiner_stat")]
     fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .map(|x| (*x.get()).combiner_time_stat)
-        }
+        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
     }
 }
