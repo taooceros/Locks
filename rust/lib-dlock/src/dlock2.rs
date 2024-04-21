@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
-use std::fmt::{Binary, Debug};
+use std::collections::{BTreeSet, BinaryHeap, HashMap};
+use std::fmt::Debug;
 
 use crate::{
     c_binding::{ccsynch::CCCSynch, flatcombining::CFlatCombining},

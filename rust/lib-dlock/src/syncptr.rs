@@ -39,13 +39,6 @@ impl<T> Into<*const T> for SyncMutPtr<T> {
     }
 }
 
-impl<T> SyncMutPtr<T> {
-    pub fn null() -> Self {
-        Self {
-            ptr: std::ptr::null_mut(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct SyncPtr<T: ?Sized> {

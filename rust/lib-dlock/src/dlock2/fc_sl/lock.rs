@@ -20,7 +20,6 @@ use crate::{
 
 use super::node::Node;
 
-const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, PartialOrd, Ord)]

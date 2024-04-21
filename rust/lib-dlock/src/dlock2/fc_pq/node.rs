@@ -42,10 +42,3 @@ impl<T> Node<T> {
         }
     }
 }
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        drop(&mut self.combiner_stat)
-        // don't drop data
-    }
-}

@@ -1,5 +1,4 @@
 #![feature(sync_unsafe_cell)]
-#![feature(pointer_is_aligned)]
 #![feature(type_alias_impl_trait)]
 #![feature(thread_id_value)]
 #![allow(non_upper_case_globals)]

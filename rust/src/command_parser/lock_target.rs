@@ -13,7 +13,7 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, fc::FC, fc_ban::FCBan, fc_pq::UsageNode, mutex::DLock2Mutex, spinlock::DLock2Wrapper,
+        self, fc::FC, fc_ban::FCBan, mutex::DLock2Mutex, spinlock::DLock2Wrapper,
         uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,

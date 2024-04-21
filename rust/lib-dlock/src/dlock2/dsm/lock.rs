@@ -6,7 +6,7 @@ use std::{
     cell::{SyncUnsafeCell, UnsafeCell},
     hint::spin_loop,
     mem::MaybeUninit,
-    ptr::{self, null_mut},
+    ptr::null_mut,
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
 
@@ -14,7 +14,7 @@ use debug_unwraps::DebugUnwrapExt;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
-use crate::{dlock2::DLock2Delegate, parker::Parker};
+use crate::dlock2::DLock2Delegate;
 
 #[derive(Debug)]
 struct ThreadData<T> {

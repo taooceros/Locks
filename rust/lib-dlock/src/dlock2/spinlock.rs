@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, ops::DerefMut};
+use std::cell::SyncUnsafeCell;
 
 use lock_api::RawMutex;
 

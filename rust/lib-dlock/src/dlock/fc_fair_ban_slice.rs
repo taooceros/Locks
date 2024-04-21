@@ -20,8 +20,6 @@ mod node;
 
 const CLEAN_UP_PERIOD: u32 = 50;
 const CLEAN_UP_AGE: u32 = 50;
-const COMBINER_SLICE_MS: Duration = Duration::from_micros(100);
-const COMBINER_SLICE: i64 = (COMBINER_SLICE_MS.as_nanos() as i64) * 2400;
 
 #[derive(Debug)]
 pub struct FcFairBanSliceLock<T, L, P>

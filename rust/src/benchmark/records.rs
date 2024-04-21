@@ -4,7 +4,6 @@ use std::{
     collections::HashMap,
     fs::File,
     path::Path,
-    time::Duration,
 };
 
 use arrow::{datatypes::Schema, record_batch::RecordBatch};

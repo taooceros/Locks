@@ -10,7 +10,6 @@ where
 {
     pub(super) age: u32,
     pub(super) active: AtomicBool,
-    pub(super) usage: isize,
     pub(super) f: CachePadded<Option<*mut (dyn DLockDelegate<T>)>>,
     pub(super) next: *mut Node<T, P>,
     pub(super) parker: P, // id: i32,
@@ -28,7 +27,6 @@ impl<T, P: Parker> Node<T, P> {
         Self {
             age: 0,
             active: AtomicBool::new(false),
-            usage: 0,
             f: CachePadded::new(None),
             parker: Default::default(),
             next: null_mut(),

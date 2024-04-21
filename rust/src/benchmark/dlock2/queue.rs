@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use arrow::record_batch;
 use rand::Rng;
 
 use crate::{

@@ -1,5 +1,5 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::SyncUnsafeCell,
     cmp::min,
     hint::spin_loop,
     mem::MaybeUninit,
@@ -12,7 +12,7 @@ use crate::atomic_extension::AtomicExtension;
 
 #[derive(Debug)]
 pub struct ConcurrentRingBuffer<T, const N: usize> {
-    pub buffer: SyncUnsafeCell<[MaybeUninit<Entry<T>>; N]>,
+    buffer: SyncUnsafeCell<[MaybeUninit<Entry<T>>; N]>,
     pub head: CachePadded<AtomicUsize>,
     pub tail: CachePadded<AtomicUsize>,
 }

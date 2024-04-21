@@ -1,7 +1,6 @@
 use std::{
     arch::x86_64::__rdtscp,
-    borrow::Borrow,
-    hint::{black_box, spin_loop},
+    hint::{black_box},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},

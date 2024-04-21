@@ -6,7 +6,6 @@ use arrow::ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow::ipc::CompressionType;
 
 use histo::Histogram;
-use itertools::Itertools;
 use libdlock::dlock::{guard::DLockGuard, BenchmarkType, DLock};
 use quanta::Clock;
 

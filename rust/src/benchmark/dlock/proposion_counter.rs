@@ -1,5 +1,4 @@
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use arrow_ipc::CompressionType;
 use criterion::black_box;
 use csv::Writer;
 use itertools::Itertools;

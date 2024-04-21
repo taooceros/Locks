@@ -2,13 +2,11 @@ use crate::dlock2::{CombinerStatistics, DLock2};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::max,
     ops::AddAssign,
     ptr::{self, NonNull},
-    sync::{
-        atomic::{AtomicI64, AtomicPtr, AtomicU64, Ordering::*},
-        Arc,
-    },
+    sync::
+        atomic::{AtomicPtr, AtomicU64, Ordering::*}
+    ,
 };
 
 use crossbeam::utils::Backoff;
@@ -33,8 +31,6 @@ where
     delegate: F,
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<I>>,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicU64,
     local_node: ThreadLocal<ThreadData<I>>,
 }
@@ -49,8 +45,6 @@ where
             data: SyncUnsafeCell::new(data),
             tail: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
             local_node: ThreadLocal::new(),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicU64::new(0),
         }
     }

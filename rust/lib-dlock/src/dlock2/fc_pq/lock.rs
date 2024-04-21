@@ -2,12 +2,10 @@ use derivative::Derivative;
 use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::thread::current;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    mem::transmute,
     ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
@@ -17,15 +15,12 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
-use crate::{__jmp_buf, rand};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
-    spin_lock::RawSpinLock,
 };
 
-use arrayvec::ArrayVec;
 
 mod buffer;
 
@@ -33,7 +28,7 @@ use self::buffer::ConcurrentRingBuffer;
 
 use super::node::Node;
 
-const CLEAN_UP_AGE: u32 = 500;
+// const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Derivative, Debug)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]

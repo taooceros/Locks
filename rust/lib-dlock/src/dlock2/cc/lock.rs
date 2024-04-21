@@ -2,7 +2,6 @@ use crate::dlock2::{CombinerStatistics, DLock2};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    hint::spin_loop,
     ops::AddAssign,
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering::*},
@@ -12,7 +11,7 @@ use crossbeam::utils::Backoff;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
-use crate::{dlock2::DLock2Delegate, parker::Parker};
+use crate::dlock2::DLock2Delegate;
 
 #[derive(Debug)]
 struct ThreadData<T> {
@@ -76,7 +75,7 @@ where
                 .store(current_ptr, Relaxed)
         }
 
-        let backoff = Backoff::new();
+        let _backoff = Backoff::new();
 
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
