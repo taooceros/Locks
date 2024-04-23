@@ -1,4 +1,4 @@
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 use crate::{atomic_extension::AtomicExtension, dlock2::DLock2};
 use std::ops::AddAssign;
 use std::{
@@ -22,7 +22,7 @@ struct ThreadData<T> {
     toggle: AtomicU8,
 
     #[cfg(feature = "combiner_stat")]
-    combiner_stat: SyncUnsafeCell<CombinerStatistics>,
+    combiner_stat: SyncUnsafeCell<CombinerSample>,
 }
 
 #[derive(Debug)]
@@ -72,7 +72,7 @@ where
         let thread_data = self.local_node.get_or(|| ThreadData {
             nodes: Default::default(),
             toggle: AtomicU8::new(0),
-            combiner_stat: SyncUnsafeCell::new(CombinerStatistics::default()),
+            combiner_stat: SyncUnsafeCell::new(CombinerSample::default()),
         });
         let mut aux = 0;
 
@@ -190,7 +190,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe {
             self.local_node
                 .get()

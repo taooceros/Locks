@@ -6,7 +6,7 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 
 pub struct Node<T> {
     pub age: UnsafeCell<u32>,
@@ -15,7 +15,7 @@ pub struct Node<T> {
     pub complete: AtomicBool,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_stat: CombinerStatistics,
+    pub combiner_stat: CombinerSample,
 }
 
 impl<T> Node<T> {
@@ -30,7 +30,7 @@ impl<T> Node<T> {
             data: unsafe { MaybeUninit::uninit().assume_init() },
             next: AtomicPtr::default(),
             #[cfg(feature = "combiner_stat")]
-            combiner_stat: CombinerStatistics::default().into(),
+            combiner_stat: CombinerSample::default().into(),
         }
     }
 }

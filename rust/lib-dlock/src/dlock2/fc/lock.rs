@@ -2,7 +2,7 @@ use std::{
     arch::x86_64::__rdtscp, cell::SyncUnsafeCell, ops::AddAssign, ptr::{self, null_mut, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
 };
 
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 use crossbeam::utils::{Backoff, CachePadded};
 use lock_api::RawMutex;
 use thread_local::ThreadLocal;
@@ -214,7 +214,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

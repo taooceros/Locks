@@ -2,7 +2,7 @@ use std::{ops::DerefMut, sync::Mutex};
 
 use super::{DLock2, DLock2Delegate};
 
-use super::CombinerStatistics;
+use super::CombinerSample;
 #[derive(Debug)]
 pub struct DLock2Mutex<T, I, F>
 where
@@ -40,7 +40,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         None
     }
 }

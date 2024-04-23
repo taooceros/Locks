@@ -7,19 +7,23 @@ default_non_cs := "0"
 
 default_arg := "--cs " + default_cs + " --non-cs " + default_non_cs
 
+profile := "debug"
+
+profile_arg := if profile == "release-with-debug" {"--profile=release-with-debug"} else {""}
+
 build:
     #!/usr/bin/env zsh
     cd ./rust
-    cargo build --profile=release-with-debug
+    cargo build {{profile_arg}}
 
 run2 locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
-    cargo run --profile=release-with-debug -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+    cargo run {{profile_arg}} -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
 
 run1 locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
-    cargo run --profile=release-with-debug -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+    cargo run {{profile_arg}} -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}

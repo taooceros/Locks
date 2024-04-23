@@ -1,4 +1,4 @@
-use crate::dlock2::{CombinerStatistics, DLock2};
+use crate::dlock2::{CombinerSample, DLock2};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -16,7 +16,7 @@ use crate::dlock2::DLock2Delegate;
 #[derive(Debug)]
 struct ThreadData<T> {
     node: AtomicPtr<Node<T>>,
-    combiner_stat: SyncUnsafeCell<CombinerStatistics>,
+    combiner_stat: SyncUnsafeCell<CombinerSample>,
 }
 
 #[derive(Debug)]
@@ -52,7 +52,7 @@ where
     fn lock(&self, data: I) -> I {
         let thread_data = self.local_node.get_or(|| ThreadData {
             node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
-            combiner_stat: SyncUnsafeCell::new(CombinerStatistics::default()),
+            combiner_stat: SyncUnsafeCell::new(CombinerSample::default()),
         });
         let mut aux = 0;
         // use thread local node as next node
@@ -143,7 +143,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe {
             self.local_node
                 .get()

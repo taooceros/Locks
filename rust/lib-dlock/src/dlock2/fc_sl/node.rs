@@ -6,7 +6,7 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 
 pub struct Node<T> {
     pub usage: u64,
@@ -14,7 +14,7 @@ pub struct Node<T> {
     pub data: SyncUnsafeCell<T>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_stat: CombinerStatistics,
+    pub combiner_stat: CombinerSample,
 }
 
 impl<T> Node<T> {
@@ -28,7 +28,7 @@ impl<T> Node<T> {
             complete: AtomicBool::new(false),
             data: unsafe { MaybeUninit::uninit().assume_init() },
             #[cfg(feature = "combiner_stat")]
-            combiner_stat: CombinerStatistics::default(),
+            combiner_stat: CombinerSample::default(),
         }
     }
 }

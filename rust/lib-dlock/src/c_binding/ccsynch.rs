@@ -52,7 +52,7 @@ where
         }
     }
 }
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 
 unsafe impl<T, F, I> DLock2<I> for CCCSynch<T, F, I>
 where
@@ -61,7 +61,7 @@ where
     I: Send + 'static,
 {
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         None
     }
 

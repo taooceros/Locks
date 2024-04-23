@@ -48,7 +48,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&super::CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&super::CombinerSample> {
         return None;
     }
 }

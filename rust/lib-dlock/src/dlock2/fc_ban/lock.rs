@@ -1,4 +1,4 @@
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -252,7 +252,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe {
             self.local_node
                 .get()

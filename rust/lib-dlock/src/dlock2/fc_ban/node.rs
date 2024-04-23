@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicPtr},
 };
 
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 
 pub struct Node<T> {
     pub age: UnsafeCell<u32>,
@@ -14,7 +14,7 @@ pub struct Node<T> {
     pub next: AtomicPtr<Node<T>>,
     pub banned_until: SyncUnsafeCell<u64>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_stat: CombinerStatistics,
+    pub combiner_stat: CombinerSample,
 }
 
 impl<T> Node<T> {
@@ -30,7 +30,7 @@ impl<T> Node<T> {
             next: AtomicPtr::default(),
             banned_until: 0.into(),
             #[cfg(feature = "combiner_stat")]
-            combiner_stat: CombinerStatistics::default().into(),
+            combiner_stat: CombinerSample::default().into(),
         }
     }
 }

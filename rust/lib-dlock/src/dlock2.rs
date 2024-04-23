@@ -37,14 +37,16 @@ pub unsafe trait DLock2<I>: Send + Sync {
     fn lock(&self, data: I) -> I;
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics>;
+    fn get_combine_stat(&self) -> Option<&CombinerSample>;
 }
 
 #[derive(Debug, Default)]
-pub struct CombinerStatistics {
-    pub combine_size: HashMap<usize, u64>,
+pub struct CombinerSample {
+    pub combine_size: HashMap<usize, usize>,
     pub combine_time: Vec<u64>,
 }
+
+
 
 #[enum_dispatch]
 #[derive(Debug, Display)]

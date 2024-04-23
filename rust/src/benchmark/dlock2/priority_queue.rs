@@ -1,6 +1,6 @@
 use std::{
     arch::x86_64::__rdtscp,
-    hint::{black_box},
+    hint::black_box,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,7 +15,10 @@ use rand::Rng;
 use crate::{
     benchmark::{
         bencher::Bencher,
-        records::{write_results, Records},
+        records::{
+            spec::{Latency, Spec, SpecBuilder},
+            write_results, Records,
+        },
     },
     lock_target::DLock2Target,
 };
@@ -150,18 +153,19 @@ where
                     }
 
                     Records {
-                        id,
-                        cpu_id: core_id.id,
-                        thread_num: bencher.num_thread,
-                        cpu_num: bencher.num_cpu,
-                        loop_count: loop_count as u64,
-                        num_acquire,
-                        cs_length: 0,
-                        non_cs_length: Some(0),
-                        waiter_latency,
-                        locktype: queue_name.to_owned(),
-                        waiter_type: "".to_string(),
-                        ..Default::default()
+                        spec: SpecBuilder::default()
+                            .with_bencher(bencher)
+                            .id(id)
+                            .loop_count(loop_count)
+                            .num_acquire(num_acquire)
+                            .target_name(queue_name.to_string())
+                            .build()
+                            .unwrap(),
+                        latency: Latency {
+                            combiner_latency: vec![],
+                            waiter_latency,
+                        },
+                        combiner_stat: Default::default(),
                     }
                 })
             })
@@ -194,10 +198,10 @@ fn finish_benchmark<'a>(
     write_results(&folder, file_name, records);
 
     for record in records.iter() {
-        println!("{}", record.loop_count);
+        println!("{}", record.spec.loop_count);
     }
 
-    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.spec.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
 }

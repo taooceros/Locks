@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
-use crate::dlock2::CombinerStatistics;
+use crate::dlock2::CombinerSample;
 use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
@@ -268,7 +268,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerStatistics> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }
