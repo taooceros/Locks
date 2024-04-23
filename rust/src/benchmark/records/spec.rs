@@ -10,7 +10,6 @@ use typed_builder::TypedBuilder;
 
 use crate::benchmark::bencher::Bencher;
 
-
 #[derive(PartialEq, Debug, TypedBuilder)]
 #[builder(mutators(
     pub fn with_bencher(&mut self, bencher: &Bencher) -> &mut Self {
@@ -42,8 +41,6 @@ pub struct Spec {
     #[builder(default)]
     pub waiter_type: Option<String>,
 }
-
-
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Latency {
