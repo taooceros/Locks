@@ -273,7 +273,7 @@ where
                     let combiner_stat = lock_ref.get_combine_stat();
 
                     Records {
-                        spec: SpecBuilder::default()
+                        spec: Spec::builder()
                             .with_bencher(bencher)
                             .id(id)
                             .cpu_id(core_id.id)
@@ -283,8 +283,7 @@ where
                             .num_acquire(num_acquire)
                             .hold_time(hold_time)
                             .target_name(format!("{}", lock_ref))
-                            .build()
-                            .unwrap(),
+                            .build(),
                         latency: Latency {
                             combiner_latency,
                             waiter_latency,

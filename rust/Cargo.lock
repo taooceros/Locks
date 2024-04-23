@@ -816,37 +816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_builder"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
-dependencies = [
- "derive_builder_macro",
-]
-
-[[package]]
-name = "derive_builder_core"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d48cda787f839151732d396ac69e3473923d54312c070ee21e9effcaa8ca0b1d"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.60",
-]
-
-[[package]]
-name = "derive_builder_macro"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
-dependencies = [
- "derive_builder_core",
- "syn 2.0.60",
-]
-
-[[package]]
 name = "dlock"
 version = "0.1.0"
 dependencies = [
@@ -861,7 +830,6 @@ dependencies = [
  "crossbeam-skiplist",
  "csv",
  "debug_print",
- "derive_builder",
  "histo",
  "itertools 0.12.1",
  "libdlock",
@@ -878,6 +846,7 @@ dependencies = [
  "strum",
  "thread-priority",
  "trait-set",
+ "typed-builder",
  "zstd",
 ]
 
@@ -2048,6 +2017,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "typed-builder"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77739c880e00693faef3d65ea3aad725f196da38b22fdc7ea6ded6e1ce4d3add"
+dependencies = [
+ "typed-builder-macro",
+]
+
+[[package]]
+name = "typed-builder-macro"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f718dfaf347dcb5b983bfc87608144b0bad87970aebcbea5ce44d2a30c08e63"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.60",
 ]
 
 [[package]]

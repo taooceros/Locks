@@ -299,13 +299,14 @@ fn start_benchmark<'a>(
                     let combiner_stat = lock_ref.get_combine_stat();
 
                     Records {
-                        spec: SpecBuilder::default()
+                        spec: Spec::builder()
                             .with_bencher(bencher)
                             .id(id)
+                            .cpu_id(core_id.id)
                             .loop_count(loop_count)
                             .num_acquire(num_acquire)
-                            .build()
-                            .unwrap(),
+                            .target_name("Fetch And Add".to_owned())
+                            .build(),
                         latency: Latency {
                             combiner_latency,
                             waiter_latency,

@@ -15,7 +15,7 @@ use rand::Rng;
 use crate::{
     benchmark::{
         bencher::Bencher,
-        dlock2::queue::spec::{CombinerStatistics, Latency, SpecBuilder},
+        dlock2::queue::spec::{CombinerStatistics, Latency, Spec, SpecBuilder},
         records::*,
     },
     lock_target::DLock2Target,
@@ -143,15 +143,14 @@ where
                     }
 
                     Records {
-                        spec: SpecBuilder::default()
+                        spec: Spec::builder()
                             .with_bencher(&bencher)
                             .id(id)
                             .cpu_id(core_id.id)
                             .loop_count(loop_count)
                             .num_acquire(loop_count)
                             .target_name(queue_name.to_string())
-                            .build()
-                            .unwrap(),
+                            .build(),
                         latency: Latency {
                             combiner_latency: vec![],
                             waiter_latency: response_times,

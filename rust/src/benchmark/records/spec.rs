@@ -4,20 +4,33 @@ use std::{
 };
 
 use clap::builder;
-use derive_builder::Builder;
 use libdlock::dlock2::CombinerSample;
 use serde::{Deserialize, Serialize};
+use typed_builder::TypedBuilder;
 
 use crate::benchmark::bencher::Bencher;
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Builder)]
+
+#[derive(PartialEq, Debug, TypedBuilder)]
+#[builder(mutators(
+    pub fn with_bencher(&mut self, bencher: &Bencher) -> &mut Self {
+        self.thread_num = bencher.num_thread.into();
+        self.cpu_num = bencher.num_cpu.into();
+        self.duration = bencher.duration.into();
+        self
+    }
+))]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Spec {
     pub id: usize,
     pub cpu_id: usize,
+    #[builder(via_mutators)]
     pub thread_num: usize,
+    #[builder(via_mutators)]
     pub cpu_num: usize,
     pub loop_count: u64,
     pub num_acquire: u64,
+    #[builder(via_mutators)]
     pub duration: u64,
     pub target_name: String,
     #[builder(default)]
@@ -30,14 +43,7 @@ pub struct Spec {
     pub waiter_type: Option<String>,
 }
 
-impl SpecBuilder {
-    pub fn with_bencher(&mut self, bencher: &Bencher) -> &mut Self {
-        self.thread_num = bencher.num_thread.into();
-        self.cpu_num = bencher.num_cpu.into();
-        self.duration = bencher.duration.into();
-        self
-    }
-}
+
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Latency {

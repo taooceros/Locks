@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use core_affinity::CoreId;
 use rand::Rng;
 
 use crate::{
@@ -153,14 +154,14 @@ where
                     }
 
                     Records {
-                        spec: SpecBuilder::default()
+                        spec: Spec::builder()
                             .with_bencher(bencher)
                             .id(id)
+                            .cpu_id(core_id.id)
                             .loop_count(loop_count)
                             .num_acquire(num_acquire)
                             .target_name(queue_name.to_string())
-                            .build()
-                            .unwrap(),
+                            .build(),
                         latency: Latency {
                             combiner_latency: vec![],
                             waiter_latency,
