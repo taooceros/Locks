@@ -1,5 +1,3 @@
-set positional-arguments
-
 alias r := run2
 
 default_cs := "1000,3000"
@@ -16,14 +14,18 @@ build:
     cd ./rust
     cargo build {{profile_arg}}
 
-run2 locks="" *additional_arg=default_arg: build
+run2 experiment="counter-proportional" locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
-    cargo run {{profile_arg}} -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+    cargo run {{profile_arg}} -- d-lock2  {{ if locks == "" {""} else {"--lock-targets " + locks} }} {{experiment}} {{additional_arg}}
 
-run1 locks="" *additional_arg=default_arg: build
+run1 experiment locks="" *additional_arg=default_arg: build
     #!/usr/bin/env zsh
     cd ./rust
 
     cargo run {{profile_arg}} -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
+
+
+queue2 locks="": (run2 "queue" locks "")
+    true

@@ -148,6 +148,7 @@ where
                             .id(id)
                             .cpu_id(core_id.id)
                             .loop_count(loop_count)
+                            .num_acquire(loop_count)
                             .target_name(queue_name.to_string())
                             .build()
                             .unwrap(),
