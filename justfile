@@ -29,3 +29,6 @@ run1 experiment locks="" *additional_arg=default_arg: build
 
 queue2 locks="": (run2 "queue" locks "")
     true
+
+pluto:
+    julia -e "using Pluto; Pluto.run();"

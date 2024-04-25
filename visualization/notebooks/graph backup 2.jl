@@ -16,7 +16,7 @@ end
 
 # ╔═╡ 3c5e052c-f11e-4a8a-932f-786bf70aa8de
 begin
-	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools, RecursiveArrayTools
+	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools, FlexiMaps
 	
 	using AlgebraOfGraphics: density
 	CairoMakie.activate!(type="svg")
@@ -41,7 +41,10 @@ html"""
 colors = ["#003C96", "#11A69C", "#924AF7", "#D17711", "#0081FE", "#FF5383", "#00AB55", "#400387", "#F2681F", "#005062", "#DE2C62", "#660E00"];
 
 # ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
-folder = "../output"
+folder = "../data"
+
+# ╔═╡ 18b61f75-4981-4988-9523-24700ae73a54
+datasets = readdir(folder);
 
 # ╔═╡ d0a1530c-d95e-4c30-9569-56c82b686392
 md"""
@@ -100,7 +103,14 @@ We have performed the experiment for different length of non-critical section to
 
 """
 
-# ╔═╡ 3503720e-b0c0-4914-9a11-17b821951a44
+# ╔═╡ 5c2a9187-b5ae-4a4b-ad40-a3d063f4ab99
+md"""
+### Result
+
+We will hold an interactive result view to demonstrate the result.
+"""
+
+# ╔═╡ c8a7a955-9425-4da2-a946-6043a0758408
 begin
 	simple_counter_df = nothing
 	
@@ -118,12 +128,11 @@ begin
 			map(x->DataFrame(Arrow.Table(x)), _)
 		end)
 	end
-	counter_locknames = unique(simple_counter_df[!, :target_name])
+	counter_locknames = unique(simple_counter_df[!, :locktype])
 	filter!(x->(!(x in ["C_FC", "C_CC"])), counter_locknames)
 	
 	simple_counter_noncs = sort(unique(simple_counter_df[!, :non_cs_length]))
 	simple_counter_threads = sort(unique(simple_counter_df[!, :thread_num]))
-
 
 	md"""
 	### Result
@@ -148,15 +157,15 @@ $(@bind simple_counter_throughput_noncs_length PlutoUI.MultiCheckBoxNotebook.Mul
 
 # ╔═╡ f764b6a1-f943-44bd-a629-6a957c7ec869
 simple_counter_throughput_loop_df = @chain simple_counter_df begin
-	@subset(:target_name .∈ Ref(simple_counter_throughput_locks), :non_cs_length .∈ Ref(simple_counter_throughput_noncs_length); view=true)
-	groupby([:thread_num, :target_name, :non_cs_length])
+	@subset(:locktype .∈ Ref(simple_counter_throughput_locks), :non_cs_length .∈ Ref(simple_counter_throughput_noncs_length); view=true)
+	groupby([:thread_num, :locktype, :non_cs_length])
 	@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
 end;
 
 # ╔═╡ a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
 let
 	plt = data(simple_counter_throughput_loop_df) *
-		mapping(:thread_num => float, :loop_count => float, color=:target_name, layout=:non_cs_length => nonnumeric) * 
+		mapping(:thread_num => float, :loop_count => float, color=:locktype, layout=:non_cs_length => nonnumeric) * 
 		(visual(Scatter) + visual(Lines; alpha = 0.5));
 	
 	draw(plt; figure=(;size=(1200,800)),
@@ -199,8 +208,8 @@ $(@bind simple_counter_fairness_thread_num PlutoUI.MultiCheckBoxNotebook.MultiCh
 
 # ╔═╡ 2bbc641c-1c88-4101-b9b8-f3699302cc7f
 simple_counter_fairness_df = @chain simple_counter_df begin
-		@subset(:target_name .∈ Ref(simple_counter_fairness_locks), :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
-	end;
+	@subset(:locktype .∈ Ref(simple_counter_fairness_locks), :duration .!= 0, :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
+end;
 
 # ╔═╡ dd696bcb-11f4-4b24-a533-0f4daf3f4f86
 md"""
@@ -210,7 +219,7 @@ md"""
 # ╔═╡ f6f8234c-b3c9-40a4-89bf-a6493233a377
 let
 	plt = data(simple_counter_fairness_df) *
-		mapping(:id, :loop_count, color=:target_name, markersize=:cs_length => (x->(x+3000)/500), col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
+		mapping(:id, :loop_count, color=:locktype, markersize=:cs_length => (x->(x+3000)/500), col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
 		(visual(Scatter; alpha=0.8) + visual(Lines; alpha=0.5));
 
 	height = length(simple_counter_fairness_thread_num) * 400
@@ -228,11 +237,11 @@ md"""
 # ╔═╡ 176d3440-f271-4355-b2c1-2cc1da1517bd
 let
 	plt = data(simple_counter_fairness_df) *
-		mapping(:target_name, :loop_count => (x->x+1), color=:cs_length => nonnumeric, col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
+		mapping(:locktype, :loop_count => (x->x+1), color=:cs_length => nonnumeric, col=:non_cs_length => nonnumeric, row=:thread_num => nonnumeric) * 
 		(visual(BoxPlot));
 
-	width = 200 + (150 + 30 * length(simple_counter_fairness_locks)) * length(simple_counter_fairness_noncs_length)
-	height = 300 + length(simple_counter_fairness_thread_num) * 200
+	width = 200+ (150 + 30 * length(simple_counter_fairness_locks)) * length(simple_counter_fairness_noncs_length)
+	height = length(simple_counter_fairness_thread_num) * 300
 	
 	fig = draw(plt; figure=(;size=(width,height)),
     	palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
@@ -255,50 +264,6 @@ Both of these priority queue based fair variant are using simple heuristic simil
 
 """
 
-# ╔═╡ 0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
-md"""
-#### Combine Batch Size
-
-In this section, we will examine the batch size of a single combine. This is an important metric for understanding the performance of a delegation-styled lock, because the larger the batch size, the less context switch for the critical section.
-
-__Locks__
-$(@bind simple_counter_combine_time_locks PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(counter_locknames, default=[counter_locknames[1]];select_all=true))
-
-__Non-Critical Section Length__
-$(@bind simple_counter_combine_time_noncs_length PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(simple_counter_noncs, default=view(simple_counter_noncs, [1]); select_all=true))
-
-__Thread Number__
-$(@bind simple_counter_combine_time_thread_num PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(simple_counter_threads, default=[16]; select_all=true))
-
-
-"""
-
-# ╔═╡ 2e9962b5-5b0c-44a6-b047-a68d45ab5a26
-simple_counter_combine_time_df = @chain simple_counter_df begin
-	@subset(:target_name .∈ Ref(simple_counter_combine_time_locks), :non_cs_length .∈ Ref(simple_counter_combine_time_noncs_length), :thread_num .∈ Ref(simple_counter_combine_time_thread_num); view=true)
-end;
-
-# ╔═╡ 7bc7fcca-5eba-413b-a8e1-80f3af383420
-let 
-	group = :cs_length
-	
-	df = @chain simple_counter_combine_time_df begin
-		@select(:id, :target_name, :thread_num, :combine_size, :cs_length)
-		groupby([group, :target_name])
-		@combine(:combine_size_ecdf = ecdf(ArrayPartition(:combine_size...)))
-		@transform(@byrow :index = 1:80)
-		DataFrames.flatten(:index)
-		@transform(@byrow :value = :combine_size_ecdf(:index))
-	end
-	
-	plt = data(df) *
-			mapping(:index, :value, color=:cs_length => nonnumeric, layout=:target_name) * 
-			(visual(Lines));
-	
-	fig = draw(plt; figure=(;size=(1200,1200)),
-		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
-end
-
 # ╔═╡ 0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 md"""
 ### Conclusion
@@ -308,6 +273,305 @@ The experiment demonstrate the performance comparison of multiple delegation-sty
 This experiment also demonstrate that the acquirstion fairness  of delegation-styled lock, and the usage fairness for fair variant delegation styled lock under larger contention. It shows that it is possible to achieve usage fairness with mininmal performance panelty for delegation-styled locks.
 
 """
+
+# ╔═╡ d051df13-fdb5-4a79-bc01-62b7da79ce46
+# ╠═╡ disabled = true
+#=╠═╡
+md"""
+# DataSet
+"""
+  ╠═╡ =#
+
+# ╔═╡ 4e1ce063-adf1-4b92-941f-90f3d41dbddb
+# ╠═╡ disabled = true
+#=╠═╡
+md"""
+Select Dataset $(@bind dataset_name Select(datasets))
+"""
+  ╠═╡ =#
+
+# ╔═╡ 78545e43-25f8-4b4e-8b37-20be86ac7035
+# ╠═╡ disabled = true
+# ╠═╡ skip_as_script = true
+#=╠═╡
+data1 = Arrow.Table(joinpath("..", folder, dataset_name))
+  ╠═╡ =#
+
+# ╔═╡ 15ff182b-e29f-4521-8490-4467738c7f32
+# ╠═╡ disabled = true
+#=╠═╡
+df_origin = DataFrame(data1)
+  ╠═╡ =#
+
+# ╔═╡ 071f1e64-9af0-4135-9cc6-d86febcb4d76
+#=╠═╡
+begin
+	pretty_table(names(df_origin), header = ["Columns"])
+	md"""
+	Column Names
+	"""
+end
+  ╠═╡ =#
+
+# ╔═╡ 6b907e00-187a-425a-b4f9-a8b079b7d897
+# ╠═╡ disabled = true
+#=╠═╡
+locknames = @distinct(df_origin, :locktype)[!, :locktype];
+  ╠═╡ =#
+
+# ╔═╡ b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
+#=╠═╡
+md"""
+Lock Types: $(@bind locktypes MultiSelect(locknames, default=locknames))
+"""
+  ╠═╡ =#
+
+# ╔═╡ acb5e252-26e7-4335-9ab0-d30ecba9427a
+# ╠═╡ disabled = true
+# ╠═╡ skip_as_script = true
+#=╠═╡
+df1 = @chain df_origin begin
+	@subset(:locktype .∈ Ref(locktypes))
+end;
+
+# ╔═╡ 5587f88f-2b80-46c1-908e-64284e040576
+thread_nums = convert(Vector{Int}, unique(df1[!, :thread_num]))
+
+# ╔═╡ 6009e94f-5ad1-45ae-bf5c-9d272c900d2c
+# ╠═╡ disabled = true
+#=╠═╡
+md"""
+# Loop Count
+"""
+  ╠═╡ =#
+
+# ╔═╡ a3f00b89-8ab0-4026-af69-6966947d2fe6
+begin
+	count_df = @chain df1 begin
+		groupby([:thread_num, :locktype, :waiter_type])	
+		@combine(:thread_num = first(:thread_num), :loop_count = sum(:loop_count))
+	end
+end;
+
+# ╔═╡ cdf3ef81-fd2d-450d-8e50-8e56fe629163
+# ╠═╡ disabled = true
+#=╠═╡
+count_plt = data(count_df) * mapping(:thread_num => float, :loop_count => float, color=:locktype, marker=:locktype) * (visual(Scatter) + visual(Lines; alpha = 0.5));
+  ╠═╡ =#
+
+# ╔═╡ 2b20fa2c-bb36-4f60-abce-5eb1c56ea700
+#=╠═╡
+draw(count_plt; figure=(; size=(1000, 600)),
+    palettes=(; color=colors), axis=(; xticks=[2,4,8,16,32,64]))
+  ╠═╡ =#
+
+# ╔═╡ 5d719fea-c747-4e7a-a837-d1d043b7d655
+# ╠═╡ disabled = true
+#=╠═╡
+md"""
+# Per Thread Iteration
+"""
+  ╠═╡ =#
+
+# ╔═╡ 2022ecc8-c3e6-473d-a54e-23e998a2ff21
+@bind thread_num_hold_time Select(thread_nums; default=16)
+
+# ╔═╡ f6034971-1b8d-4ec6-84e7-6d23454fecb5
+begin
+	hold_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_hold_time)
+	end
+end;
+
+# ╔═╡ 81cd97f5-99a9-41b6-b801-bff8e08c4baf
+per_iteration_plt = data(hold_time_df) * mapping(:id => nonnumeric, :loop_count, color=:locktype) * (visual(Lines) + visual(Scatter));
+
+# ╔═╡ 34dfdb62-adb5-44e0-b128-86aabd480c7a
+draw(per_iteration_plt, figure=(;size=(1400,600)))
+
+# ╔═╡ aa585e86-53f4-4340-80a5-b64ee56cc0bd
+md"""
+# Combine Time
+
+$(@bind thread_num_combine_time Select(thread_nums; default=16))
+"""
+
+# ╔═╡ 8f0d38dc-3814-48e4-ad99-914a417f228a
+begin
+	combine_time_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_combine_time)
+		dropmissing(:combine_time)
+	end
+end;
+
+# ╔═╡ 4777ad7f-1dba-4217-b2a9-473a0fbf698a
+combine_time_plt = data(combine_time_df) * mapping(:id => nonnumeric, :combine_time, color=:locktype) * (visual(Lines) + visual(Scatter));
+
+# ╔═╡ 905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
+draw(combine_time_plt, figure=(;size=(1400,600)))
+
+# ╔═╡ c2c4f06a-f723-436e-8e5a-5451924c144b
+md"""
+# Response Time
+Enable Analysis $(@bind analyze_response_time CheckBox(false))
+
+Thread Num $(@bind thread_num_response_time Select(thread_nums, default=16))
+"""
+
+# ╔═╡ 4ebcc2b4-d5b1-4fa2-a180-707c1c868019
+if analyze_response_time 
+	locktypes2 = unique((@chain df1 begin
+		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+		dropmissing([:combiner_latency, :waiter_latency]; view=true)
+	end)[!, :locktype])
+
+	response_time_dict = Dict()
+	
+	for locktype in locktypes2 
+		df5 = @chain df1 begin
+			@subset(:thread_num .== thread_num_response_time, :locktype .== locktype; view=true)
+			@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+			dropmissing([:combiner_latency, :waiter_latency]; view=true)
+			@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
+		end
+
+		cv1 = ApplyArray(vcat, df5[!, :combiner_latency]...)
+		cv2 = Array{Int}(undef, length(cv1))
+		copyto!(cv2, cv1)
+		sort!(cv2)
+
+		wv1 = ApplyArray(vcat, df5[!, :waiter_latency]...)
+		wv2 = Array{Int}(undef, length(wv1))
+		copyto!(wv2, wv1)
+		sort!(wv2)
+		
+		response_time_dict[locktype] = (ecdf(cv2), ecdf(wv2))
+	end
+
+	response_time_dict;
+end;
+
+# ╔═╡ 3cdafbff-0b89-4371-9446-ef89e64f6eb9
+# ╠═╡ disabled = true
+#=╠═╡
+if analyze_response_time 
+	ecdf_df = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+		dropmissing([:combiner_latency, :waiter_latency]; view=true)
+		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
+		groupby([:locktype])
+		@combine(
+			:c_ecdf = ecdf(convert(Vector{Int}, SplitApplyCombine.flatten(:combiner_latency))), 
+			:w_ecdf =  ecdf(convert(Vector{Int}, SplitApplyCombine.flatten(:waiter_latency)))
+		)
+		groupby(:locktype)
+		# @transform(@byrow :c_ecdf_value = :c_ecdf(:points), :w_ecdf_value = :c_ecdf(:points))
+		# DataFramesMeta.flatten([:points, :ecdf_value, :w_ecdf_value])
+	end;
+end;
+  ╠═╡ =#
+
+# ╔═╡ e673365d-f959-413e-a6e8-3a76a0e89841
+if analyze_response_time
+	function range_tuple(x, length = 300000)
+		start, stop = x
+	
+		range(start, stop, length)
+		# maprange(log, start, stop, length=length)
+	end;
+	
+	ecdf_points = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time; view=true)
+		@transform(:combiner_latency = replace(:combiner_latency, missing => []))
+		dropmissing([:combiner_latency, :waiter_latency]; view=true)
+		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency; view=true)
+		groupby([:locktype])
+		@combine(
+			:points = range_tuple(extrema(Iterators.flatten(ApplyArray(vcat, :combiner_latency, :waiter_latency))))
+		)
+		# @transform(@byrow :c_ecdf_value = :c_ecdf(:points), :w_ecdf_value = :c_ecdf(:points))
+		# DataFramesMeta.flatten([:points, :ecdf_value, :w_ecdf_value])
+	end;
+end;
+
+
+# ╔═╡ a0eecb6d-6fda-4668-bab6-59f189295f5d
+# ╠═╡ disabled = true
+#=╠═╡
+if analyze_response_time
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :job_length, :is_combiner, :response_time)
+		@transform(@byrow :response_time = Dates.value.(:response_time))
+		@transform(@byrow :c_r = zip(:is_combiner, :response_time))
+		@transform(@byrow begin
+			:combine_response = Iterators.filter((y->y[1]), :c_r)
+			:response = Iterators.filter((y->!y[1]), :c_r)
+		end)
+		stack([:combine_response, :response])
+		@rename(:response_type = :variable)
+	end
+end
+  ╠═╡ =#
+
+# ╔═╡ b8db3eed-eb6c-4161-9d97-99d5c9c4194e
+if analyze_response_time
+	group = ["Combiner", "Waiter"]
+	
+	response_time_plt = data(ecdf_points) *
+		(mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][1](x)), layout=:locktype) * visual(Lines, color = colors[1])
+		+ mapping(:points, (:points, :locktype) => ((x, y)->response_time_dict[y][2](x)), layout=:locktype) * visual(Lines, color = colors[2]))
+	;
+end;
+
+# ╔═╡ 5f3d39d9-273d-48f7-a86e-211ec5c3bd81
+if analyze_response_time
+	draw(response_time_plt, figure=(;size=(1200,800)), axis=(;xscale=log))
+end
+
+# ╔═╡ 84a9bf82-521e-4f46-8b14-8356d6a886b8
+md"""
+# (Flatten) Response Time
+Enable Flatten Analysis (Maybe very slow) $(@bind flatten_latency_analysis CheckBox(false))
+
+Thread Num $(@bind flatten_thread_num_latency Select(thread_nums; default=16))
+"""
+
+# ╔═╡ 0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
+if flatten_latency_analysis
+	flatten_latency_df = @chain df1 begin
+		@subset(:thread_num .== flatten_thread_num_latency)
+		@select(:locktype, :id, :cs_length, :combiner_latency, :waiter_latency)
+		groupby([:locktype, :cs_length])
+		@combine(:ecdf = ecdf(convert(Vector{Int}, SplitApplyCombine.flatten(vcat(:combiner_latency, :waiter_latency)))))
+		@transform(:points = range_tuple.(extrema.(:ecdf)))
+		@transform(@byrow :ecdf_value = :ecdf(:points))
+		DataFramesMeta.flatten([:points, :ecdf_value])
+	end;
+end;
+
+# ╔═╡ 6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+if flatten_latency_analysis
+	df2 = @chain df1 begin
+		@subset(:thread_num .== thread_num_response_time)
+		@select(:locktype, :id, :combiner_latency, :waiter_latency)
+		stack([:combiner_latency, :waiter_latency])
+		@rename(:response_type = :variable)
+	end;
+end;
+
+# ╔═╡ c23027c6-026b-4577-acc1-332c0b135853
+if flatten_latency_analysis
+	flatten_latency_plt = data(flatten_latency_df) * mapping(:points, :ecdf_value, color=:cs_length => (x-> nonnumeric(x.nanos)), layout=:locktype) * (visual(Lines));
+end;
+
+
+# ╔═╡ 5f4e146a-bc79-4725-b5ad-a23a2971a5fa
+if flatten_latency_analysis
+	draw(flatten_latency_plt, figure=(;size=(1200,600)), axis=(;xscale=log))
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -320,11 +584,11 @@ ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+FlexiMaps = "6394faf6-06db-4fa8-b750-35ccc60383f7"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
-RecursiveArrayTools = "731186ca-8d62-57ce-b412-fbd966d074cd"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SplitApplyCombine = "03a91e81-4c3e-53e1-a0a4-9c0c8f19dd66"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
@@ -337,11 +601,11 @@ CairoMakie = "~0.11.9"
 ColorSchemes = "~3.24.0"
 DataFrames = "~1.6.1"
 DataFramesMeta = "~0.15.1"
+FlexiMaps = "~0.1.25"
 LazyArrays = "~1.8.3"
 Pluto = "~0.19.40"
 PlutoUI = "~0.7.58"
 PrettyTables = "~2.3.1"
-RecursiveArrayTools = "~3.12.0"
 Revise = "~3.5.14"
 SplitApplyCombine = "~1.2.3"
 StatsBase = "~0.34.2"
@@ -353,7 +617,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "d100bb8d00fdd237d1d87bfc59154ec127a2e4a8"
+project_hash = "afb0f48496c9d97bddae2cd70c28540e1e3eb099"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -381,6 +645,27 @@ version = "1.3.0"
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
 uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 version = "0.4.5"
+
+[[deps.Accessors]]
+deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "LinearAlgebra", "MacroTools", "Markdown", "Test"]
+git-tree-sha1 = "c0d491ef0b135fd7d63cbc6404286bc633329425"
+uuid = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
+version = "0.1.36"
+
+    [deps.Accessors.extensions]
+    AccessorsAxisKeysExt = "AxisKeys"
+    AccessorsIntervalSetsExt = "IntervalSets"
+    AccessorsStaticArraysExt = "StaticArrays"
+    AccessorsStructArraysExt = "StructArrays"
+    AccessorsUnitfulExt = "Unitful"
+
+    [deps.Accessors.weakdeps]
+    AxisKeys = "94b1ba4f-4ee9-5380-92f1-94cde586c3c5"
+    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
+    Requires = "ae029012-a4dd-5104-9daa-d747884805df"
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+    StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+    Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -646,6 +931,15 @@ deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
 version = "1.1.0+0"
 
+[[deps.CompositionsBase]]
+git-tree-sha1 = "802bb88cd69dfd1509f6670416bd4434015693ad"
+uuid = "a33af91c-f02d-484b-be07-31d278c5ca2b"
+version = "0.1.2"
+weakdeps = ["InverseFunctions"]
+
+    [deps.CompositionsBase.extensions]
+    CompositionsBaseInverseFunctionsExt = "InverseFunctions"
+
 [[deps.ConcurrentUtilities]]
 deps = ["Serialization", "Sockets"]
 git-tree-sha1 = "6cbbd4d241d7e6579ab354737f4dd95ca43946e1"
@@ -695,6 +989,11 @@ deps = ["Chain", "DataFrames", "MacroTools", "OrderedCollections", "Reexport", "
 git-tree-sha1 = "45da647495a607429ca6cbdc591e98737a928b42"
 uuid = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 version = "0.15.1"
+
+[[deps.DataPipes]]
+git-tree-sha1 = "64ae76311a9e3a300ccabc1d8d5d4d36b9d047c7"
+uuid = "02685ad9-2d12-40c3-9f73-c6aeda6a7ff5"
+version = "0.3.14"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -905,6 +1204,24 @@ git-tree-sha1 = "335bfdceacc84c5cdf16aadc768aa5ddfc5383cc"
 uuid = "53c48c17-4a7d-5ca2-90c5-79b7896eea93"
 version = "0.8.4"
 
+[[deps.FlexiMaps]]
+deps = ["Accessors", "DataPipes", "InverseFunctions"]
+git-tree-sha1 = "b10d103acab2d5fef4a4136309f491292895de63"
+uuid = "6394faf6-06db-4fa8-b750-35ccc60383f7"
+version = "0.1.25"
+
+    [deps.FlexiMaps.extensions]
+    AxisKeysExt = "AxisKeys"
+    DictionariesExt = "Dictionaries"
+    IntervalSetsExt = "IntervalSets"
+    StructArraysExt = "StructArrays"
+
+    [deps.FlexiMaps.weakdeps]
+    AxisKeys = "94b1ba4f-4ee9-5380-92f1-94cde586c3c5"
+    Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
+    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
+    StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+
 [[deps.Fontconfig_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "21efd19106a55620a188615da6d3d06cd7f6ee03"
@@ -965,12 +1282,6 @@ deps = ["Distributions", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", 
 git-tree-sha1 = "273bd1cd30768a2fddfa3fd63bbc746ed7249e5f"
 uuid = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
 version = "1.9.0"
-
-[[deps.GPUArraysCore]]
-deps = ["Adapt"]
-git-tree-sha1 = "ec632f177c0d990e64d955ccc1b8c04c485a0950"
-uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
-version = "0.1.6"
 
 [[deps.GeoInterface]]
 deps = ["Extents"]
@@ -1159,6 +1470,12 @@ weakdeps = ["Random", "RecipesBase", "Statistics"]
     IntervalSetsRandomExt = "Random"
     IntervalSetsRecipesBaseExt = "RecipesBase"
     IntervalSetsStatisticsExt = "Statistics"
+
+[[deps.InverseFunctions]]
+deps = ["Test"]
+git-tree-sha1 = "68772f49f54b479fa88ace904f6127f0a3bb2e46"
+uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
+version = "0.1.12"
 
 [[deps.InvertedIndices]]
 git-tree-sha1 = "0dc7b50b8d436461be01300fd8cd45aa0274b038"
@@ -1830,30 +2147,6 @@ git-tree-sha1 = "5c3d09cc4f31f5fc6af001c250bf1278733100ff"
 uuid = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 version = "1.3.4"
 
-[[deps.RecursiveArrayTools]]
-deps = ["Adapt", "ArrayInterface", "DocStringExtensions", "GPUArraysCore", "IteratorInterfaceExtensions", "LinearAlgebra", "RecipesBase", "SparseArrays", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tables"]
-git-tree-sha1 = "a94d22ca9ad49a7a169ecbc5419c59b9793937cc"
-uuid = "731186ca-8d62-57ce-b412-fbd966d074cd"
-version = "3.12.0"
-
-    [deps.RecursiveArrayTools.extensions]
-    RecursiveArrayToolsFastBroadcastExt = "FastBroadcast"
-    RecursiveArrayToolsForwardDiffExt = "ForwardDiff"
-    RecursiveArrayToolsMeasurementsExt = "Measurements"
-    RecursiveArrayToolsMonteCarloMeasurementsExt = "MonteCarloMeasurements"
-    RecursiveArrayToolsReverseDiffExt = ["ReverseDiff", "Zygote"]
-    RecursiveArrayToolsTrackerExt = "Tracker"
-    RecursiveArrayToolsZygoteExt = "Zygote"
-
-    [deps.RecursiveArrayTools.weakdeps]
-    FastBroadcast = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
-    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-    Measurements = "eff96d63-e80a-5855-80a2-b1b0885c5ab7"
-    MonteCarloMeasurements = "0987c9cc-fe09-11e8-30f0-b96dd679fdca"
-    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
-    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
-    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
-
 [[deps.Reexport]]
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
@@ -1905,12 +2198,6 @@ version = "0.4.0+0"
 git-tree-sha1 = "40b9edad2e5287e05bd413a38f61a8ff55b9557b"
 uuid = "5eaf0fd0-dfba-4ccb-bf02-d820a40db705"
 version = "0.2.1"
-
-[[deps.RuntimeGeneratedFunctions]]
-deps = ["ExprTools", "SHA", "Serialization"]
-git-tree-sha1 = "6aacc5eefe8415f47b3e34214c1d79d2674a0ba2"
-uuid = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
-version = "0.5.12"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
@@ -2085,14 +2372,11 @@ deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Re
 git-tree-sha1 = "cef0472124fab0695b58ca35a77c6fb942fdab8a"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "1.3.1"
+weakdeps = ["ChainRulesCore", "InverseFunctions"]
 
     [deps.StatsFuns.extensions]
     StatsFunsChainRulesCoreExt = "ChainRulesCore"
     StatsFunsInverseFunctionsExt = "InverseFunctions"
-
-    [deps.StatsFuns.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.StatsModels]]
 deps = ["DataAPI", "DataStructures", "LinearAlgebra", "Printf", "REPL", "ShiftedArrays", "SparseArrays", "StatsAPI", "StatsBase", "StatsFuns", "Tables"]
@@ -2111,13 +2395,18 @@ deps = ["ConstructionBase", "DataAPI", "Tables"]
 git-tree-sha1 = "f4dc295e983502292c4c3f951dbb4e985e35b3be"
 uuid = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 version = "0.6.18"
-weakdeps = ["Adapt", "GPUArraysCore", "SparseArrays", "StaticArrays"]
 
     [deps.StructArrays.extensions]
     StructArraysAdaptExt = "Adapt"
     StructArraysGPUArraysCoreExt = "GPUArraysCore"
     StructArraysSparseArraysExt = "SparseArrays"
     StructArraysStaticArraysExt = "StaticArrays"
+
+    [deps.StructArrays.weakdeps]
+    Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+    GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
+    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [[deps.SuiteSparse]]
 deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
@@ -2127,12 +2416,6 @@ uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
 version = "7.2.1+1"
-
-[[deps.SymbolicIndexingInterface]]
-deps = ["MacroTools", "RuntimeGeneratedFunctions"]
-git-tree-sha1 = "f7b1fc9fc2bc938436b7684c243be7d317919056"
-uuid = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
-version = "0.3.11"
 
 [[deps.TOML]]
 deps = ["Dates"]
@@ -2246,14 +2529,11 @@ deps = ["Dates", "LinearAlgebra", "Random"]
 git-tree-sha1 = "3c793be6df9dd77a0cf49d80984ef9ff996948fa"
 uuid = "1986cc42-f94f-5a68-af5c-568840ba703d"
 version = "1.19.0"
+weakdeps = ["ConstructionBase", "InverseFunctions"]
 
     [deps.Unitful.extensions]
     ConstructionBaseUnitfulExt = "ConstructionBase"
     InverseFunctionsUnitfulExt = "InverseFunctions"
-
-    [deps.Unitful.weakdeps]
-    ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.WoodburyMatrices]]
 deps = ["LinearAlgebra", "SparseArrays"]
@@ -2405,30 +2685,59 @@ version = "3.5.0+0"
 # ╔═╡ Cell order:
 # ╟─3872be19-d39d-4a5f-be9e-5625ca45bf2d
 # ╟─32fe4de7-887b-4f4f-b7b6-6d10d9c5a0b6
-# ╠═3c5e052c-f11e-4a8a-932f-786bf70aa8de
+# ╟─3c5e052c-f11e-4a8a-932f-786bf70aa8de
 # ╟─059160d7-741d-49f6-86b1-864d5d2fd7e2
-# ╠═a5a7824d-095f-4d68-bf22-96f0a93901a3
+# ╟─a5a7824d-095f-4d68-bf22-96f0a93901a3
+# ╟─18b61f75-4981-4988-9523-24700ae73a54
 # ╟─d0a1530c-d95e-4c30-9569-56c82b686392
 # ╟─4de305e8-70fc-44f5-9181-c9e55a47c77c
 # ╟─4effc63c-e191-4708-890f-44bf0e3a0ea7
 # ╟─7ca2625c-3681-4eb1-a7a2-487978716a0c
-# ╟─3503720e-b0c0-4914-9a11-17b821951a44
+# ╟─5c2a9187-b5ae-4a4b-ad40-a3d063f4ab99
+# ╠═c8a7a955-9425-4da2-a946-6043a0758408
 # ╟─de0bec11-fc0b-4e68-8ec2-1c4c9435cb7a
 # ╟─a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
-# ╟─f764b6a1-f943-44bd-a629-6a957c7ec869
-# ╟─a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
-# ╟─d830cb2b-f599-47e4-83f9-3d4dd1ba6876
+# ╠═f764b6a1-f943-44bd-a629-6a957c7ec869
+# ╠═a3aaa05b-571a-41d6-a1b9-ecdbf5f9fdd0
 # ╟─c9aee179-eebe-4e12-8976-ee131aaf029e
 # ╟─e7d00699-c7cc-4e27-ab4f-fd3ff7f60258
 # ╟─2bbc641c-1c88-4101-b9b8-f3699302cc7f
-# ╟─dd696bcb-11f4-4b24-a533-0f4daf3f4f86
 # ╟─f6f8234c-b3c9-40a4-89bf-a6493233a377
-# ╟─5baa0231-e4e3-4104-b556-19026fb61623
-# ╠═176d3440-f271-4355-b2c1-2cc1da1517bd
-# ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
-# ╟─0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
-# ╟─2e9962b5-5b0c-44a6-b047-a68d45ab5a26
-# ╠═7bc7fcca-5eba-413b-a8e1-80f3af383420
+# ╟─176d3440-f271-4355-b2c1-2cc1da1517bd
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
+# ╠═d051df13-fdb5-4a79-bc01-62b7da79ce46
+# ╟─4e1ce063-adf1-4b92-941f-90f3d41dbddb
+# ╠═78545e43-25f8-4b4e-8b37-20be86ac7035
+# ╠═15ff182b-e29f-4521-8490-4467738c7f32
+# ╟─071f1e64-9af0-4135-9cc6-d86febcb4d76
+# ╟─6b907e00-187a-425a-b4f9-a8b079b7d897
+# ╟─b3389196-d2c0-4c7c-a4a8-dcbaf7e59c35
+# ╟─acb5e252-26e7-4335-9ab0-d30ecba9427a
+# ╟─5587f88f-2b80-46c1-908e-64284e040576
+# ╟─6009e94f-5ad1-45ae-bf5c-9d272c900d2c
+# ╟─a3f00b89-8ab0-4026-af69-6966947d2fe6
+# ╟─cdf3ef81-fd2d-450d-8e50-8e56fe629163
+# ╟─2b20fa2c-bb36-4f60-abce-5eb1c56ea700
+# ╟─5d719fea-c747-4e7a-a837-d1d043b7d655
+# ╟─2022ecc8-c3e6-473d-a54e-23e998a2ff21
+# ╟─f6034971-1b8d-4ec6-84e7-6d23454fecb5
+# ╟─81cd97f5-99a9-41b6-b801-bff8e08c4baf
+# ╟─34dfdb62-adb5-44e0-b128-86aabd480c7a
+# ╟─aa585e86-53f4-4340-80a5-b64ee56cc0bd
+# ╟─8f0d38dc-3814-48e4-ad99-914a417f228a
+# ╟─4777ad7f-1dba-4217-b2a9-473a0fbf698a
+# ╟─905f824d-dd5e-4c6e-a0c9-d5ad956d3ef2
+# ╟─c2c4f06a-f723-436e-8e5a-5451924c144b
+# ╟─4ebcc2b4-d5b1-4fa2-a180-707c1c868019
+# ╟─3cdafbff-0b89-4371-9446-ef89e64f6eb9
+# ╟─e673365d-f959-413e-a6e8-3a76a0e89841
+# ╟─a0eecb6d-6fda-4668-bab6-59f189295f5d
+# ╟─b8db3eed-eb6c-4161-9d97-99d5c9c4194e
+# ╟─5f3d39d9-273d-48f7-a86e-211ec5c3bd81
+# ╟─84a9bf82-521e-4f46-8b14-8356d6a886b8
+# ╟─0cbcabaa-c47c-41b1-a98b-0a2c6c8a6e3d
+# ╟─6dc5e04a-2e6c-40ad-ba5f-0c0433382b0e
+# ╟─c23027c6-026b-4577-acc1-332c0b135853
+# ╟─5f4e146a-bc79-4725-b5ad-a23a2971a5fa
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
