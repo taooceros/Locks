@@ -4,6 +4,7 @@ use std::{
 };
 
 use clap::builder;
+use itertools::Itertools;
 use libdlock::dlock2::combiner_stat::CombinerSample;
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;
@@ -60,6 +61,7 @@ impl CombinerStatistics {
             combine_size: sample
                 .combine_size
                 .iter()
+                .sorted()
                 .flat_map(|(k, v)| repeat(*k).take(*v))
                 .collect(),
             combine_time: sample.combine_time.clone(),

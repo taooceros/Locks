@@ -192,6 +192,11 @@ md"""
 ##### Figure: ECDF of Combine Size
 """
 
+# ╔═╡ 2426f0e6-5b26-417a-94ad-03c87e6f0a95
+md"""
+#### Figure: Histogram of Combine Size
+"""
+
 # ╔═╡ 0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 md"""
 ### Conclusion
@@ -362,33 +367,67 @@ $(@bind simple_counter_combine_time_thread_num Radio([i for i in simple_counter_
 
 """
 
-# ╔═╡ ef88c7c7-8cd3-4f56-b199-4f5d13328ddd
-simple_counter_combine_time_thread_num
-
 # ╔═╡ 2e9962b5-5b0c-44a6-b047-a68d45ab5a26
 simple_counter_combine_time_df = @chain simple_counter_df begin
 	@subset(:target_name .∈ Ref(simple_counter_combine_time_locks), :non_cs_length .∈ Ref(simple_counter_combine_time_noncs_length), :thread_num .∈ Ref(simple_counter_combine_time_thread_num); view=true)
 end;
 
-# ╔═╡ 7bc7fcca-5eba-413b-a8e1-80f3af383420
+# ╔═╡ 9ea080a3-284f-4f1d-8c17-6cd13608f08b
 let 
-	group = [:cs_length, :non_cs_length]
+	group = [:cs_length, :target_name, :non_cs_length]
 	
 	df = @chain simple_counter_combine_time_df begin
 		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
-		groupby([group; :target_name])
-		@combine(:combine_size_ecdf = ecdf(ArrayPartition(:combine_size...)), :index = extrema(ArrayPartition(:combine_size...)))
-		@transform(@byrow :index = (:index[1]):0.1:(:index[2]))
+		DataFrames.flatten(:combine_size)
+	end
+	
+	plt = data(df) *
+			mapping(:combine_size, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * density();
+	
+	fig = draw(plt; figure=(;size=(1200,1200)),
+		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:none))
+end
+
+# ╔═╡ 3a9f0f9d-f5b8-484f-838e-ee92913862d2
+let 
+	group = [:cs_length, :non_cs_length, :target_name]
+	
+	df = @chain simple_counter_combine_time_df begin
+		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
+		groupby(group)
+		@combine(:combine_number = sum(ArrayPartition(:combine_size...)))
+	end
+
+	print(df)
+	
+	plt = data(df) *
+			mapping(:cs_length => nonnumeric, :combine_number, col=:target_name, row = :non_cs_length => nonnumeric) * visual(BarPlot);
+	
+	fig = draw(plt; figure=(;size=(1200,1200)),
+		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
+end
+
+# ╔═╡ 7bc7fcca-5eba-413b-a8e1-80f3af383420
+let 
+	group = [:cs_length, :non_cs_length, :target_name]
+	
+	df = @chain simple_counter_combine_time_df begin
+		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
+		groupby(group)
+		@combine(:combine_size_ecdf = (ecdf(ArrayPartition(:combine_size...))), :index = extrema(ArrayPartition(:combine_size...)))
+		@transform(@byrow :index = (:index[1]):(:index[2]))
 		DataFrames.flatten(:index)
 		@transform(@byrow :value = :combine_size_ecdf(:index))
 	end
 	
 	plt = data(df) *
 			mapping(:index, :value, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * 
-			(visual(Lines));
+			(visual(Lines, alpha=0.3));
 	
-	fig = draw(plt; figure=(;size=(1200,1200)),
-		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
+	height = 300 * length(simple_counter_combine_time_noncs_length)
+	
+	fig = draw(plt; figure=(;size=(1200,height)),
+		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:minimal))
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2514,10 +2553,12 @@ version = "3.5.0+0"
 # ╠═176d3440-f271-4355-b2c1-2cc1da1517bd
 # ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
 # ╟─0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
-# ╠═ef88c7c7-8cd3-4f56-b199-4f5d13328ddd
-# ╟─2e9962b5-5b0c-44a6-b047-a68d45ab5a26
+# ╠═2e9962b5-5b0c-44a6-b047-a68d45ab5a26
 # ╠═aeac3fa3-08f2-438a-9930-8eb0e35956e4
 # ╠═7bc7fcca-5eba-413b-a8e1-80f3af383420
+# ╠═2426f0e6-5b26-417a-94ad-03c87e6f0a95
+# ╠═9ea080a3-284f-4f1d-8c17-6cd13608f08b
+# ╠═3a9f0f9d-f5b8-484f-838e-ee92913862d2
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
 # ╠═9f70bb50-4697-41ff-a160-4c3ddca693d2
 # ╟─00000000-0000-0000-0000-000000000001
