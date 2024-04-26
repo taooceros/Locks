@@ -45,7 +45,7 @@ html"""
 colors = ["#003C96", "#11A69C", "#924AF7", "#D17711", "#0081FE", "#FF5383", "#00AB55", "#400387", "#F2681F", "#005062", "#DE2C62", "#660E00"];
 
 # ╔═╡ a5a7824d-095f-4d68-bf22-96f0a93901a3
-folder = "../output"
+folder = "../data"
 
 # ╔═╡ d0a1530c-d95e-4c30-9569-56c82b686392
 md"""
@@ -123,6 +123,10 @@ begin
 		end)
 	end
 	counter_locknames = unique(simple_counter_df[!, :target_name])
+	counter_dlocknames = filter(counter_locknames) do lock
+		!(lock in ["Mutex", "SpinLock", "USCL"])
+	end
+	
 	filter!(x->(!(x in ["C_FC", "C_CC"])), counter_locknames)
 	
 	simple_counter_noncs = sort(unique(simple_counter_df[!, :non_cs_length]))
@@ -205,6 +209,11 @@ The experiment demonstrate the performance comparison of multiple delegation-sty
 
 This experiment also demonstrate that the acquirstion fairness  of delegation-styled lock, and the usage fairness for fair variant delegation styled lock under larger contention. It shows that it is possible to achieve usage fairness with mininmal performance panelty for delegation-styled locks.
 
+"""
+
+# ╔═╡ df1d3a65-1081-4af3-9658-716ae27f5041
+md"""
+# Appendix
 """
 
 # ╔═╡ 9f70bb50-4697-41ff-a160-4c3ddca693d2
@@ -356,7 +365,7 @@ md"""
 In this section, we will examine the batch size of a single combine. This is an important metric for understanding the performance of a delegation-styled lock, because the larger the batch size, the less context switch for the critical section.
 
 __Locks__
-$(@bind simple_counter_combine_time_locks PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(counter_locknames, default=[counter_locknames[1]];select_all=true))
+$(@bind simple_counter_combine_time_locks PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(counter_dlocknames, default=[counter_locknames[1]];select_all=true))
 
 __Non-Critical Section Length__
 $(@bind simple_counter_combine_time_noncs_length PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(simple_counter_noncs, default=view(simple_counter_noncs, [1]); select_all=true))
@@ -375,22 +384,6 @@ end;
 # ╔═╡ 785cbdd2-5f11-43ea-8df7-bc4e87a09546
 simple_counter_combine_time_df[!, :combine_size]
 
-# ╔═╡ 9ea080a3-284f-4f1d-8c17-6cd13608f08b
-let 
-	group = [:cs_length, :target_name, :non_cs_length]
-	
-	df = @chain simple_counter_combine_time_df begin
-		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
-		DataFrames.flatten(:combine_size)
-	end
-	
-	plt = data(df) *
-			mapping(:combine_size, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * histogram(bins=50);
-	
-	fig = draw(plt; figure=(;size=(1200,1200)),
-		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:none))
-end
-
 # ╔═╡ 3a9f0f9d-f5b8-484f-838e-ee92913862d2
 let 
 	group = [:cs_length, :non_cs_length, :target_name]
@@ -400,8 +393,6 @@ let
 		groupby(group)
 		@combine(:combine_number = sum(ArrayPartition(:combine_size...)))
 	end
-
-	print(df)
 	
 	plt = data(df) *
 			mapping(:cs_length => nonnumeric, :combine_number, col=:target_name, row = :non_cs_length => nonnumeric) * visual(BarPlot);
@@ -412,25 +403,47 @@ end
 
 # ╔═╡ 7bc7fcca-5eba-413b-a8e1-80f3af383420
 let 
-	group = [:cs_length, :non_cs_length, :target_name]
+	group = [:id, :non_cs_length, :target_name]
 	
 	df = @chain simple_counter_combine_time_df begin
 		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
 		groupby(group)
-		@combine(:combine_size_ecdf = (@time ecdf(ArrayPartition(:combine_size...))), :index = extrema(ArrayPartition(:combine_size...)))
+		@combine(:combine_size_ecdf = (ecdf(ArrayPartition(:combine_size...))), :index = extrema(ArrayPartition(:combine_size...)))
 		@transform(@byrow :index = (:index[1]):(:index[2]))
 		DataFrames.flatten(:index)
 		@transform(@byrow :value = :combine_size_ecdf(:index))
 	end
 	
 	plt = data(df) *
-			mapping(:index, :value, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * 
-			(visual(Lines, alpha=0.3));
+			mapping(:index, :value, color =:id => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * 
+			(visual(Lines, alpha=0.6));
+
+	width = 300 + 200 * length(simple_counter_combine_time_locks)
 	
 	height = 300 * length(simple_counter_combine_time_noncs_length)
 	
-	fig = draw(plt; figure=(;size=(1200,height)),
-		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:minimal))
+	fig = draw(plt; figure=(;size=(width,height)),
+		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi, xticks=WilkinsonTicks(10)), facet=(;linkxaxes=:minimal))
+end
+
+# ╔═╡ 9ea080a3-284f-4f1d-8c17-6cd13608f08b
+let 
+	group = [:id, :target_name, :non_cs_length]
+	
+	df = @chain simple_counter_combine_time_df begin
+		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
+		DataFrames.flatten(:combine_size)
+	end
+	
+	plt = data(df) *
+			mapping(:combine_size, color=:id => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * histogram(bins=30);
+
+	width = 300 + 300 * length(simple_counter_combine_time_locks)
+	
+	height = 300 * length(simple_counter_combine_time_noncs_length)
+	
+	fig = @time draw(plt; figure=(;size=(width,height)),
+		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:minimal, linkyaxes=:none))
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2541,7 +2554,7 @@ version = "3.5.0+0"
 # ╟─4de305e8-70fc-44f5-9181-c9e55a47c77c
 # ╟─4effc63c-e191-4708-890f-44bf0e3a0ea7
 # ╟─7ca2625c-3681-4eb1-a7a2-487978716a0c
-# ╟─3503720e-b0c0-4914-9a11-17b821951a44
+# ╠═3503720e-b0c0-4914-9a11-17b821951a44
 # ╟─de0bec11-fc0b-4e68-8ec2-1c4c9435cb7a
 # ╟─a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
 # ╟─f764b6a1-f943-44bd-a629-6a957c7ec869
@@ -2555,8 +2568,8 @@ version = "3.5.0+0"
 # ╟─5baa0231-e4e3-4104-b556-19026fb61623
 # ╠═176d3440-f271-4355-b2c1-2cc1da1517bd
 # ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
-# ╟─0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
-# ╠═2e9962b5-5b0c-44a6-b047-a68d45ab5a26
+# ╠═0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
+# ╟─2e9962b5-5b0c-44a6-b047-a68d45ab5a26
 # ╠═785cbdd2-5f11-43ea-8df7-bc4e87a09546
 # ╠═aeac3fa3-08f2-438a-9930-8eb0e35956e4
 # ╠═7bc7fcca-5eba-413b-a8e1-80f3af383420
@@ -2564,6 +2577,7 @@ version = "3.5.0+0"
 # ╠═9ea080a3-284f-4f1d-8c17-6cd13608f08b
 # ╠═3a9f0f9d-f5b8-484f-838e-ee92913862d2
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
-# ╠═9f70bb50-4697-41ff-a160-4c3ddca693d2
+# ╟─df1d3a65-1081-4af3-9658-716ae27f5041
+# ╟─9f70bb50-4697-41ff-a160-4c3ddca693d2
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
