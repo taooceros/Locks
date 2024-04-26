@@ -2,7 +2,7 @@ use std::{ops::DerefMut, sync::Mutex};
 
 use super::{DLock2, DLock2Delegate};
 
-use super::CombinerSample;
+use super::combiner_stat::CombinerSample;
 #[derive(Debug)]
 pub struct DLock2Mutex<T, I, F>
 where

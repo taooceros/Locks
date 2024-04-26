@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
@@ -20,7 +20,6 @@ use crate::{
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
 };
-
 
 mod buffer;
 
@@ -211,12 +210,9 @@ where
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
-
-            let combiner_stat = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
-
-            combiner_stat.combine_time.push(end - begin);
-            *combiner_stat.combine_size.entry(combine_size).or_default() += 1;
+            (*self.local_node.get().unwrap().get())
+                .combiner_stat
+                .insert_sample(begin, combine_size);
         }
     }
 }

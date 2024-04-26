@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::builder;
-use libdlock::dlock2::CombinerSample;
+use libdlock::dlock2::combiner_stat::CombinerSample;
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;
 

@@ -1,4 +1,4 @@
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 use crate::{atomic_extension::AtomicExtension, dlock2::DLock2};
 use std::ops::AddAssign;
 use std::{

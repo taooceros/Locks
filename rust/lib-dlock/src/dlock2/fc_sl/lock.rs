@@ -1,4 +1,4 @@
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
@@ -19,7 +19,6 @@ use crate::{
 };
 
 use super::node::Node;
-
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -131,15 +130,9 @@ where
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
-
-            let combiner_statistics = &mut (*self.local_node.get().unwrap().get()).combiner_stat;
-            combiner_statistics.combine_time.push(end - begin);
-            combiner_statistics
-                .combine_size
-                .entry(combine_count)
-                .or_default()
-                .add_assign(1)
+            (*self.local_node.get().unwrap().get())
+                .combiner_stat
+                .insert_sample(begin, combine_count);
         }
     }
 }

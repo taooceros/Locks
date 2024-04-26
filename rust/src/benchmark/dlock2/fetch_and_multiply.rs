@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use libdlock::dlock2::combiner_stat::CombinerSample;
 use libdlock::dlock2::DLock2;
 use rand::Rng;
 
@@ -86,7 +87,6 @@ impl AtomicF64 {
         }
     }
 }
-use libdlock::dlock2::CombinerSample;
 
 pub struct FetchAndMultiplyDLock2 {
     data: AtomicF64,

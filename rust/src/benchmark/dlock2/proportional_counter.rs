@@ -14,7 +14,7 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::dlock2::{CombinerSample, DLock2};
+use libdlock::dlock2::DLock2;
 
 use crate::{
     benchmark::{
@@ -23,6 +23,7 @@ use crate::{
     },
     lock_target::DLock2Target,
 };
+use libdlock::dlock2::combiner_stat::CombinerSample;
 
 struct FetchAddDlock2 {
     data: AtomicUsize,

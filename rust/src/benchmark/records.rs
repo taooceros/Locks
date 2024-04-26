@@ -11,7 +11,6 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
-use libdlock::dlock2::CombinerSample;
 use serde::{Deserialize, Serialize};
 use serde_arrow::schema::{SchemaLike, SerdeArrowSchema, TracingOptions};
 

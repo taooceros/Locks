@@ -1,4 +1,4 @@
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,

@@ -1,8 +1,12 @@
 use std::{
-    arch::x86_64::__rdtscp, cell::SyncUnsafeCell, ops::AddAssign, ptr::{self, null_mut, NonNull}, sync::atomic::{AtomicPtr, Ordering::*}
+    arch::x86_64::__rdtscp,
+    cell::SyncUnsafeCell,
+    ops::{AddAssign, SubAssign},
+    ptr::{self, null_mut, NonNull},
+    sync::atomic::{AtomicPtr, Ordering::*},
 };
 
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 use crossbeam::utils::{Backoff, CachePadded};
 use lock_api::RawMutex;
 use thread_local::ThreadLocal;
@@ -112,25 +116,15 @@ where
             current_ptr = NonNull::new(current.next.load(Acquire));
         }
 
-        #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
-
-            let combiner_statistics = &mut self
-                .local_node
+            self.local_node
                 .get()
                 .unwrap()
                 .get()
                 .as_mut()
                 .unwrap()
-                .combiner_stat;
-            combiner_statistics.combine_time.push(end - begin);
-
-            combiner_statistics
-                .combine_size
-                .entry(count)
-                .or_default()
-                .add_assign(1);
+                .combiner_stat
+                .insert_sample(begin, count);
         }
     }
 

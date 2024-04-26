@@ -7,7 +7,7 @@ use std::{
 use atomic_enum::atomic_enum;
 use crossbeam::utils::CachePadded;
 
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 
 #[atomic_enum]
 #[derive(PartialEq)]

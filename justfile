@@ -26,9 +26,13 @@ run1 experiment locks="" *additional_arg=default_arg: build
 
     cargo run {{profile_arg}} -- d-lock1  {{ if locks == "" {""} else {"--lock-targets " + locks} }} counter-proportional {{additional_arg}}
 
+check:
+    #!/usr/bin/env zsh
+    cd ./rust
+    cargo check
 
 queue2 locks="": (run2 "queue" locks "")
     true
 
 pluto:
-    julia -e "using Pluto; Pluto.run();"
+    julia -e "using Pluto; Pluto.run(auto_reload_from_file=true);"

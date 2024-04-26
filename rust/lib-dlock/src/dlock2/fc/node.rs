@@ -6,7 +6,7 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 
-use crate::dlock2::CombinerSample;
+use crate::dlock2::combiner_stat::CombinerSample;
 
 pub struct Node<T> {
     pub age: UnsafeCell<u32>,

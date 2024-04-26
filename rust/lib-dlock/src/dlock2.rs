@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, HashMap};
+use std::collections::{BTreeSet, BinaryHeap};
 use std::fmt::Debug;
 
 use crate::{
@@ -28,6 +28,8 @@ pub mod mutex;
 pub mod spinlock;
 pub mod uscl;
 
+pub mod combiner_stat;
+
 pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
 impl<T, I, F> DLock2Delegate<T, I> for F where F: Fn(&mut T, I) -> I + Send + Sync {}
 
@@ -37,15 +39,8 @@ pub unsafe trait DLock2<I>: Send + Sync {
     fn lock(&self, data: I) -> I;
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_stat(&self) -> Option<&CombinerSample>;
+    fn get_combine_stat(&self) -> Option<&combiner_stat::CombinerSample>;
 }
-
-#[derive(Debug, Default)]
-pub struct CombinerSample {
-    pub combine_size: HashMap<usize, usize>,
-    pub combine_time: Vec<u64>,
-}
-
 
 
 #[enum_dispatch]

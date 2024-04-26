@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.40
+# v0.19.41
 
 using Markdown
 using InteractiveUtils
@@ -16,10 +16,14 @@ end
 
 # ╔═╡ 3c5e052c-f11e-4a8a-932f-786bf70aa8de
 begin
-	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, ColorSchemes, CairoMakie, AlgebraOfGraphics, PlutoUI, Pluto, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools, RecursiveArrayTools
+	using Revise, Arrow, DataFrames, DataFramesMeta, StatsBase, Dates, ColorSchemes, CairoMakie, AlgebraOfGraphics, Pluto, PlutoUI, PrettyTables, SplitApplyCombine, LazyArrays, BenchmarkTools, RecursiveArrayTools, HypertextLiteral, Random
 	
 	using AlgebraOfGraphics: density
 	CairoMakie.activate!(type="svg")
+
+	md"""
+	# Dependency
+	"""
 end
 
 # ╔═╡ 3872be19-d39d-4a5f-be9e-5625ca45bf2d
@@ -137,6 +141,137 @@ md"""
 #### Throughput
 """
 
+# ╔═╡ d830cb2b-f599-47e4-83f9-3d4dd1ba6876
+md"""
+##### Figure: Throughput Comparison of each lock
+"""
+
+# ╔═╡ c9aee179-eebe-4e12-8976-ee131aaf029e
+md"""
+The experiment demonstrate the comparison of throughput for each locks with varying size of non-critical section. The result shows that the size of non-critical section has minimal impact on the overall throughput for all locks but `Mutex` and `U-SCL` until hitting a large enough non-critical section (10000) which has the possibility that all threads would not try to acquire the critical section for a certain amount of time. These performance degration is recovered when the contention increases (thread number increase).
+
+`Mutex` presents the best behavior when size of non-critical section is 10, which aligns the best with its `spin-and-wait` strategy. `U-SCL` suffers from any non-critical section because of the presence of lock slice.
+
+Specifically, the only case when `SpinLock` outperform other locks are when we have non-critical section size 10000 with two threads and size 100000 with two/four/eight threads. In these configuration, there might be some times in which all threads would not try to acquire the lock, in which the delegation-styled locks may fail to combine as it is the combiner may be the only one active in executing the critical section.
+
+In most other configuration, `FlatCombining` outperform other locks, which reproduces the high performance mentioned in the paper presenting `CC-Synch`. They mentioned that `FlatCombining` is providing extrodinary performance when the critical section is small (around 1000 iterations) which is this experiment. `CC-Synch` and `DSM-Synch` would outperform `FlatCombining` at 32 threads but loses at 64 threads. On the other hand, `FlatCombining` demonstrate increasing performance at 64 threads. These performance difference may due to the fact that the current implementation of `FlatCombining` utilizes the exponential backoff strategy, while `CC-Synch`/`DSM-Synch` does not.
+
+`FlatCombining-Skiplist` is an implementation that utilizes a concurrent-skiplist to replace the FIFO queue in `CC-Synch`/`DSM-Synch` with the election strategy presented in `FlatCombining`. The performance is generally bad because the overhead of skiplist, but still outperform other locks that doesn't employ delegation strategy.
+
+"""
+
+# ╔═╡ dd696bcb-11f4-4b24-a533-0f4daf3f4f86
+md"""
+##### Figure: Thread level Throughput Comparison with different non-critical section
+"""
+
+# ╔═╡ 5baa0231-e4e3-4104-b556-19026fb61623
+md"""
+##### Figure: Box Plot of throughput per for each lock
+"""
+
+# ╔═╡ 20a389c2-52aa-4b2b-8c83-e02688a985d0
+md"""
+##### Analysis
+
+We can see that most delegation styled lock has demonstrated (amortized) acquisition fairness. The throughput comparison of threads are proportional to the critical section. On the other hand, _Mutex_ and _SpinLock_ has demosntrated the potential to starve thread, which is expected. As noted in __SCL__, the disproportional workload will be amplified with non-fair lock.
+
+The fair variant of delegation styled locks based on banning strategy have demonstrate the fairness guarantee comparable to _U-SCL_, while maintaining high performance. On the other hand, the current implmentation fails to provide fairness guarantee if only two threads are contending for the lock, while `U-SCL` is able to both perform well and provide fairness. The reason is not so clear yet, but potential reason include:
+
+1. Combiner are unable to insert their work to the job queue when it is combining, which might yield additional unfairness if the thread with smaller critical section becomes the combiner.
+2. The current banning algorithm different than the one use in `U-SCL`, which bans every thread even though they hasn't entered the critical section for a while. This is probably not a good practice and should be fixed.
+
+Other fair variant of delegation styled locks, such as `FC_PQ_BTree`/`FC_PQ_BHeap` and `FC_SL` also demonstrate significant unfairness when only two threads are competing. The major reason for these unfainess is likely to attribute to the small contention, which makes it hard for the coordinator to reorder the job sequence.
+
+Both of these priority queue based fair variant are using simple heuristic similar to `CFS` by counting the usage of each thread toward the lock and reorder jobs. When the thread number is low, it is unlikely that the waiter can insert its second job before the combiner decides to switch to job from another threads, which yield to the unfairness.
+
+"""
+
+# ╔═╡ aeac3fa3-08f2-438a-9930-8eb0e35956e4
+md"""
+##### Figure: ECDF of Combine Size
+"""
+
+# ╔═╡ 0b4d40b5-590a-4eaf-9b44-a2a4388cc389
+md"""
+### Conclusion
+
+The experiment demonstrate the performance comparison of multiple delegation-styled locks, `U-SCL` and some other commonly seen lock. It shows the performance improvement of delegation-styled lock with reduced the data movement. The experiment also demonstrate the behavior of each lock under different contention level. It shows that delegation-styled lock performance are less impacted by the contention level compared to traditional lock such as `Mutex` and `SpinLock`.
+
+This experiment also demonstrate that the acquirstion fairness  of delegation-styled lock, and the usage fairness for fair variant delegation styled lock under larger contention. It shows that it is possible to achieve usage fairness with mininmal performance panelty for delegation-styled locks.
+
+"""
+
+# ╔═╡ 9f70bb50-4697-41ff-a160-4c3ddca693d2
+begin
+	import AbstractPlutoDingetjes.Bonds
+	struct Radio
+	    options::Vector{Pair}
+	    default::Union{Nothing, <:Any}
+	end
+	
+	Radio(options::AbstractVector; default=nothing) = Radio([o => o for o in options], default)
+	
+	Radio(options::AbstractVector{<:Pair}; default=nothing) = Radio(options, default)
+	
+	function Base.show(io::IO, m::MIME"text/html", radio::Radio)
+	    groupname = randstring('a':'z')
+			
+		h = @htl(
+			"""<form>$(
+			map(enumerate(radio.options)) do (i, o)
+				@htl(
+					"""<div><input $((
+						type="radio",
+						id=(groupname * string(i)),
+						name=groupname,
+						value=i,
+						checked=(radio.default == o.first),
+					))><label for=$(groupname * repr(o.first))>$(
+						o.second
+					)</label></div>"""
+				)
+	        end	
+			)<script>
+			const form = currentScript.parentElement
+			const groupname = $(groupname)
+			
+	        const selected_radio = form.querySelector('input[checked]')
+	
+			let val = parseInt(selected_radio?.value, 10)
+	
+			Object.defineProperty(form, "value", {
+				get: () => val,
+				set: (newval) => {
+					val = int(newval)
+					const i = document.getElementById(groupname + newval)
+					if(i != null){
+						i.checked = true
+					}
+				},
+			})
+	
+	        form.oninput = (e) => {
+	            val = parseInt(e.target.value, 10)
+				console.log(val)
+	            // and bubble upwards
+	        }
+			</script></form>""")
+		show(io, m, h)
+	end
+
+	Base.get(radio::Radio) = radio.default
+	Bonds.initial_value(radio::Radio) = radio.default
+	Bonds.possible_values(radio::Radio) = first.(radio.options)
+	function Bonds.validate_value(select::Radio, val)
+		val ∈ (first(p) for p in select.options)
+	end
+
+	Bonds.transform_value(s::Radio, value_from_javascript::Int) = s.options[value_from_javascript].first
+
+	Bonds.transform_value(s::Radio, value_from_javascript::String) = s.options[tryparse(Int, value_from_javascript)].first
+end
+
 # ╔═╡ a54efd5b-7cad-4a70-b22a-f3fa817d9ad1
 md"""
 __Locks__
@@ -163,25 +298,6 @@ let
     	palettes=(; color=colors), axis=(; xticks=[0,2,4,8,16,32,64], xscale=log, limits = (1, nothing, 0, nothing)))
 end
 
-# ╔═╡ d830cb2b-f599-47e4-83f9-3d4dd1ba6876
-md"""
-##### Figure: Throughput Comparison of each lock
-"""
-
-# ╔═╡ c9aee179-eebe-4e12-8976-ee131aaf029e
-md"""
-The experiment demonstrate the comparison of throughput for each locks with varying size of non-critical section. The result shows that the size of non-critical section has minimal impact on the overall throughput for all locks but `Mutex` and `U-SCL` until hitting a large enough non-critical section (10000) which has the possibility that all threads would not try to acquire the critical section for a certain amount of time. These performance degration is recovered when the contention increases (thread number increase).
-
-`Mutex` presents the best behavior when size of non-critical section is 10, which aligns the best with its `spin-and-wait` strategy. `U-SCL` suffers from any non-critical section because of the presence of lock slice.
-
-Specifically, the only case when `SpinLock` outperform other locks are when we have non-critical section size 10000 with two threads and size 100000 with two/four/eight threads. In these configuration, there might be some times in which all threads would not try to acquire the lock, in which the delegation-styled locks may fail to combine as it is the combiner may be the only one active in executing the critical section.
-
-In most other configuration, `FlatCombining` outperform other locks, which reproduces the high performance mentioned in the paper presenting `CC-Synch`. They mentioned that `FlatCombining` is providing extrodinary performance when the critical section is small (around 1000 iterations) which is this experiment. `CC-Synch` and `DSM-Synch` would outperform `FlatCombining` at 32 threads but loses at 64 threads. On the other hand, `FlatCombining` demonstrate increasing performance at 64 threads. These performance difference may due to the fact that the current implementation of `FlatCombining` utilizes the exponential backoff strategy, while `CC-Synch`/`DSM-Synch` does not.
-
-`FlatCombining-Skiplist` is an implementation that utilizes a concurrent-skiplist to replace the FIFO queue in `CC-Synch`/`DSM-Synch` with the election strategy presented in `FlatCombining`. The performance is generally bad because the overhead of skiplist, but still outperform other locks that doesn't employ delegation strategy.
-
-"""
-
 # ╔═╡ e7d00699-c7cc-4e27-ab4f-fd3ff7f60258
 md"""
 #### Fairness
@@ -202,11 +318,6 @@ simple_counter_fairness_df = @chain simple_counter_df begin
 		@subset(:target_name .∈ Ref(simple_counter_fairness_locks), :non_cs_length .∈ Ref(simple_counter_fairness_noncs_length), :thread_num .∈ Ref(simple_counter_fairness_thread_num); view=true)
 	end;
 
-# ╔═╡ dd696bcb-11f4-4b24-a533-0f4daf3f4f86
-md"""
-##### Figure: Thread level Throughput Comparison with different non-critical section
-"""
-
 # ╔═╡ f6f8234c-b3c9-40a4-89bf-a6493233a377
 let
 	plt = data(simple_counter_fairness_df) *
@@ -219,11 +330,6 @@ let
 	fig = draw(plt; figure=(;size=(width, height)),
     	palettes=(; color=colors), axis=(;xlabel="Thread Id (each column represent one non-critical section)", ylabel="Throughput", limits=(nothing, nothing, 0, nothing)), facet=(;linkxaxes=:none, linkyaxes=:none))
 end
-
-# ╔═╡ 5baa0231-e4e3-4104-b556-19026fb61623
-md"""
-##### Figure: Box Plot of throughput per for each lock
-"""
 
 # ╔═╡ 176d3440-f271-4355-b2c1-2cc1da1517bd
 let
@@ -238,23 +344,6 @@ let
     	palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
 end
 
-# ╔═╡ 20a389c2-52aa-4b2b-8c83-e02688a985d0
-md"""
-##### Analysis
-
-We can see that most delegation styled lock has demonstrated (amortized) acquisition fairness. The throughput comparison of threads are proportional to the critical section. On the other hand, _Mutex_ and _SpinLock_ has demosntrated the potential to starve thread, which is expected. As noted in __SCL__, the disproportional workload will be amplified with non-fair lock.
-
-The fair variant of delegation styled locks based on banning strategy have demonstrate the fairness guarantee comparable to _U-SCL_, while maintaining high performance. On the other hand, the current implmentation fails to provide fairness guarantee if only two threads are contending for the lock, while `U-SCL` is able to both perform well and provide fairness. The reason is not so clear yet, but potential reason include:
-
-1. Combiner are unable to insert their work to the job queue when it is combining, which might yield additional unfairness if the thread with smaller critical section becomes the combiner.
-2. The current banning algorithm different than the one use in `U-SCL`, which bans every thread even though they hasn't entered the critical section for a while. This is probably not a good practice and should be fixed.
-
-Other fair variant of delegation styled locks, such as `FC_PQ_BTree`/`FC_PQ_BHeap` and `FC_SL` also demonstrate significant unfairness when only two threads are competing. The major reason for these unfainess is likely to attribute to the small contention, which makes it hard for the coordinator to reorder the job sequence.
-
-Both of these priority queue based fair variant are using simple heuristic similar to `CFS` by counting the usage of each thread toward the lock and reorder jobs. When the thread number is low, it is unlikely that the waiter can insert its second job before the combiner decides to switch to job from another threads, which yield to the unfairness.
-
-"""
-
 # ╔═╡ 0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
 md"""
 #### Combine Batch Size
@@ -268,10 +357,13 @@ __Non-Critical Section Length__
 $(@bind simple_counter_combine_time_noncs_length PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(simple_counter_noncs, default=view(simple_counter_noncs, [1]); select_all=true))
 
 __Thread Number__
-$(@bind simple_counter_combine_time_thread_num PlutoUI.MultiCheckBoxNotebook.MultiCheckBox(simple_counter_threads, default=[16]; select_all=true))
 
+$(@bind simple_counter_combine_time_thread_num Radio([i for i in simple_counter_threads]; default = 16))
 
 """
+
+# ╔═╡ ef88c7c7-8cd3-4f56-b199-4f5d13328ddd
+simple_counter_combine_time_thread_num
 
 # ╔═╡ 2e9962b5-5b0c-44a6-b047-a68d45ab5a26
 simple_counter_combine_time_df = @chain simple_counter_df begin
@@ -280,38 +372,29 @@ end;
 
 # ╔═╡ 7bc7fcca-5eba-413b-a8e1-80f3af383420
 let 
-	group = :cs_length
+	group = [:cs_length, :non_cs_length]
 	
 	df = @chain simple_counter_combine_time_df begin
-		@select(:id, :target_name, :thread_num, :combine_size, :cs_length)
-		groupby([group, :target_name])
-		@combine(:combine_size_ecdf = ecdf(ArrayPartition(:combine_size...)))
-		@transform(@byrow :index = 1:80)
+		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
+		groupby([group; :target_name])
+		@combine(:combine_size_ecdf = ecdf(ArrayPartition(:combine_size...)), :index = extrema(ArrayPartition(:combine_size...)))
+		@transform(@byrow :index = (:index[1]):0.1:(:index[2]))
 		DataFrames.flatten(:index)
 		@transform(@byrow :value = :combine_size_ecdf(:index))
 	end
 	
 	plt = data(df) *
-			mapping(:index, :value, color=:cs_length => nonnumeric, layout=:target_name) * 
+			mapping(:index, :value, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * 
 			(visual(Lines));
 	
 	fig = draw(plt; figure=(;size=(1200,1200)),
 		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkyaxes=:none))
 end
 
-# ╔═╡ 0b4d40b5-590a-4eaf-9b44-a2a4388cc389
-md"""
-### Conclusion
-
-The experiment demonstrate the performance comparison of multiple delegation-styled locks, `U-SCL` and some other commonly seen lock. It shows the performance improvement of delegation-styled lock with reduced the data movement. The experiment also demonstrate the behavior of each lock under different contention level. It shows that delegation-styled lock performance are less impacted by the contention level compared to traditional lock such as `Mutex` and `SpinLock`.
-
-This experiment also demonstrate that the acquirstion fairness  of delegation-styled lock, and the usage fairness for fair variant delegation styled lock under larger contention. It shows that it is possible to achieve usage fairness with mininmal performance panelty for delegation-styled locks.
-
-"""
-
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+AbstractPlutoDingetjes = "6e696c72-6542-2067-7265-42206c756150"
 AlgebraOfGraphics = "cbdf2221-f076-402e-a563-3d30da359d67"
 Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
@@ -320,16 +403,19 @@ ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 RecursiveArrayTools = "731186ca-8d62-57ce-b412-fbd966d074cd"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SplitApplyCombine = "03a91e81-4c3e-53e1-a0a4-9c0c8f19dd66"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+AbstractPlutoDingetjes = "~1.3.2"
 AlgebraOfGraphics = "~0.6.18"
 Arrow = "~2.7.1"
 BenchmarkTools = "~1.5.0"
@@ -337,8 +423,9 @@ CairoMakie = "~0.11.9"
 ColorSchemes = "~3.24.0"
 DataFrames = "~1.6.1"
 DataFramesMeta = "~0.15.1"
+HypertextLiteral = "~0.9.5"
 LazyArrays = "~1.8.3"
-Pluto = "~0.19.40"
+Pluto = "~0.19.41"
 PlutoUI = "~0.7.58"
 PrettyTables = "~2.3.1"
 RecursiveArrayTools = "~3.12.0"
@@ -353,7 +440,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "d100bb8d00fdd237d1d87bfc59154ec127a2e4a8"
+project_hash = "8c568a82b472c4c62ec52e76e1a85ce52444887c"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -373,9 +460,9 @@ version = "0.3.0"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
-git-tree-sha1 = "0f748c81756f2e5e6854298f11ad8b2dfae6911a"
+git-tree-sha1 = "6e1d2a35f2f90a4bc7c2ed98079b2ba09c35b83a"
 uuid = "6e696c72-6542-2067-7265-42206c756150"
-version = "1.3.0"
+version = "1.3.2"
 
 [[deps.AbstractTrees]]
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
@@ -818,9 +905,9 @@ uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
 version = "0.1.10"
 
 [[deps.ExpressionExplorer]]
-git-tree-sha1 = "bce17cd0180a75eec637d6e3f8153011b8bdb25a"
+git-tree-sha1 = "0da78bef32ca71276337442389a3d1962a1ee0da"
 uuid = "21656369-7473-754a-2065-74616d696c43"
-version = "1.0.0"
+version = "1.0.2"
 
 [[deps.ExproniconLite]]
 git-tree-sha1 = "5552cf384e4577c5dd2db57d7086a4a41747dbb9"
@@ -1021,9 +1108,9 @@ version = "1.0.2"
 
 [[deps.HTTP]]
 deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "ExceptionUnwrapping", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
-git-tree-sha1 = "db864f2d91f68a5912937af80327d288ea1f3aee"
+git-tree-sha1 = "2c3ec1f90bb4a8f7beafb0cffea8a4c3f4e636ab"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "1.10.3"
+version = "1.10.6"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Pkg"]
@@ -1583,9 +1670,9 @@ version = "0.8.1+2"
 
 [[deps.OpenSSL]]
 deps = ["BitFlags", "Dates", "MozillaCACerts_jll", "OpenSSL_jll", "Sockets"]
-git-tree-sha1 = "af81a32750ebc831ee28bdaaba6e1067decef51e"
+git-tree-sha1 = "38cb508d080d21dc1128f7fb04f20387ed4c0af4"
 uuid = "4d8831e6-92b7-49fb-bdf8-b643e874388c"
-version = "1.4.2"
+version = "1.4.3"
 
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1700,9 +1787,9 @@ version = "1.4.1"
 
 [[deps.Pluto]]
 deps = ["Base64", "Configurations", "Dates", "Downloads", "ExpressionExplorer", "FileWatching", "FuzzyCompletions", "HTTP", "HypertextLiteral", "InteractiveUtils", "Logging", "LoggingExtras", "MIMEs", "Malt", "Markdown", "MsgPack", "Pkg", "PlutoDependencyExplorer", "PrecompileSignatures", "PrecompileTools", "REPL", "RegistryInstances", "RelocatableFolders", "Scratch", "Sockets", "TOML", "Tables", "URIs", "UUIDs"]
-git-tree-sha1 = "35280d2e6b2211bc5f9e913460c263ac89ef56f0"
+git-tree-sha1 = "5e88cea5e54cb10216ad64eedd6897f9597a85b4"
 uuid = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
-version = "0.19.40"
+version = "0.19.41"
 
 [[deps.PlutoDependencyExplorer]]
 deps = ["ExpressionExplorer", "InteractiveUtils", "Markdown"]
@@ -2427,8 +2514,11 @@ version = "3.5.0+0"
 # ╠═176d3440-f271-4355-b2c1-2cc1da1517bd
 # ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
 # ╟─0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
+# ╠═ef88c7c7-8cd3-4f56-b199-4f5d13328ddd
 # ╟─2e9962b5-5b0c-44a6-b047-a68d45ab5a26
+# ╠═aeac3fa3-08f2-438a-9930-8eb0e35956e4
 # ╠═7bc7fcca-5eba-413b-a8e1-80f3af383420
 # ╟─0b4d40b5-590a-4eaf-9b44-a2a4388cc389
+# ╠═9f70bb50-4697-41ff-a160-4c3ddca693d2
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

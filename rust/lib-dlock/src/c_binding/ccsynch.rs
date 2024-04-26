@@ -52,7 +52,8 @@ where
         }
     }
 }
-use crate::dlock2::CombinerSample;
+
+use crate::dlock2::combiner_stat::CombinerSample;
 
 unsafe impl<T, F, I> DLock2<I> for CCCSynch<T, F, I>
 where
