@@ -3,11 +3,19 @@ cd rust
 cargo build --release
 
 let threads = seq 1 6 | each { |it| 2 ** $it} | str join ","
-# echo $threads
+echo $threads
 
 let base_duration = 1000
 
 let simple_cs = "1000,3000"
+
+let dlock_targets = ["fc", "fc-ban", "cc", "cc-ban", "dsm", "fc-sl", "fc-pq-b-tree", "fc-pq-b-heap"] | str join ","
+
+let run_other_locks = false
+
+let lock_arg = if (not $run_other_locks) { $"-l($dlock_targets)" } else {""}
+echo $lock_arg
+
 
 alias dlock2 = target/release/dlock d-lock2
 
@@ -16,14 +24,14 @@ let long_experiment_length = 15
 
 # echo $cs
 
-dlock2 counter-proportional -t $threads --cs $simple_cs --non-cs 0 -d $long_experiment_length
+dlock2 $lock_arg counter-proportional -t $threads --cs $simple_cs --non-cs 0 -d $long_experiment_length
 
 for non_cs in (seq 1 5 | each { |it| 10 ** $it}) {
-    dlock2 counter-proportional -t $threads --cs $simple_cs --non-cs $non_cs -d $long_experiment_length
+    dlock2 $lock_arg counter-proportional -t $threads --cs $simple_cs --non-cs $non_cs -d $long_experiment_length
 }
 
-dlock2 counter-proportional -t 8,16 --cs 1 --non-cs 0 -d $short_experiment_length --stat-response-time --file-name "single-addition-latency"
-dlock2 counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_length
+# dlock2 $lock_arg counter-proportional -t 8,16 --cs 1 --non-cs 0 -d $short_experiment_length --stat-response-time --file-name "single-addition-latency"
+dlock2 $lock_arg counter-proportional -t $threads --cs 1 --non-cs 0 -d $long_experiment_length
 
 
 

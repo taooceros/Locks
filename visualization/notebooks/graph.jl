@@ -372,6 +372,9 @@ simple_counter_combine_time_df = @chain simple_counter_df begin
 	@subset(:target_name .∈ Ref(simple_counter_combine_time_locks), :non_cs_length .∈ Ref(simple_counter_combine_time_noncs_length), :thread_num .∈ Ref(simple_counter_combine_time_thread_num); view=true)
 end;
 
+# ╔═╡ 785cbdd2-5f11-43ea-8df7-bc4e87a09546
+simple_counter_combine_time_df[!, :combine_size]
+
 # ╔═╡ 9ea080a3-284f-4f1d-8c17-6cd13608f08b
 let 
 	group = [:cs_length, :target_name, :non_cs_length]
@@ -382,7 +385,7 @@ let
 	end
 	
 	plt = data(df) *
-			mapping(:combine_size, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * density();
+			mapping(:combine_size, color=:cs_length => nonnumeric, col=:target_name, row = :non_cs_length => nonnumeric) * histogram(bins=50);
 	
 	fig = draw(plt; figure=(;size=(1200,1200)),
 		palettes=(; color=colors), axis=(;xticklabelrotation=1/3*pi), facet=(;linkxaxes=:none))
@@ -414,7 +417,7 @@ let
 	df = @chain simple_counter_combine_time_df begin
 		@select(:id, :target_name, :thread_num, :combine_size, :cs_length, :non_cs_length)
 		groupby(group)
-		@combine(:combine_size_ecdf = (ecdf(ArrayPartition(:combine_size...))), :index = extrema(ArrayPartition(:combine_size...)))
+		@combine(:combine_size_ecdf = (@time ecdf(ArrayPartition(:combine_size...))), :index = extrema(ArrayPartition(:combine_size...)))
 		@transform(@byrow :index = (:index[1]):(:index[2]))
 		DataFrames.flatten(:index)
 		@transform(@byrow :value = :combine_size_ecdf(:index))
@@ -2554,6 +2557,7 @@ version = "3.5.0+0"
 # ╟─20a389c2-52aa-4b2b-8c83-e02688a985d0
 # ╟─0ec68c95-3071-4d6c-9cee-2ac5f2fbdd21
 # ╠═2e9962b5-5b0c-44a6-b047-a68d45ab5a26
+# ╠═785cbdd2-5f11-43ea-8df7-bc4e87a09546
 # ╠═aeac3fa3-08f2-438a-9930-8eb0e35956e4
 # ╠═7bc7fcca-5eba-413b-a8e1-80f3af383420
 # ╠═2426f0e6-5b26-417a-94ad-03c87e6f0a95
