@@ -14,15 +14,16 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::{dlock2::DLock2, FILENAME_MAX};
+use libdlock::dlock2::DLock2;
 
 use crate::{
     benchmark::{
         bencher::Bencher,
-        records::{write_results, Records},
+        records::{spec::*, write_results, Records},
     },
     lock_target::DLock2Target,
 };
+use libdlock::dlock2::combiner_stat::CombinerSample;
 
 struct FetchAddDlock2 {
     data: AtomicUsize,
@@ -58,7 +59,8 @@ unsafe impl DLock2<Data> for FetchAddDlock2 {
         panic!("Invalid input")
     }
 
-    fn get_combine_time(&self) -> std::option::Option<u64> {
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_stat(&self) -> std::option::Option<&CombinerSample> {
         None
     }
 }
@@ -269,20 +271,27 @@ where
                         }
                     }
 
+                    let combiner_stat = lock_ref.get_combine_stat();
+
                     Records {
-                        id,
-                        cpu_id: core_id.id,
-                        loop_count,
-                        num_acquire,
-                        cs_length: cs_loop,
-                        non_cs_length: Some(non_cs_loop),
-                        combiner_latency,
-                        waiter_latency,
-                        hold_time,
-                        combine_time: lock_ref.get_combine_time(),
-                        locktype: format!("{}", lock_ref),
-                        waiter_type: "".to_string(),
-                        ..Records::from_bencher(bencher)
+                        spec: Spec::builder()
+                            .with_bencher(bencher)
+                            .id(id)
+                            .cpu_id(core_id.id)
+                            .loop_count(loop_count)
+                            .cs_length(cs_loop)
+                            .non_cs_length(non_cs_loop)
+                            .num_acquire(num_acquire)
+                            .hold_time(hold_time)
+                            .target_name(format!("{}", lock_ref))
+                            .build(),
+                        latency: Latency {
+                            combiner_latency,
+                            waiter_latency,
+                        },
+                        combiner_stat: combiner_stat
+                            .map(CombinerStatistics::from_combiner_sample)
+                            .unwrap_or_default(),
                     }
                 })
             })
@@ -316,10 +325,10 @@ fn finish_benchmark<'a>(
     write_results(&folder, file_name, records);
 
     for record in records.iter() {
-        println!("{}", record.loop_count);
+        println!("{}", record.spec.loop_count);
     }
 
-    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.spec.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
 }

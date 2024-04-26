@@ -1,10 +1,12 @@
+use crate::dlock2::combiner_stat::CombinerSample;
 use crate::{atomic_extension::AtomicExtension, dlock2::DLock2};
+use std::ops::AddAssign;
 use std::{
     arch::x86_64::__rdtscp,
     cell::{SyncUnsafeCell, UnsafeCell},
     hint::spin_loop,
     mem::MaybeUninit,
-    ptr::{self, null_mut},
+    ptr::null_mut,
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
 
@@ -12,7 +14,7 @@ use debug_unwraps::DebugUnwrapExt;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
-use crate::{dlock2::DLock2Delegate, parker::Parker};
+use crate::dlock2::DLock2Delegate;
 
 #[derive(Debug)]
 struct ThreadData<T> {
@@ -20,11 +22,11 @@ struct ThreadData<T> {
     toggle: AtomicU8,
 
     #[cfg(feature = "combiner_stat")]
-    combiner_time_stat: SyncUnsafeCell<u64>,
+    combiner_stat: SyncUnsafeCell<CombinerSample>,
 }
 
 #[derive(Debug)]
-pub struct DSMSynch<T, I, F, const H: u32 = 64>
+pub struct DSMSynch<T, I, F, const H: usize = 64>
 where
     F: DLock2Delegate<T, I>,
     I: Send,
@@ -60,7 +62,7 @@ impl<T> AsMutPtr for Node<T> {
     }
 }
 
-unsafe impl<T, I, F, const H: u32> DLock2<I> for DSMSynch<T, I, F, H>
+unsafe impl<T, I, F, const H: usize> DLock2<I> for DSMSynch<T, I, F, H>
 where
     T: Send + Sync,
     F: DLock2Delegate<T, I>,
@@ -70,7 +72,7 @@ where
         let thread_data = self.local_node.get_or(|| ThreadData {
             nodes: Default::default(),
             toggle: AtomicU8::new(0),
-            combiner_time_stat: 0.into(),
+            combiner_stat: SyncUnsafeCell::new(CombinerSample::default()),
         });
         let mut aux = 0;
 
@@ -112,7 +114,7 @@ where
 
             let mut tmp_node = myNode;
 
-            let mut counter: u32 = 0;
+            let mut counter = 0;
 
             loop {
                 counter += 1;
@@ -178,8 +180,9 @@ where
             #[cfg(feature = "combiner_stat")]
             {
                 let end = __rdtscp(&mut aux);
-
-                *thread_data.combiner_time_stat.get() += end - begin;
+                let combiner_statistics = thread_data.combiner_stat.get().as_mut().unwrap();
+                combiner_statistics.combine_time.push(end - begin);
+                combiner_statistics.combine_size.entry(counter).or_default().add_assign(1);
             }
 
             return myNode.data.get().read().assume_init();
@@ -187,11 +190,11 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe {
             self.local_node
                 .get()
-                .map(|node| *node.combiner_time_stat.get())
+                .map(|node| node.combiner_stat.get().as_ref().unwrap())
         }
     }
 }

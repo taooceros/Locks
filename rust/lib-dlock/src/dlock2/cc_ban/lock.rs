@@ -1,11 +1,12 @@
-use crate::dlock2::DLock2;
+use crate::dlock2::{combiner_stat::CombinerSample, DLock2};
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::max,
     ops::AddAssign,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicI64, AtomicPtr, AtomicU64, Ordering::*},
+    sync::
+        atomic::{AtomicPtr, AtomicU64, Ordering::*}
+    ,
 };
 
 use crossbeam::utils::Backoff;
@@ -18,7 +19,8 @@ use crate::dlock2::DLock2Delegate;
 pub struct ThreadData<T> {
     pub(crate) node: AtomicPtr<Node<T>>,
     pub(crate) banned_until: SyncUnsafeCell<u64>,
-    pub combiner_time_stat: SyncUnsafeCell<u64>,
+    #[cfg(feature = "combiner_stat")]
+    pub combiner_time_stat: SyncUnsafeCell<CombinerSample>,
 }
 
 #[derive(Debug, Default)]
@@ -29,8 +31,6 @@ where
     delegate: F,
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<I>>,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicU64,
     local_node: ThreadLocal<ThreadData<I>>,
 }
@@ -45,8 +45,6 @@ where
             data: SyncUnsafeCell::new(data),
             tail: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
             local_node: ThreadLocal::new(),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicU64::new(0),
         }
     }
@@ -68,7 +66,7 @@ where
     }
 }
 
-const H: u32 = 16;
+const H: usize = 16;
 
 unsafe impl<T, I, F> DLock2<I> for CCBan<T, I, F>
 where
@@ -87,7 +85,7 @@ where
             ThreadData {
                 node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
                 banned_until: current_tsc.into(),
-                combiner_time_stat: 0.into(),
+                combiner_time_stat: CombinerSample::default().into(),
             }
         });
 
@@ -151,7 +149,7 @@ where
 
         let mut tmp_node = current_node;
 
-        let mut counter: u32 = 0;
+        let mut counter: usize = 0;
 
         let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
 
@@ -178,7 +176,7 @@ where
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);
 
-                let cs = work_end - work_begin;;
+                let cs = work_end - work_begin;
                 tmp_node
                     .panelty
                     .get()
@@ -201,18 +199,22 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*thread_data.combiner_time_stat.get()) += end - begin;
+            let stat = thread_data.combiner_time_stat.get().as_mut().unwrap();
+
+            stat.combine_time.push(end - begin);
+
+            *stat.combine_size.entry(counter).or_default() += 1;
         }
 
         return unsafe { current_node.data.get().read() };
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         unsafe {
             self.local_node
                 .get()
-                .map(|local_node| (*local_node.combiner_time_stat.get()))
+                .map(|local_node| local_node.combiner_time_stat.get().as_ref().unwrap())
         }
     }
 }

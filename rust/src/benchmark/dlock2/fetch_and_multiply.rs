@@ -11,13 +11,17 @@ use std::{
     time::Duration,
 };
 
+use libdlock::dlock2::combiner_stat::CombinerSample;
 use libdlock::dlock2::DLock2;
 use rand::Rng;
 
 use crate::{
     benchmark::{
         bencher::Bencher,
-        records::{write_results, Records},
+        records::{
+            spec::{Latency, Spec, SpecBuilder},
+            write_results, Records,
+        },
     },
     lock_target::DLock2Target,
 };
@@ -148,7 +152,7 @@ unsafe impl DLock2<Data> for FetchAndMultiplyDLock2 {
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
         None
     }
 }
@@ -292,19 +296,21 @@ fn start_benchmark<'a>(
                         }
                     }
 
+                    let combiner_stat = lock_ref.get_combine_stat();
+
                     Records {
-                        id,
-                        cpu_id: core_id.id,
-                        thread_num: bencher.num_thread,
-                        cpu_num: bencher.num_cpu,
-                        loop_count: loop_count as u64,
-                        num_acquire,
-                        combiner_latency,
-                        waiter_latency,
-                        hold_time: Default::default(),
-                        combine_time: lock_ref.get_combine_time(),
-                        locktype: format!("{}", lock_ref),
-                        waiter_type: "".to_string(),
+                        spec: Spec::builder()
+                            .with_bencher(bencher)
+                            .id(id)
+                            .cpu_id(core_id.id)
+                            .loop_count(loop_count)
+                            .num_acquire(num_acquire)
+                            .target_name("Fetch And Add".to_owned())
+                            .build(),
+                        latency: Latency {
+                            combiner_latency,
+                            waiter_latency,
+                        },
                         ..Default::default()
                     }
                 })
@@ -334,7 +340,7 @@ fn finish_benchmark<'a>(
     //     println!("{}", record.loop_count);
     // }
 
-    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.spec.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
 

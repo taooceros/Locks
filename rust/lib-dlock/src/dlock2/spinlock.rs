@@ -1,8 +1,9 @@
-use std::{cell::SyncUnsafeCell, ops::DerefMut};
+use std::cell::SyncUnsafeCell;
 
 use lock_api::RawMutex;
 
 use super::{DLock2, DLock2Delegate};
+use super::combiner_stat::CombinerSample;
 
 #[derive(Debug)]
 pub struct DLock2Wrapper<T, I, F, L>
@@ -48,7 +49,8 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
+
         return None;
     }
 }

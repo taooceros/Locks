@@ -10,11 +10,14 @@ use std::{
     time::Duration,
 };
 
-use arrow::record_batch;
 use rand::Rng;
 
 use crate::{
-    benchmark::{bencher::Bencher, records::*},
+    benchmark::{
+        bencher::Bencher,
+        dlock2::queue::spec::{CombinerStatistics, Latency, Spec, SpecBuilder},
+        records::*,
+    },
     lock_target::DLock2Target,
 };
 
@@ -140,15 +143,19 @@ where
                     }
 
                     Records {
-                        id,
-                        cpu_id: core_id.id,
-                        loop_count,
-                        num_acquire,
-                        non_cs_length: Some(0),
-                        waiter_latency: response_times,
-                        locktype: queue_name.to_owned(),
-                        waiter_type: "".to_string(),
-                        ..Records::from_bencher(bencher)
+                        spec: Spec::builder()
+                            .with_bencher(&bencher)
+                            .id(id)
+                            .cpu_id(core_id.id)
+                            .loop_count(loop_count)
+                            .num_acquire(loop_count)
+                            .target_name(queue_name.to_string())
+                            .build(),
+                        latency: Latency {
+                            combiner_latency: vec![],
+                            waiter_latency: response_times,
+                        },
+                        combiner_stat: CombinerStatistics::default(),
                     }
                 })
             })
@@ -182,10 +189,10 @@ fn finish_benchmark<'a>(
     write_results(&folder, file_name, records);
 
     for record in records.iter() {
-        println!("{}", record.loop_count);
+        println!("{}", record.spec.loop_count);
     }
 
-    let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
+    let total_loop_count: u64 = records.iter().map(|r| r.spec.loop_count).sum();
 
     println!("Total loop count: {}", total_loop_count);
 }

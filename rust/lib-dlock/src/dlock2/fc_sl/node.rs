@@ -6,13 +6,15 @@ use std::{
 
 use crossbeam::utils::CachePadded;
 
+use crate::dlock2::combiner_stat::CombinerSample;
+
 pub struct Node<T> {
     pub usage: u64,
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<T>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: u64,
+    pub combiner_stat: CombinerSample,
 }
 
 impl<T> Node<T> {
@@ -26,13 +28,13 @@ impl<T> Node<T> {
             complete: AtomicBool::new(false),
             data: unsafe { MaybeUninit::uninit().assume_init() },
             #[cfg(feature = "combiner_stat")]
-            combiner_time_stat: 0,
+            combiner_stat: CombinerSample::default(),
         }
     }
 }
 
 impl<T> Drop for Node<T> {
     fn drop(&mut self) {
-        // don't drop anything
+        // don't drop data
     }
 }

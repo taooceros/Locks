@@ -2,29 +2,24 @@ use derivative::Derivative;
 use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::thread::current;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    mem::transmute,
     ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
+use crate::dlock2::combiner_stat::CombinerSample;
 use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
-use crate::{__jmp_buf, rand};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
-    spin_lock::RawSpinLock,
 };
-
-use arrayvec::ArrayVec;
 
 mod buffer;
 
@@ -32,7 +27,7 @@ use self::buffer::ConcurrentRingBuffer;
 
 use super::node::Node;
 
-const CLEAN_UP_AGE: u32 = 500;
+// const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Derivative, Debug)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
@@ -112,6 +107,10 @@ where
     fn combine(&self) {
         #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
+
+        #[cfg(feature = "combiner_stat")]
+        let mut combine_size = 0;
+
         let mut begin: u64;
 
         unsafe {
@@ -178,6 +177,8 @@ where
 
                     node.complete.store(true, Release);
 
+                    combine_size += 1;
+
                     job_queue.push(current);
                 } else {
                     // if the buffer is full then push the nodes back to the job queue
@@ -209,9 +210,9 @@ where
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
-
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            (*self.local_node.get().unwrap().get())
+                .combiner_stat
+                .insert_sample(begin, combine_size);
         }
     }
 }
@@ -263,11 +264,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .map(|x| (*x.get()).combiner_time_stat)
-        }
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
+        unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

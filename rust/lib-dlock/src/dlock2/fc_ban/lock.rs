@@ -1,8 +1,8 @@
+use crate::dlock2::combiner_stat::CombinerSample;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::max,
-    ops::{Add, AddAssign},
+    ops::AddAssign,
     ptr::{self, null_mut, NonNull},
     sync::atomic::{AtomicI64, AtomicPtr, AtomicU32, Ordering::*},
 };
@@ -31,8 +31,8 @@ where
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     delegate: F,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i64>,
+    // avg_cs: SyncUnsafeCell<i64>,
+    // num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicI64,
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<I>>,
@@ -50,8 +50,8 @@ where
         Self {
             pass: AtomicU32::new(0),
             combiner_lock: CachePadded::new(L::INIT),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
+            // avg_cs: SyncUnsafeCell::new(0),
+            // num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicI64::new(0),
             delegate,
             data: SyncUnsafeCell::new(data),
@@ -95,12 +95,15 @@ where
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        #[cfg(feature = "combiner_stat")]
+        let mut combine_count = 0;
+
         unsafe {
             begin = __rdtscp(&mut aux);
         }
 
-        let mut num_exec = unsafe { self.num_exec.get().read() };
-        let mut avg_cs = unsafe { self.avg_cs.get().read() };
+        // let mut num_exec = unsafe { self.num_exec.get().read() };
+        // let mut avg_cs = unsafe { self.avg_cs.get().read() };
 
         let mut work_begin = begin;
 
@@ -127,6 +130,8 @@ where
                         let work_end = __rdtscp(&mut aux);
                         let cs = (work_end - work_begin) as i64;
 
+                        combine_count += 1;
+
                         current
                             .banned_until
                             .get()
@@ -142,16 +147,26 @@ where
             current_ptr = NonNull::new(current.next.load(Acquire));
         }
 
-        unsafe {
-            self.num_exec.get().write(num_exec);
-            self.avg_cs.get().write(avg_cs);
-        }
+        // unsafe {
+        //     self.num_exec.get().write(num_exec);
+        //     self.avg_cs.get().write(avg_cs);
+        // }
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            let combiner_statistics = &mut self
+                .local_node
+                .get()
+                .unwrap()
+                .get()
+                .as_mut()
+                .unwrap()
+                .combiner_stat;
+            combiner_statistics.combine_time.push(end - begin);
+
+            combiner_statistics.combine_size.entry(combine_count).or_default().add_assign(1);
         }
     }
 
@@ -237,7 +252,11 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
+        unsafe {
+            self.local_node
+                .get()
+                .map(|x| &x.get().as_ref().unwrap().combiner_stat)
+        }
     }
 }

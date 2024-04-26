@@ -2,7 +2,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
     os::unix::prelude::PermissionsExt,
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use zstd::{stream::AutoFinishEncoder, Encoder};

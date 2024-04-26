@@ -97,8 +97,8 @@ impl<P: Parker> RclServer<P> {
         self.num_free_threads.fetch_add(1, SeqCst);
     }
 
-    fn start_thread(thread: *mut RclThread<P>) {
-        let thread = unsafe { &mut *thread };
-        thread.waiting_to_serve.wake(1);
-    }
+    // fn start_thread(thread: *mut RclThread<P>) {
+    //     let thread = unsafe { &mut *thread };
+    //     thread.waiting_to_serve.wake(1);
+    // }
 }

@@ -41,7 +41,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
+    fn get_combine_stat(&self) -> Option<&super::combiner_stat::CombinerSample> {
         None
     }
 }

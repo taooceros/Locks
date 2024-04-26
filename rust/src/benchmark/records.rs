@@ -4,10 +4,12 @@ use std::{
     collections::HashMap,
     fs::File,
     path::Path,
-    time::Duration,
 };
 
-use arrow::{datatypes::Schema, record_batch::RecordBatch};
+use arrow::{
+    datatypes::{FieldRef, Schema},
+    record_batch::RecordBatch,
+};
 use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use serde::{Deserialize, Serialize};
 use serde_arrow::schema::{SchemaLike, SerdeArrowSchema, TracingOptions};
@@ -16,34 +18,16 @@ use crate::benchmark::helper::create_plain_writer;
 
 use super::bencher::Bencher;
 
+pub mod spec;
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Records {
-    pub id: usize,
-    pub cpu_id: usize,
-    pub thread_num: usize,
-    pub cpu_num: usize,
-    pub loop_count: u64,
-    pub num_acquire: u64,
-    pub cs_length: u64,
-    pub duration: u64,
-    pub non_cs_length: Option<u64>,
-    pub combiner_latency: Vec<u64>,
-    pub waiter_latency: Vec<u64>,
-    pub hold_time: u64,
-    pub combine_time: Option<u64>,
-    pub locktype: String,
-    pub waiter_type: String,
-}
-
-impl Records {
-    pub fn from_bencher(bencher: &Bencher) -> Self {
-        Self {
-            cpu_num: bencher.num_cpu,
-            thread_num: bencher.num_thread,
-            duration: bencher.duration,
-            ..Default::default()
-        }
-    }
+    #[serde(flatten)]
+    pub spec: spec::Spec,
+    #[serde(flatten)]
+    pub latency: spec::Latency,
+    #[serde(flatten)]
+    pub combiner_stat: spec::CombinerStatistics,
 }
 
 pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borrow<Vec<Records>>) {
@@ -51,11 +35,15 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
         static WRITERS: RefCell<HashMap<String, FileWriter<std::fs::File>>> = HashMap::new().into();
     }
 
-    let fields = SerdeArrowSchema::from_type::<Records>(TracingOptions::default())
-        .unwrap()
-        .to_arrow_fields()
-        .unwrap();
-    let arrays = serde_arrow::to_arrow(&fields, results.borrow()).unwrap();
+    let fields = Vec::<FieldRef>::from_samples(
+        results.borrow(),
+        TracingOptions::default()
+            .map_as_struct(true)
+            .coerce_numbers(true)
+            .allow_null_fields(true),
+    )
+    .unwrap();
+    let batch = serde_arrow::to_record_batch(&fields, results.borrow()).unwrap();
 
     let schema = Schema::new(fields);
 
@@ -85,8 +73,6 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
 
             map.get_mut(file_path_str)
         };
-
-        let batch = RecordBatch::try_new(schema.into(), arrays).unwrap();
 
         writer.unwrap().write(&batch).expect("Failed to write");
     });

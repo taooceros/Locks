@@ -1,7 +1,9 @@
+use crate::dlock2::combiner_stat::CombinerSample;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    ptr::{self},
+    ops::AddAssign,
+    ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -17,8 +19,6 @@ use crate::{
 };
 
 use super::node::Node;
-
-const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -87,9 +87,15 @@ where
             begin = __rdtscp(&mut aux);
         }
 
+        let mut combine_count = 0;
+
         const H: usize = 64;
 
-        for _ in 0..H {
+        loop {
+            if combine_count >= H {
+                break;
+            }
+
             let current = self.jobs.pop_front();
 
             if current.is_none() {
@@ -116,15 +122,17 @@ where
                     begin = end;
 
                     node.complete.store(true, Release);
+
+                    combine_count += 1;
                 }
             }
         }
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
-
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            (*self.local_node.get().unwrap().get())
+                .combiner_stat
+                .insert_sample(begin, combine_count);
         }
     }
 }
@@ -172,11 +180,7 @@ where
     }
 
     #[cfg(feature = "combiner_stat")]
-    fn get_combine_time(&self) -> Option<u64> {
-        unsafe {
-            self.local_node
-                .get()
-                .map(|x| (*x.get()).combiner_time_stat)
-        }
+    fn get_combine_stat(&self) -> Option<&CombinerSample> {
+        unsafe { self.local_node.get().map(|x| &(*x.get()).combiner_stat) }
     }
 }

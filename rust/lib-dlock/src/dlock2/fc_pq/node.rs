@@ -1,7 +1,13 @@
-use std::{cell::SyncUnsafeCell, mem::MaybeUninit, sync::atomic::{AtomicBool, AtomicU64}};
+use std::{
+    cell::SyncUnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicU64},
+};
 
 use atomic_enum::atomic_enum;
 use crossbeam::utils::CachePadded;
+
+use crate::dlock2::combiner_stat::CombinerSample;
 
 #[atomic_enum]
 #[derive(PartialEq)]
@@ -18,7 +24,7 @@ pub struct Node<T> {
     pub data: SyncUnsafeCell<T>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: u64,
+    pub combiner_stat: CombinerSample,
 }
 
 impl<T> Node<T> {
@@ -32,13 +38,7 @@ impl<T> Node<T> {
             complete: AtomicBool::new(false),
             data: unsafe { MaybeUninit::uninit().assume_init() },
             #[cfg(feature = "combiner_stat")]
-            combiner_time_stat: 0,
+            combiner_stat: CombinerSample::default(),
         }
-    }
-}
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        // don't drop anything
     }
 }
