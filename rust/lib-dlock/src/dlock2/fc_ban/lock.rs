@@ -225,7 +225,7 @@ where
                     if node.complete.load(Acquire) {
                         break 'outer;
                     }
-                    backoff.snooze();
+                    // backoff.snooze();
                     if backoff.is_completed() {
                         continue 'outer;
                     }

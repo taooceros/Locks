@@ -1,0 +1,25 @@
+
+ Performance counter stats for 'target/release/dlock d-lock2 -t 36 --lock-targets fc-pq-b-heap counter-proportional --cs 1,3 --non-cs 0 -d 1':
+
+        62,930,027      cache-references                                              (38.50%)
+        25,974,541      cache-misses              #   41.275 % of all cache refs      (46.35%)
+    14,924,610,919      L1-dcache-loads                                               (46.56%)
+        36,748,034      L1-dcache-load-misses     #    0.25% of all L1-dcache accesses  (46.77%)
+     9,774,546,664      L1-dcache-stores                                              (46.86%)
+   <not supported>      L1-dcache-store-misses                                      
+           530,256      l2_rqsts.demand_data_rd_hit                                     (46.86%)
+        14,087,559      l2_rqsts.demand_data_rd_miss                                     (30.92%)
+        14,148,631      LLC-loads                                                     (30.54%)
+         6,734,474      LLC-load-misses           #   47.60% of all LL-cache accesses  (30.42%)
+    14,540,307,013      dTLB-loads                                                    (31.29%)
+             4,261      dTLB-load-misses          #    0.00% of all dTLB cache accesses  (31.16%)
+     9,602,530,854      dTLB-stores                                                   (31.03%)
+            31,231      dTLB-store-misses                                             (30.91%)
+                33      cpu-migrations                                              
+
+       1.004469070 seconds time elapsed
+
+      29.860049000 seconds user
+       6.182636000 seconds sys
+
+
