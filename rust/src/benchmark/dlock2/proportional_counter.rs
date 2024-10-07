@@ -88,7 +88,7 @@ pub fn proportional_counter<'a>(
 
                 if let Data::Input {
                     thread_id,
-                    data: loop_limit,
+                    data: mut loop_limit,
                 } = input
                 {
                     let timestamp = unsafe {
@@ -98,9 +98,6 @@ pub fn proportional_counter<'a>(
                             0
                         }
                     };
-
-                    // it is very important to have black_box here
-                    let mut loop_limit = black_box(loop_limit);
 
                     while black_box(loop_limit) > 0 {
                         *data += 1;

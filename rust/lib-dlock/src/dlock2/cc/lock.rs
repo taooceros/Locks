@@ -81,7 +81,7 @@ where
         while current_node.wait.load(Acquire) {
             // spin
             // backoff.snooze();
-            // spin_loop()
+            spin_loop()
         }
 
         // check whether the current node is completed
