@@ -78,7 +78,7 @@ pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
         })
         .lock()
         .unwrap();
-    
+
     for result in results.iter().flat_map(|r| r.to_records()) {
         writer.serialize(result).unwrap();
     }
