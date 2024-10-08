@@ -101,8 +101,7 @@ pub fn proportional_counter<'a>(
                     };
 
                     while loop_limit > 0 {
-                        *data += 1;
-                        black_box(1);
+                        *black_box(&mut *data) += 1;
                         loop_limit -= 1;
                     }
 
