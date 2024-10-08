@@ -84,8 +84,8 @@ pub fn proportional_counter<'a>(
             Data::default(),
             #[inline(never)]
             move |data: &mut usize, input: Data| {
-                let data = black_box(data);
-                let input = black_box(input);
+                let data = data;
+                let input = input;
 
                 if let Data::Input {
                     thread_id,
@@ -101,7 +101,7 @@ pub fn proportional_counter<'a>(
                     };
 
                     while loop_limit > 0 {
-                        *data += 1;
+                        *data += black_box(1);
                         loop_limit -= 1;
                     }
 
