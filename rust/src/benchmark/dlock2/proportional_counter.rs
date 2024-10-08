@@ -101,7 +101,8 @@ pub fn proportional_counter<'a>(
                     };
 
                     while loop_limit > 0 {
-                        *data += black_box(1);
+                        *data += 1;
+                        black_box(1);
                         loop_limit -= 1;
                     }
 
