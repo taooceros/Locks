@@ -12,7 +12,7 @@ use std::cell::{OnceCell, RefCell};
 use std::fs::File;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, current};
 use std::time::Duration;
 use zstd::stream::AutoFinishEncoder;
@@ -59,24 +59,26 @@ pub fn benchmark_response_time_one_three_ratio(info: LockBenchInfo<u64>) {
         i += 1;
     }
 
-    static mut WRITER: OnceCell<
-        RefCell<
+    use std::sync::Mutex;
+
+    static WRITER: OnceLock<
+        Mutex<
             Writer<
                 AutoFinishEncoder<'_, File, Box<dyn FnMut(Result<File, std::io::Error>) + Send>>,
             >,
         >,
-    > = OnceCell::new();
+    > = OnceLock::new();
 
-    let mut writer = unsafe {
-        WRITER
-            .get_or_init(|| {
-                RefCell::new(Writer::from_writer(
-                    create_zstd_writer(info.output_path.join("response_time_one_three_ratio.csv"))
-                        .expect("Failed to create writer"),
-                ))
-            })
-            .borrow_mut()
-    };
+    let mut writer = WRITER
+        .get_or_init(|| {
+            Mutex::new(Writer::from_writer(
+                create_zstd_writer(info.output_path.join("response_time_one_three_ratio.csv"))
+                    .expect("Failed to create writer"),
+            ))
+        })
+        .lock()
+        .unwrap();
+    
     for result in results.iter().flat_map(|r| r.to_records()) {
         writer.serialize(result).unwrap();
     }
