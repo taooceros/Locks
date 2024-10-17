@@ -1,10 +1,60 @@
 #import "@preview/touying:0.5.2": *
 #import "@preview/codly:1.0.0": *
-#show: codly-init.with()
+#import "@preview/chronos:0.1.0"
 
+#show: codly-init.with()
 #import themes.dewdrop: *
 
 #show: dewdrop-theme.with(aspect-ratio: "16-9", navigation: none)
+
+= Recap Implemented Locks
+
+== Flat Combining
+
+Precondition: Each lock has a singly linked list of nodes belongs to each thread.
+
+#image("2024-10-17-12-44-31.png")
+
+
+#let circle_num(number) = numbering("①", number)
+
+#chronos.diagram({
+  import chronos: *
+  _par("T1")
+  _par("Lock")
+  _par("T2")
+  _par("T1 Node")
+  _par("Combiner")
+  _seq("T1", "Lock", comment: [start], enable-dst: true)
+  _seq("T2", "Lock", comment: [start], enable-dst: true)
+  _seq("T2", "T2 Node", create-dst: true, dashed: false, comment: circle_num(1))
+  _seq("T1", "T1 Node", create-dst: true, dashed: false, comment: circle_num(1))
+  _seq("T1 Node", "T1", dashed: false, disable-src: true)
+  _seq("T1", "Combiner", create-dst: true, comment: [#circle_num(2) try_lock(true) #footnote[A "lock" inside the fc_lock that is used to provide mutual exclusion for combiner] <fc_inner_lock>])
+  _seq("Combiner", "Combiner", comment: [#circle_num(3) combine])
+
+  _seq("T2", "T2 Node", comment: [#circle_num(2) try lock(false)], create-dst: false)
+  _seq("T2 Node", "T2 Node", comment: [Wait (with timeout)], enable-dst: true)
+  _seq("T2 Node", "Combiner", comment: [(timeout) #circle_num(2) try lock (true) #footnote[Dashed Line means potentially executed but not in this case.]], enable-dst: false, dashed: true)
+  _seq("T2 Node", "T2 Node", comment: [(timeout) #circle_num(2) try lock (false)], enable-dst: false, disable-src: true)
+  _seq("Combiner", "Combiner", comment: [#circle_num(4) cleaning (if needed)])
+  _seq("Combiner", "T1", comment: [#circle_num(5) unlock #footnote(<fc_inner_lock>)])
+}, width: 60%)
+
+== CCSynch
+
+The difference between _CCSynch_ and _Flat Combining_ is that it maintains a FIFO queue of the job, and automatically select combiner based on the queue.
+
+
+
+
+== Flat Combining with Banning
+
+== CCSynch with Banning
+
+== FC-PQ
+
+== FC-Skiplist
 
 = Profiling Result
 
