@@ -5,7 +5,7 @@
 #show: codly-init.with()
 #import themes.dewdrop: *
 
-#show: dewdrop-theme.with(aspect-ratio: "16-9", navigation: none)
+#show: dewdrop-theme.with(aspect-ratio: "4-3", navigation: none)
 
 = Recap Implemented Locks
 
@@ -13,40 +13,110 @@
 
 Precondition: Each lock has a singly linked list of nodes belongs to each thread.
 
-#image("2024-10-17-12-44-31.png")
+#image("flat-combining.png")
 
 
 #let circle_num(number) = numbering("①", number)
 
 #chronos.diagram({
   import chronos: *
-  _par("T1")
+  let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
+  let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
   _par("Lock")
-  _par("T2")
+  _par("Head")
   _par("T1 Node")
   _par("Combiner")
-  _seq("T1", "Lock", comment: [start], enable-dst: true)
-  _seq("T2", "Lock", comment: [start], enable-dst: true)
-  _seq("T2", "T2 Node", create-dst: true, dashed: false, comment: circle_num(1))
-  _seq("T1", "T1 Node", create-dst: true, dashed: false, comment: circle_num(1))
-  _seq("T1 Node", "T1", dashed: false, disable-src: true)
-  _seq("T1", "Combiner", create-dst: true, comment: [#circle_num(2) try_lock(true) #footnote[A "lock" inside the fc_lock that is used to provide mutual exclusion for combiner] <fc_inner_lock>])
-  _seq("Combiner", "Combiner", comment: [#circle_num(3) combine])
+  t1_seq("Lock", "Lock", comment: [T1 start])
+  t2_seq("Lock", "Lock", comment: [T2 start])
 
-  _seq("T2", "T2 Node", comment: [#circle_num(2) try lock(false)], create-dst: false)
-  _seq("T2 Node", "T2 Node", comment: [Wait (with timeout)], enable-dst: true)
-  _seq("T2 Node", "Combiner", comment: [(timeout) #circle_num(2) try lock (true) #footnote[Dashed Line means potentially executed but not in this case.]], enable-dst: false, dashed: true)
-  _seq("T2 Node", "T2 Node", comment: [(timeout) #circle_num(2) try lock (false)], enable-dst: false, disable-src: true)
-  _seq("Combiner", "Combiner", comment: [#circle_num(4) cleaning (if needed)])
-  _seq("Combiner", "T1", comment: [#circle_num(5) unlock #footnote(<fc_inner_lock>)])
-}, width: 60%)
+  t2_seq("Lock", "T2 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
+  t2_seq("T2 Node", "Lock", dashed: false)
+
+  t1_seq("Lock", "T1 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
+  t1_seq("T1 Node", "Lock", dashed: false, disable-src: true)
+
+  t1_seq("Lock", "Combiner", comment: [#circle_num(2) try_lock(true) #footnote[A "lock" inside the fc_lock that is used to provide mutual exclusion for combiner] <fc_inner_lock>], enable-dst: true)
+  t1_seq("Combiner", "Head", comment: [#circle_num(3) combine])
+  t1_seq("Head", "T1 Node", comment: [#circle_num(3)], enable-dst: true)
+
+  t1_seq("T1 Node", "T1 Node", comment: [completed = true])
+  t1_seq("T1 Node", "T2 Node", comment: [#circle_num(3) Next])
+
+  t2_seq("Lock", "T2 Node", comment: [#circle_num(2) try lock(false)], create-dst: false)
+
+
+  t2_seq("T2 Node", "T2 Node", comment: [Wait Completed (with timeout)], enable-dst: true)
+  
+  t1_seq("T2 Node", "T2 Node", comment: [completed = true])
+
+  t1_seq("T2 Node", "Combiner", comment: [Finish #circle_num(3)])
+
+  t2_seq("T2 Node", "Combiner", comment: [(timeout) #circle_num(2) try lock (true) #footnote[Dashed Line means potentially executed but not in this case.]], enable-dst: false, dashed: true)
+  t2_seq("T2 Node", "T2 Node", comment: [read completed = true], disable-dst: true)
+  t1_seq("Combiner", "Combiner", comment: [#circle_num(4) cleaning (if needed)])
+  t1_seq("Combiner", "Lock", comment: [#circle_num(5) unlock #footnote(<fc_inner_lock>)], disable-src: true)
+  t2_seq("T2 Node", "Lock", comment: [#circle_num(5) completed = true $=>$ return])
+}, width: 70%)
 
 == CCSynch
 
-The difference between _CCSynch_ and _Flat Combining_ is that it maintains a FIFO queue of the job, and automatically select combiner based on the queue.
+_CCSynch_ maintains a FIFO queue of the job.
+
+#enum(numbering: "①")[
+  Acquire a _next_ node from `thread_local`
+][
+  Swap the `Tail` with the `next` node
+][
+  Wait `wait`
+][
+  if `!completed`, traverse the queue and execute jobs, set `completed` to `true`, and `wait` to `false`
+][
+  when reaching combine limit, set next `wait` to `false`, and `completed` to `false`
+]
 
 
+#align(center)[
+  #image("ccsynch.drawio.svg", width: 80%)
+]
 
+#chronos.diagram({
+  import chronos: *
+
+  let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
+  let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
+  _par("Lock")
+  _par("T1")
+  _par("T2")
+  _par("T1 Data")
+  _par("T2 Data")
+
+  t1_seq("T1", "Lock", comment: [start], enable-dst: true)
+
+  t1_seq("Lock", "T1 Data", create-dst: true, comment: [#circle_num(1) Get Node])
+  t1_seq("T1 Data", "Node 1", comment: [#circle_num(2) Swap `Tail`], create-dst: true)
+
+  t1_seq("Node 1", "Node 1", comment: [#circle_num(3) Wait])
+  t2_seq("T2", "Lock", comment: [start], enable-dst: true)
+
+  t1_seq("Node 1", "Node 1", comment: [Check Completed])
+
+  t1_seq("Node 1", "Combiner", comment: [#circle_num(4) If not $=>$ Combine], enable-dst: true)
+
+  t2_seq("Lock", "T2 Data", comment: [Acquire Node])
+  t2_seq("T2 Data", "Node 2", comment: [Swap with `Tail`], create-dst: true)
+  t2_seq("Node 2", "Node 2", comment: [Wait], enable-dst: true)
+
+  t1_seq("Combiner", "Node 1", enable-dst: true, comment: [Traverse queue])
+  t1_seq("Node 1", "Node 1", comment: [completed=T, wait=F])
+  t1_seq("Node 1", "Node 2", comment: [Execute Next], disable-src: true, enable-dst: true)
+
+  t1_seq("Node 2", "Node 2", comment: [
+    completed=T, wait=F
+  ], disable-src: true)
+  t2_seq("Node 2", "Lock", comment: [Return], disable-dst: true)
+  t1_seq("Node 2", "Combiner", disable-dst: true, disable-src: true)
+  t1_seq("Combiner", "Lock", comment: [Return], disable-dst: true)
+}, width: 80%)
 
 == Flat Combining with Banning
 
