@@ -7,14 +7,72 @@
 
 #show: dewdrop-theme.with(aspect-ratio: "4-3", navigation: none)
 
-= Recap Implemented Locks
+
+
+= General Idea of Delegation Styled Lock
+
+#table(columns: (20%, 70%), stroke: none, gutter: 2em, [
+  #set par(linebreaks: "optimized", justify: false)
+  #v(5em)
+  A general idea of delegation styled lock
+  ], [
+  #image("Delegation Styled Lock Illustration.svg", width: 100%)
+])
+
+== Imbalanced Workload
+
+#table(columns: (20%, 75%), stroke: none, gutter: 2em, [
+  #set par(linebreaks: "optimized", justify: false)
+  #v(5em)
+  $t_2$ is occupying more lock-usage than $t_1$ and $t_3$
+  ], [
+  #image("Imbalanced Workload DLock.svg", width: 100%)
+])
+
+#pagebreak()
+
+=== Lock Usage Fairness
+
+- $t_2$ uses the lock longer than $t_1$ and $t_3$ because it has a longer critical section.
+- $t_1$ can leave the lock earlier if using a normal lock, since when it acquires the lock, the lock is uncontended. However, now it needs to help other threads to execute the critical section.
+
+== Scheduler Subversion
+
+- Assuming the threads are over-subscribed #footnote[This is actually valid assumption, since delegation styled lock is much more scalable than normal lock which enable the potential of very large number of threads], scheduler will pre-empt the threads.
+- Assuming instead of spin-waiting, threads are sleeping during waiting #footnote[Consider the case when we needs very large number of threads].
+
++ In a normal lock, Scheduler Subversion happens when threads holding shorter critical section are spinning "longer", which consumes CPU time but not progressing, while threads that holding longer critical section are using the lock more proportionally. This subverts the fairness goal provided by the scheduler.
++ In delegation styled lock, the combiner thread is helping the other threads. Since this delegation is transparent to the scheduler, scheduler will panelize the combiner thread because of its voluntary work.
+
+*Example*
++ When $t_1$ is helping $t_2$ and $t_3$, it will use more CPU time, but not doing its own job.
++ Scheduler is not aware of the delegation, so it will try to schedule $t_1$ less time because of its voluntary work.
+
+= Solution
+
++ Banning
++ Priority Queue (CFS like)
++ Other Scheduling Mechanism
+
+== Priority Queue
+
++ 
+
+= Implementation
 
 == Flat Combining
 
-Precondition: Each lock has a singly linked list of nodes belongs to each thread.
+A singlely linked list of nodes (belongs to each threads) are used to publish the job.
 
 #image("flat-combining.png")
 
+#pagebreak()
+
+=== Illustration 1
+
+#pagebreak()
+
+=== Illustration 2
 
 #let circle_num(number) = numbering("①", number)
 
