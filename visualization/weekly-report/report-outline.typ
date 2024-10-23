@@ -10,14 +10,21 @@
       + Easy to implement
     + Disadvantage
       + May create gap that prevents all threads from getting the lock
-  + Priority Queue
+  + Lock-Free Priority Queue
+    + Advantage
+      + No gap
+      + Simple Idea
+    + Challenges
+      + Multi-threaded lock-free implementation is complex and slow
+  + Serilized Priority Queue
     + Advantage
       + No gap
       + Fair
       + Single-threaded implementation is fast
     + Challenges
-      + Multi-threaded lock-free implementation is complex and slow
       + Hard to design protocol for threads to publish to pririty queue
+      + How to elect the combiner thread?
+      + How to cache node.
   + Other Scheduling Mechanism
 + Protocol Design
   + Idea

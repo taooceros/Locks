@@ -6,15 +6,24 @@
 #import themes.dewdrop: *
 
 #show: dewdrop-theme.with(aspect-ratio: "4-3", navigation: none)
+#show link: set text(blue.darken(20%))
+
+#set heading(numbering: "1.") 
+
+
+= Recap: Delegation Styled Lock
+
+#table(columns: (30%, 70%), stroke: none, gutter: 2em, [
+    #set par(linebreaks: "optimized", justify: false)
+    #v(3em)
+
+    Thread publish their critical section to a job queue, and one server thread (combiner) will execute the job to prevent control flow switching.
 
 
 
-= General Idea of Delegation Styled Lock
-
-#table(columns: (20%, 70%), stroke: none, gutter: 2em, [
-  #set par(linebreaks: "optimized", justify: false)
-  #v(5em)
-  A general idea of delegation styled lock
+    Two aspects:
+    1. How to elect the combiner thread
+    2. How to schedule the job
   ], [
   #image("Delegation Styled Lock Illustration.svg", width: 100%)
 ])
@@ -48,15 +57,75 @@
 + When $t_1$ is helping $t_2$ and $t_3$, it will use more CPU time, but not doing its own job.
 + Scheduler is not aware of the delegation, so it will try to schedule $t_1$ less time because of its voluntary work.
 
-= Solution
+= Solution to Lock Usage Fairness
 
 + Banning
 + Priority Queue (CFS like)
 + Other Scheduling Mechanism
 
-== Priority Queue
+== Banning
 
-+ 
+- Similar to U-SCL, we ban threads that executes long critical section.
+
+=== Implementation
+
+- Flat Combining with Banning @flat-combining-banning
+- CCSynch with Banning @ccsynch-banning
+
+=== Problem
+
+- If there are threads that enters the lock sparsely, there may be chance that all current contending threads are banned, while the lock remains unused.
+
+== Naive Priority Queue
+
+- Use a priority queue as the job queue (e.g. skip-list).
+
+=== Implementation
+
+- Combiner elected via an `AtomicBool`
+- Priority queue is implemented via skip-list (#link("https://docs.rs/crossbeam-skiplist/latest/crossbeam_skiplist/", [crossbeam-skiplist]))
+- To execute a critical section, thread post the request to a local node and pushes it into the skip-list.
+- Combiner will pop the job from the skip-list.
+
+=== Illustration
+
+TODO
+
+=== Problem
+
+- Performance overhead of skip-list is really high.
+- Dequeue is expensive, which waste combiner's CPU time (i.e. wasting potential lock usage).
+
+== Priority Queue (CFS like)
+
+- I want to propose something that is easy to implement, which allows more general scheduling mechanism.
+
+=== Motivation
+
+- Combiner has exclusive control over the lock-usage statistics (why do we need distributed ordering).
+- We may want other scheduling mechanism, e.g. EEVDF.
+- Node can be reused
+
+=== Idea
+
+- Use something like an MPSC channel to publish the job.
+- The combiner thread polls the channel to get the job, and re-order the job based on exectuion.
+
+=== Illustration
+
+TODO
+
+=== Challenges
+
+TODO!
+
+1. Deadlock of a naive implementation (TODO).
+  1. Workaround: TODO
+2. How to elect the combiner thread (subversion problem)?
+3. Publishing node can be expensive
+  1. Caching?
+4. When do combiner check the channel?
+
 
 = Implementation
 
@@ -176,9 +245,9 @@ _CCSynch_ maintains a FIFO queue of the job.
   t1_seq("Combiner", "Lock", comment: [Return], disable-dst: true)
 }, width: 80%)
 
-== Flat Combining with Banning
+== Flat Combining with Banning <flat-combining-banning>
 
-== CCSynch with Banning
+== CCSynch with Banning <ccsynch-banning>
 
 == FC-PQ
 
@@ -235,31 +304,31 @@ _CCSynch_ maintains a FIFO queue of the job.
 
 == Mutex
 
-= Code Change
+// = Code Change
 
-== Shared Counter
+// == Shared Counter
 
-+ Remove `blackbox` for accessing the data
-+ Change the blackbox position
+// + Remove `blackbox` for accessing the data
+// + Change the blackbox position
 
-```diff
-- while black_box(loop_limit) > 0 {
--   *data += 1;
-- }
-+ while loop_limit > 0 {
-+   *black_box(&mut *data) += 1;
-+   loop_limit -= 1;
-+ }
-```
+// ```diff
+// - while black_box(loop_limit) > 0 {
+// -   *data += 1;
+// - }
+// + while loop_limit > 0 {
+// +   *black_box(&mut *data) += 1;
+// +   loop_limit -= 1;
+// + }
+// ```
 
-#pagebreak()
+// #pagebreak()
 
-=== Reason for `blackbox`
+// === Reason for `blackbox`
 
-+ `loop_limit` => the length of *Critical Section*.
-+ Compiler will optimize the code to something like `*data += loop_limit;`, which will make varying the `loop_limit` not affecting the length of *Critical Section*.
+// + `loop_limit` => the length of *Critical Section*.
+// + Compiler will optimize the code to something like `*data += loop_limit;`, which will make varying the `loop_limit` not affecting the length of *Critical Section*.
 
-=== Reason for the change
+// === Reason for the change
 
-+ I want to mimic more access to the shared variable (hopefully something like `inc (rax)` in assembly).
-+ The previous version contains too much overhead for doing the loop.
+// + I want to mimic more access to the shared variable (hopefully something like `inc (rax)` in assembly).
+// + The previous version contains too much overhead for doing the loop.
