@@ -69,8 +69,8 @@
 
 === Implementation
 
-- Flat Combining with Banning @flat-combining-banning
-- CCSynch with Banning @ccsynch-banning
+- Flat Combining with Banning (@flat-combining-banning)
+- CCSynch with Banning (@ccsynch-banning)
 
 === Problem
 
@@ -80,12 +80,16 @@
 
 - Use a priority queue as the job queue (e.g. skip-list).
 
-=== Implementation
+=== Procedure
 
 - Combiner elected via an `AtomicBool`
 - Priority queue is implemented via skip-list (#link("https://docs.rs/crossbeam-skiplist/latest/crossbeam_skiplist/", [crossbeam-skiplist]))
 - To execute a critical section, thread post the request to a local node and pushes it into the skip-list.
 - Combiner will pop the job from the skip-list.
+
+=== Implementation
+
++ @fc-sl
 
 === Illustration
 
@@ -125,6 +129,10 @@ TODO!
 3. Publishing node can be expensive
   1. Caching?
 4. When do combiner check the channel?
+
+=== Implementation
+
+- @fc-pq
 
 
 = Implementation
@@ -247,11 +255,19 @@ _CCSynch_ maintains a FIFO queue of the job.
 
 == Flat Combining with Banning <flat-combining-banning>
 
+TODO!
+
 == CCSynch with Banning <ccsynch-banning>
 
-== FC-PQ
+TODO!
 
-== FC-Skiplist
+== FC-PQ <fc-pq>
+
+TODO!
+
+== FC-Skiplist <fc-sl>
+
+TODO!
 
 = Profiling Result
 
@@ -304,31 +320,31 @@ _CCSynch_ maintains a FIFO queue of the job.
 
 == Mutex
 
-// = Code Change
+= Code Change
 
-// == Shared Counter
+== Shared Counter
 
-// + Remove `blackbox` for accessing the data
-// + Change the blackbox position
++ Remove `blackbox` for accessing the data
++ Change the blackbox position
 
-// ```diff
-// - while black_box(loop_limit) > 0 {
-// -   *data += 1;
-// - }
-// + while loop_limit > 0 {
-// +   *black_box(&mut *data) += 1;
-// +   loop_limit -= 1;
-// + }
-// ```
+```diff
+- while black_box(loop_limit) > 0 {
+-   *data += 1;
+- }
++ while loop_limit > 0 {
++   *black_box(&mut *data) += 1;
++   loop_limit -= 1;
++ }
+```
 
-// #pagebreak()
+#pagebreak()
 
-// === Reason for `blackbox`
+=== Reason for `blackbox`
 
-// + `loop_limit` => the length of *Critical Section*.
-// + Compiler will optimize the code to something like `*data += loop_limit;`, which will make varying the `loop_limit` not affecting the length of *Critical Section*.
++ `loop_limit` => the length of *Critical Section*.
++ Compiler will optimize the code to something like `*data += loop_limit;`, which will make varying the `loop_limit` not affecting the length of *Critical Section*.
 
-// === Reason for the change
+=== Reason for the change
 
-// + I want to mimic more access to the shared variable (hopefully something like `inc (rax)` in assembly).
-// + The previous version contains too much overhead for doing the loop.
++ I want to mimic more access to the shared variable (hopefully something like `inc (rax)` in assembly).
++ The previous version contains too much overhead for doing the loop.
