@@ -57,7 +57,7 @@
 + When $t_1$ is helping $t_2$ and $t_3$, it will use more CPU time, but not doing its own job.
 + Scheduler is not aware of the delegation, so it will try to schedule $t_1$ less time because of its voluntary work.
 
-= Solution to Lock Usage Fairness
+= Solutions to Lock Usage Fairness
 
 + Banning
 + Priority Queue (CFS like)
