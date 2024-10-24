@@ -17,9 +17,10 @@
     #set par(linebreaks: "optimized", justify: false)
     #v(3em)
 
-    Thread publish their critical section to a job queue, and one server thread (combiner) will execute the job to prevent control flow switching.
+    _Threads_: Publish their critical section
+    _Combiner_: Execute the job
 
-
+    #v(3em)
 
     Two aspects:
     1. How to elect the combiner thread
@@ -30,22 +31,24 @@
 
 == Imbalanced Workload
 
-#table(columns: (20%, 75%), stroke: none, gutter: 2em, [
+=== Lock Usage Fairness
+
+#table(columns: (30%, 70%), stroke: none, gutter: 2em, [
   #set par(linebreaks: "optimized", justify: false)
-  #v(5em)
-  $t_2$ is occupying more lock-usage than $t_1$ and $t_3$
+  
+  - $t_2$ uses the lock longer than $t_1$ and $t_3$.
+- $t_1$ can't leave the lock earlier when finishing its own CS. It needs to help other threads to execute the critical section.
   ], [
   #image("Imbalanced Workload DLock.svg", width: 100%)
 ])
 
 #pagebreak()
 
-=== Lock Usage Fairness
 
-- $t_2$ uses the lock longer than $t_1$ and $t_3$ because it has a longer critical section.
-- $t_1$ can leave the lock earlier if using a normal lock, since when it acquires the lock, the lock is uncontended. However, now it needs to help other threads to execute the critical section.
 
 == Scheduler Subversion
+
+#text(red)[Can ignore.]
 
 - Assuming the threads are over-subscribed #footnote[This is actually valid assumption, since delegation styled lock is much more scalable than normal lock which enable the potential of very large number of threads], scheduler will pre-empt the threads.
 - Assuming instead of spin-waiting, threads are sleeping during waiting #footnote[Consider the case when we needs very large number of threads].
@@ -74,7 +77,11 @@
 
 === Problem
 
-- If there are threads that enters the lock sparsely, there may be chance that all current contending threads are banned, while the lock remains unused.
+- Some threads that enters the lock sparsely -> all active threads may be banned, while the lock remains unused.
+
+=== Illustration
+
+TODO
 
 == Naive Priority Queue
 
@@ -121,7 +128,6 @@ TODO
 
 === Challenges
 
-TODO!
 
 1. Deadlock of a naive implementation (TODO).
   1. Workaround: TODO
