@@ -5,15 +5,22 @@
 #show: codly-init.with()
 #import themes.dewdrop: *
 
-#show: dewdrop-theme.with(aspect-ratio: "4-3", navigation: none)
+#show: dewdrop-theme.with(
+  aspect-ratio: "4-3",
+  navigation: "mini-slides",
+  mini-slides: (height: 4em, x: 2em, section: false, subsection: false),
+)
 #show link: set text(blue.darken(20%))
 
-#set heading(numbering: "1.") 
-
+#set heading(numbering: "1.")
 
 = Recap: Delegation Styled Lock
 
-#table(columns: (30%, 70%), stroke: none, gutter: 2em, [
+#table(
+  columns: (30%, 70%),
+  stroke: none,
+  gutter: 2em,
+  [
     #set par(linebreaks: "optimized", justify: false)
     #v(3em)
 
@@ -24,19 +31,27 @@
     Two aspects:
     1. How to elect the combiner thread
     2. How to schedule the job
-  ], [
-  #image("Delegation Styled Lock Illustration.svg", width: 100%)
-])
+  ],
+  [
+    #image("Delegation Styled Lock Illustration.svg", width: 100%)
+  ],
+)
 
 == Imbalanced Workload
 
-#table(columns: (20%, 75%), stroke: none, gutter: 2em, [
-  #set par(linebreaks: "optimized", justify: false)
-  #v(5em)
-  $t_2$ is occupying more lock-usage than $t_1$ and $t_3$
-  ], [
-  #image("Imbalanced Workload DLock.svg", width: 100%)
-])
+#table(
+  columns: (20%, 75%),
+  stroke: none,
+  gutter: 2em,
+  [
+    #set par(linebreaks: "optimized", justify: false)
+    #v(5em)
+    $t_2$ is occupying more lock-usage than $t_1$ and $t_3$
+  ],
+  [
+    #image("Imbalanced Workload DLock.svg", width: 100%)
+  ],
+)
 
 #pagebreak()
 
@@ -82,25 +97,27 @@
 
 === Procedure
 
-- Combiner elected via an `AtomicBool`
-- Priority queue is implemented via skip-list (#link("https://docs.rs/crossbeam-skiplist/latest/crossbeam_skiplist/", [crossbeam-skiplist]))
-- To execute a critical section, thread post the request to a local node and pushes it into the skip-list.
++ Combiner elected via an `AtomicBool`
++ Lock-free Priority Queue (e.g. #link("https://docs.rs/crossbeam-skiplist/latest/crossbeam_skiplist/", [crossbeam-skiplist]))
++ To execute a critical section, thread post the request to a local node and pushes it into the skip-list.
 - Combiner will pop the job from the skip-list.
-
-=== Implementation
-
-+ @fc-sl
 
 === Illustration
 
-TODO
+#figure()[
+  #image("naive priority queue lock.svg", height: 80%)
+]
+
+=== Implementation
+
++ FC-SL (@fc-sl)
 
 === Problem
 
 - Performance overhead of skip-list is really high.
 - Dequeue is expensive, which waste combiner's CPU time (i.e. wasting potential lock usage).
 
-== Priority Queue (CFS like)
+== Priority Queue with Serialized
 
 - I want to propose something that is easy to implement, which allows more general scheduling mechanism.
 
@@ -145,53 +162,67 @@ A singlely linked list of nodes (belongs to each threads) are used to publish th
 
 #pagebreak()
 
-=== Illustration 1
-
-#pagebreak()
-
-=== Illustration 2
+=== Illustration
 
 #let circle_num(number) = numbering("①", number)
 
-#chronos.diagram({
-  import chronos: *
-  let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
-  let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
-  _par("Lock")
-  _par("Head")
-  _par("T1 Node")
-  _par("Combiner")
-  t1_seq("Lock", "Lock", comment: [T1 start])
-  t2_seq("Lock", "Lock", comment: [T2 start])
 
-  t2_seq("Lock", "T2 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
-  t2_seq("T2 Node", "Lock", dashed: false)
+#align(
+  center,
+  chronos.diagram(
+    {
+      import chronos: *
+      let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
+      let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
+      _par("Lock")
+      _par("Head")
+      _par("T1 Node")
+      _par("Combiner")
+      t1_seq("Lock", "Lock", comment: [T1 start])
+      t2_seq("Lock", "Lock", comment: [T2 start])
 
-  t1_seq("Lock", "T1 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
-  t1_seq("T1 Node", "Lock", dashed: false, disable-src: true)
+      t2_seq("Lock", "T2 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
+      t2_seq("T2 Node", "Lock", dashed: false)
 
-  t1_seq("Lock", "Combiner", comment: [#circle_num(2) try_lock(true) #footnote[A "lock" inside the fc_lock that is used to provide mutual exclusion for combiner] <fc_inner_lock>], enable-dst: true)
-  t1_seq("Combiner", "Head", comment: [#circle_num(3) combine])
-  t1_seq("Head", "T1 Node", comment: [#circle_num(3)], enable-dst: true)
+      t1_seq("Lock", "T1 Node", create-dst: true, dashed: false, comment: [#circle_num(1)])
+      t1_seq("T1 Node", "Lock", dashed: false, disable-src: true)
 
-  t1_seq("T1 Node", "T1 Node", comment: [completed = true])
-  t1_seq("T1 Node", "T2 Node", comment: [#circle_num(3) Next])
+      t1_seq(
+        "Lock",
+        "Combiner",
+        comment: [#circle_num(2) try_lock(true) #footnote[A "lock" inside the fc_lock that is used to provide mutual exclusion for combiner] <fc_inner_lock>],
+        enable-dst: true,
+      )
+      t1_seq("Combiner", "Head", comment: [#circle_num(3) combine])
+      t1_seq("Head", "T1 Node", comment: [#circle_num(3)], enable-dst: true)
 
-  t2_seq("Lock", "T2 Node", comment: [#circle_num(2) try lock(false)], create-dst: false)
+      t1_seq("T1 Node", "T1 Node", comment: [completed = true])
+      t1_seq("T1 Node", "T2 Node", comment: [#circle_num(3) Next])
+
+      t2_seq("Lock", "T2 Node", comment: [#circle_num(2) try lock(false)], create-dst: false)
 
 
-  t2_seq("T2 Node", "T2 Node", comment: [Wait Completed (with timeout)], enable-dst: true)
-  
-  t1_seq("T2 Node", "T2 Node", comment: [completed = true])
+      t2_seq("T2 Node", "T2 Node", comment: [Wait Completed (with timeout)], enable-dst: true)
 
-  t1_seq("T2 Node", "Combiner", comment: [Finish #circle_num(3)])
+      t1_seq("T2 Node", "T2 Node", comment: [completed = true])
 
-  t2_seq("T2 Node", "Combiner", comment: [(timeout) #circle_num(2) try lock (true) #footnote[Dashed Line means potentially executed but not in this case.]], enable-dst: false, dashed: true)
-  t2_seq("T2 Node", "T2 Node", comment: [read completed = true], disable-dst: true)
-  t1_seq("Combiner", "Combiner", comment: [#circle_num(4) cleaning (if needed)])
-  t1_seq("Combiner", "Lock", comment: [#circle_num(5) unlock #footnote(<fc_inner_lock>)], disable-src: true)
-  t2_seq("T2 Node", "Lock", comment: [#circle_num(5) completed = true $=>$ return])
-}, width: 70%)
+      t1_seq("T2 Node", "Combiner", comment: [Finish #circle_num(3)])
+
+      t2_seq(
+        "T2 Node",
+        "Combiner",
+        comment: [(timeout) #circle_num(2) try lock (true) #footnote[Dashed Line means potentially executed but not in this case.]],
+        enable-dst: false,
+        dashed: true,
+      )
+      t2_seq("T2 Node", "T2 Node", comment: [read completed = true], disable-dst: true)
+      t1_seq("Combiner", "Combiner", comment: [#circle_num(4) cleaning (if needed)])
+      t1_seq("Combiner", "Lock", comment: [#circle_num(5) unlock #footnote(<fc_inner_lock>)], disable-src: true)
+      t2_seq("T2 Node", "Lock", comment: [#circle_num(5) completed = true $=>$ return])
+    },
+    width: 50%,
+  ),
+)
 
 == CCSynch
 
@@ -209,49 +240,59 @@ _CCSynch_ maintains a FIFO queue of the job.
   when reaching combine limit, set next `wait` to `false`, and `completed` to `false`
 ]
 
-
 #align(center)[
   #image("ccsynch.drawio.svg", width: 80%)
 ]
 
-#chronos.diagram({
-  import chronos: *
+=== Illustration
 
-  let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
-  let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
-  _par("Lock")
-  _par("T1")
-  _par("T2")
-  _par("T1 Data")
-  _par("T2 Data")
 
-  t1_seq("T1", "Lock", comment: [start], enable-dst: true)
+#chronos.diagram(
+  {
+    import chronos: *
 
-  t1_seq("Lock", "T1 Data", create-dst: true, comment: [#circle_num(1) Get Node])
-  t1_seq("T1 Data", "Node 1", comment: [#circle_num(2) Swap `Tail`], create-dst: true)
+    let t1_seq = _seq.with(color: green.darken(20%), lifeline-style: (fill: green))
+    let t2_seq = _seq.with(color: red, lifeline-style: (fill: red))
+    _par("Lock")
+    _par("T1")
+    _par("T2")
+    _par("T1 Data")
+    _par("T2 Data")
 
-  t1_seq("Node 1", "Node 1", comment: [#circle_num(3) Wait])
-  t2_seq("T2", "Lock", comment: [start], enable-dst: true)
+    t1_seq("T1", "Lock", comment: [start], enable-dst: true)
 
-  t1_seq("Node 1", "Node 1", comment: [Check Completed])
+    t1_seq("Lock", "T1 Data", create-dst: true, comment: [#circle_num(1) Get Node])
+    t1_seq("T1 Data", "Node 1", comment: [#circle_num(2) Swap `Tail`], create-dst: true)
 
-  t1_seq("Node 1", "Combiner", comment: [#circle_num(4) If not $=>$ Combine], enable-dst: true)
+    t1_seq("Node 1", "Node 1", comment: [#circle_num(3) Wait])
+    t2_seq("T2", "Lock", comment: [start], enable-dst: true)
 
-  t2_seq("Lock", "T2 Data", comment: [Acquire Node])
-  t2_seq("T2 Data", "Node 2", comment: [Swap with `Tail`], create-dst: true)
-  t2_seq("Node 2", "Node 2", comment: [Wait], enable-dst: true)
+    t1_seq("Node 1", "Node 1", comment: [Check Completed])
 
-  t1_seq("Combiner", "Node 1", enable-dst: true, comment: [Traverse queue])
-  t1_seq("Node 1", "Node 1", comment: [completed=T, wait=F])
-  t1_seq("Node 1", "Node 2", comment: [Execute Next], disable-src: true, enable-dst: true)
+    t1_seq("Node 1", "Combiner", comment: [#circle_num(4) If not $=>$ Combine], enable-dst: true)
 
-  t1_seq("Node 2", "Node 2", comment: [
-    completed=T, wait=F
-  ], disable-src: true)
-  t2_seq("Node 2", "Lock", comment: [Return], disable-dst: true)
-  t1_seq("Node 2", "Combiner", disable-dst: true, disable-src: true)
-  t1_seq("Combiner", "Lock", comment: [Return], disable-dst: true)
-}, width: 80%)
+    t2_seq("Lock", "T2 Data", comment: [Acquire Node])
+    t2_seq("T2 Data", "Node 2", comment: [Swap with `Tail`], create-dst: true)
+    t2_seq("Node 2", "Node 2", comment: [Wait], enable-dst: true)
+
+    t1_seq("Combiner", "Node 1", enable-dst: true, comment: [Traverse queue])
+    t1_seq("Node 1", "Node 1", comment: [completed=T, wait=F])
+    t1_seq("Node 1", "Node 2", comment: [Execute Next], disable-src: true, enable-dst: true)
+
+    t1_seq(
+      "Node 2",
+      "Node 2",
+      comment: [
+        completed=T, wait=F
+      ],
+      disable-src: true,
+    )
+    t2_seq("Node 2", "Lock", comment: [Return], disable-dst: true)
+    t1_seq("Node 2", "Combiner", disable-dst: true, disable-src: true)
+    t1_seq("Combiner", "Lock", comment: [Return], disable-dst: true)
+  },
+  width: 80%,
+)
 
 == Flat Combining with Banning <flat-combining-banning>
 
@@ -285,7 +326,7 @@ TODO!
     align: center,
     stroke: none,
     table.hline(),
-    [*Function*], [*CPU Time*], [*Clockticks*], [*Instructions Retired*], [*CPI Rate*], [*Module*], 
+    [*Function*], [*CPU Time*], [*Clockticks*], [*Instructions Retired*], [*CPI Rate*], [*Module*],
     table.hline(),
     [lock], [44.490s], [$1.11 times 10^11$], [$1.30 times 10^9$], [85.489], [dlock],
     [bench code], [4.682s], [$1.17 times 10^10$], [$1.27 times 10^10$], [0.918], [dlock],
@@ -348,3 +389,5 @@ TODO!
 
 + I want to mimic more access to the shared variable (hopefully something like `inc (rax)` in assembly).
 + The previous version contains too much overhead for doing the loop.
+
+
