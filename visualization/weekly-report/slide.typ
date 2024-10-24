@@ -118,15 +118,14 @@ TODO
 - Performance overhead of skip-list is really high.
 - Dequeue is expensive, which waste combiner's CPU time (i.e. wasting potential lock usage).
 
-== Priority Queue with Serialized
+== Serialized Priority Queue
 
-- I want to propose something that is easy to implement, which allows more general scheduling mechanism.
 
 === Motivation
 
-- Combiner has exclusive control over the lock-usage statistics (why do we need distributed ordering).
+- Combiner has exclusive control over the lock-usage statistics
+  - Why bother multithreaded re-ordering
 - We may want other scheduling mechanism, e.g. EEVDF.
-- Node can be reused
 
 === Idea
 
@@ -135,17 +134,19 @@ TODO
 
 === Illustration
 
-TODO
+#figure()[
+  #image("serialized priority queue lock.svg", height: 90%)
+]
 
 === Challenges
 
-
-1. Deadlock of a naive implementation (TODO).
-  1. Workaround: TODO
-2. How to elect the combiner thread (subversion problem)?
-3. Publishing node can be expensive
-  1. Caching?
-4. When do combiner check the channel?
++ Deadlock of a naive implementation (TODO).
+  - Workaround: TODO
++ When do combiner check the channel?
+  - If checking only after no job, then $t_1$ and $t_3$ won't be scheduled more times than $t_2$.
++ How to elect the combiner thread (subversion problem)?
++ Publishing node every new job can be expensive
+  - Caching?
 
 === Implementation
 
