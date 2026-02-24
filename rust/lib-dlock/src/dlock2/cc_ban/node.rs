@@ -10,7 +10,7 @@ pub struct Node<T> {
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub completed: AtomicBool,
     pub wait: AtomicBool,
-    pub panelty: SyncUnsafeCell<u64>,
+    pub penalty: SyncUnsafeCell<u64>,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
     pub combiner_time_stat: u64,
@@ -24,7 +24,7 @@ impl<T> Default for Node<T> {
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             completed: AtomicBool::new(false),
             wait: AtomicBool::new(false),
-            panelty: SyncUnsafeCell::new(0),
+            penalty: SyncUnsafeCell::new(0),
             next: AtomicPtr::default(),
             #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,

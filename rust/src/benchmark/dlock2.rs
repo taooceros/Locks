@@ -77,7 +77,6 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                 SeqPQType::BinaryHeap => {
                     priority_queue::benchmark_pq(bencher, BinaryHeap::new, targets.iter())
                 }
-                SeqPQType::PairingHeap => todo!(),
             },
         }
     }

@@ -62,6 +62,8 @@ where
     }
 
     fn push_node(&self, node: &mut Node<I>) {
+        node.active.store(true, Release);
+
         let usage = node.usage;
 
         let usage_node = UsageNode {
@@ -114,6 +116,7 @@ where
 
                     begin = end;
 
+                    node.active.store(false, Release);
                     node.complete.store(true, Release);
                 }
             }

@@ -1,5 +1,5 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::SyncUnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicPtr},
 };
@@ -7,7 +7,7 @@ use std::{
 use crossbeam::utils::CachePadded;
 
 pub struct Node<T> {
-    pub age: UnsafeCell<u32>,
+    pub age: SyncUnsafeCell<u32>,
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,

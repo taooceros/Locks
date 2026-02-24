@@ -47,13 +47,13 @@ where
         }
     }
 
-    fn ban(&self, data: &ThreadData<I>, panelty: u64) {
+    fn ban(&self, data: &ThreadData<I>, penalty: u64) {
         unsafe {
             data.banned_until
                 .get()
                 .as_mut()
                 .unwrap_unchecked()
-                .add_assign(panelty);
+                .add_assign(penalty);
         }
     }
 }
@@ -126,7 +126,7 @@ where
         // check whether the current node is completed
         if current_node.completed.load(Acquire) {
             unsafe {
-                self.ban(thread_data, current_node.panelty.get().read());
+                self.ban(thread_data, current_node.penalty.get().read());
             }
             return unsafe { current_node.data.get().read().assume_init() };
         }
@@ -169,7 +169,7 @@ where
 
                 let cs = work_end - work_begin;
                 tmp_node
-                    .panelty
+                    .penalty
                     .get()
                     .write(cs * (self.num_waiting_threads.load(Relaxed)));
 
@@ -183,7 +183,7 @@ where
         tmp_node.wait.store(false, Release);
 
         unsafe {
-            self.ban(thread_data, current_node.panelty.get().read());
+            self.ban(thread_data, current_node.penalty.get().read());
         }
 
         #[cfg(feature = "combiner_stat")]

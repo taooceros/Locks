@@ -120,7 +120,7 @@ where
 
         let mut previous_nonnull = previous_ptr;
 
-        let mut current_ptr = NonNull::new(*previous_nonnull.as_ref().next.as_ptr());
+        let mut current_ptr = NonNull::new(previous_nonnull.as_ref().next.load(Acquire));
 
         while let Some(current_nonnull) = current_ptr {
             let current = current_nonnull.as_ref();
@@ -129,8 +129,8 @@ where
             // assert!(current.active.load(Acquire));
 
             if pass - (*current.age.get()) > CLEAN_UP_AGE {
-                (*previous.next.as_ptr()) = *current.next.as_ptr();
-                (*current.next.as_ptr()) = null_mut();
+                previous.next.store(current.next.load(Acquire), Release);
+                current.next.store(null_mut(), Release);
                 current.active.store(false, Release);
                 current_ptr = NonNull::new(previous.next.load(Acquire));
                 continue;

@@ -1,11 +1,11 @@
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
+    cell::SyncUnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicPtr},
 };
 
 pub struct Node<T> {
-    pub age: UnsafeCell<u32>,
+    pub age: SyncUnsafeCell<u32>,
     pub active: AtomicBool,
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,

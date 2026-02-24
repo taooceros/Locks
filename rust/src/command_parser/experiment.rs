@@ -101,7 +101,6 @@ pub enum SeqPQType {
     BTreeSet,
     #[default]
     BinaryHeap,
-    PairingHeap,
 }
 
 impl DLock2Experiment {

@@ -16,6 +16,20 @@ use crate::benchmark::helper::create_plain_writer;
 
 use super::bencher::Bencher;
 
+/// Wrapper that calls `finish()` on all FileWriters when dropped,
+/// ensuring Arrow IPC file footers are written.
+struct WriterMap(HashMap<String, FileWriter<File>>);
+
+impl Drop for WriterMap {
+    fn drop(&mut self) {
+        for (path, mut writer) in self.0.drain() {
+            if let Err(e) = writer.finish() {
+                eprintln!("Warning: failed to finish Arrow IPC writer for {path}: {e}");
+            }
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Records {
     pub id: usize,
@@ -48,7 +62,7 @@ impl Records {
 
 pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borrow<Vec<Records>>) {
     thread_local! {
-        static WRITERS: RefCell<HashMap<String, FileWriter<std::fs::File>>> = HashMap::new().into();
+        static WRITERS: RefCell<WriterMap> = RefCell::new(WriterMap(HashMap::new()));
     }
 
     let fields = SerdeArrowSchema::from_type::<Records>(TracingOptions::default())
@@ -60,7 +74,8 @@ pub fn write_results<'a>(output_path: &Path, file_name: &str, results: impl Borr
     let schema = Schema::new(fields);
 
     WRITERS.with(move |cell| {
-        let mut map: RefMut<HashMap<String, FileWriter<File>>> = cell.borrow_mut();
+        let mut wrapper: RefMut<WriterMap> = cell.borrow_mut();
+        let map = &mut wrapper.0;
 
         let file_path = output_path.join(format!("{file_name}.arrow"));
         let file_path_str = file_path.to_str().unwrap();
