@@ -2,10 +2,10 @@
 #![feature(pointer_is_aligned)]
 #![feature(type_alias_impl_trait)]
 #![feature(thread_id_value)]
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
 #![feature(trait_alias)]
+
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("This crate requires x86_64 (uses __rdtscp and x86-specific C code)");
 
 pub mod spin_lock;
 mod syncptr;
@@ -20,5 +20,8 @@ pub mod c_binding;
 pub mod sequential_priority_queue;
 mod atomic_extension;
 
-
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+#[allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
+mod bindings {
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+pub use bindings::*;

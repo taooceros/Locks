@@ -3,15 +3,15 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     hint::spin_loop,
+    mem::MaybeUninit,
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
-use crossbeam::utils::Backoff;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
-use crate::{dlock2::DLock2Delegate, parker::Parker};
+use crate::dlock2::DLock2Delegate;
 
 #[derive(Debug)]
 struct ThreadData<T> {
@@ -66,7 +66,7 @@ where
         let current_node = unsafe { current_ptr.as_ref().unwrap_unchecked() };
 
         unsafe {
-            *current_node.data.get() = data;
+            current_node.data.get().write(MaybeUninit::new(data));
             current_node.next.store(next_node, Release);
             self.local_node
                 .get()
@@ -75,18 +75,14 @@ where
                 .store(current_ptr, Relaxed)
         }
 
-        let backoff = Backoff::new();
-
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
-            // spin
-            // backoff.snooze();
             spin_loop()
         }
 
         // check whether the current node is completed
         if current_node.completed.load(Acquire) {
-            return unsafe { ptr::read(current_node.data.get()) };
+            return unsafe { current_node.data.get().read().assume_init() };
         }
 
         // combiner
@@ -109,10 +105,10 @@ where
             let next_node = unsafe { next_nonnull.as_ref() };
 
             unsafe {
-                tmp_node.data.get().write((self.delegate)(
+                tmp_node.data.get().write(MaybeUninit::new((self.delegate)(
                     self.data.get().as_mut().unwrap_unchecked(),
-                    tmp_node.data.get().read(),
-                ));
+                    tmp_node.data.get().read().assume_init(),
+                )));
 
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);
@@ -131,7 +127,7 @@ where
             *thread_data.combiner_time_stat.get() += end - begin;
         }
 
-        return unsafe { ptr::read(current_node.data.get()) };
+        return unsafe { current_node.data.get().read().assume_init() };
     }
 
     #[cfg(feature = "combiner_stat")]

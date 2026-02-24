@@ -7,7 +7,7 @@ use std::{
 pub struct Node<T> {
     pub age: SyncUnsafeCell<u32>,
     pub active: AtomicBool,
-    pub data: SyncUnsafeCell<T>,
+    pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub completed: AtomicBool,
     pub wait: AtomicBool,
     pub panelty: SyncUnsafeCell<u64>,
@@ -21,7 +21,7 @@ impl<T> Default for Node<T> {
         Node {
             age: SyncUnsafeCell::new(0),
             active: AtomicBool::new(false),
-            data: SyncUnsafeCell::new(unsafe { MaybeUninit::uninit().assume_init() }),
+            data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             completed: AtomicBool::new(false),
             wait: AtomicBool::new(false),
             panelty: SyncUnsafeCell::new(0),

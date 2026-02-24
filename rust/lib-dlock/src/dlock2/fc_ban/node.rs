@@ -7,7 +7,7 @@ use std::{
 pub struct Node<T> {
     pub age: UnsafeCell<u32>,
     pub active: AtomicBool,
-    pub data: SyncUnsafeCell<T>,
+    pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
     pub next: AtomicPtr<Node<T>>,
     pub banned_until: SyncUnsafeCell<u64>,
@@ -18,23 +18,17 @@ pub struct Node<T> {
 impl<T> Node<T> {
     pub(crate) fn new() -> Node<T>
     where
-        T: Send, // we never pass reference to the data
+        T: Send,
     {
         Node {
             age: 0.into(),
             active: AtomicBool::new(false),
             complete: AtomicBool::new(false),
-            data: unsafe { MaybeUninit::uninit().assume_init() },
+            data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             next: AtomicPtr::default(),
             banned_until: 0.into(),
             #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
-    }
-}
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        // don't drop anything
     }
 }

@@ -1,6 +1,7 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
+    mem::MaybeUninit,
     ptr::{self},
     sync::atomic::{AtomicPtr, Ordering::*},
 };
@@ -79,7 +80,6 @@ where
     }
 
     fn combine(&self) {
-        #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
         let mut begin: u64;
 
@@ -101,13 +101,12 @@ where
                 let node = &mut *current.node.load(Acquire);
 
                 if !node.complete.load(Acquire) {
-                    node.data.get().write(
+                    node.data.get().write(MaybeUninit::new(
                         (self.delegate)(
                             self.data.get().as_mut().unwrap_unchecked(),
-                            ptr::read(node.data.get()),
-                        )
-                        .into(),
-                    );
+                            node.data.get().read().assume_init(),
+                        ),
+                    ));
 
                     let end = __rdtscp(&mut aux);
 
@@ -140,7 +139,7 @@ where
 
         let node = unsafe { &mut *node.get() };
 
-        node.data = data.into();
+        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -168,7 +167,7 @@ where
             }
         }
 
-        unsafe { ptr::read(node.data.get()) }
+        unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]

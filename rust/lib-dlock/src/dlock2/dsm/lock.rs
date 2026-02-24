@@ -12,7 +12,7 @@ use debug_unwraps::DebugUnwrapExt;
 use thread_local::ThreadLocal;
 
 use super::node::Node;
-use crate::{dlock2::DLock2Delegate, parker::Parker};
+use crate::dlock2::DLock2Delegate;
 
 #[derive(Debug)]
 struct ThreadData<T> {
@@ -78,30 +78,30 @@ where
         let toggled = thread_data.toggle.fetch_xor(1, AcqRel);
 
         unsafe {
-            let myNode = &(*thread_data.nodes.get())[(1 - toggled) as usize];
+            let my_node = &(*thread_data.nodes.get())[(1 - toggled) as usize];
 
-            myNode.wait.store_release(true);
-            myNode.completed.store_release(false);
-            myNode.next.store_release(null_mut());
+            my_node.wait.store_release(true);
+            my_node.completed.store_release(false);
+            my_node.next.store_release(null_mut());
 
             // announce the request
-            myNode.data.get().write(MaybeUninit::new(data));
+            my_node.data.get().write(MaybeUninit::new(data));
 
             // insert the node into the queue
-            let myPredNode = self.tail.swap(myNode.as_mut_ptr(), AcqRel);
+            let my_pred_node = self.tail.swap(my_node.as_mut_ptr(), AcqRel);
 
             // if a node already exists in the list
-            if !myPredNode.is_null() {
-                let predNode = myPredNode.as_mut().unwrap_unchecked();
+            if !my_pred_node.is_null() {
+                let pred_node = my_pred_node.as_mut().unwrap_unchecked();
 
-                predNode.next.store_release(myNode.as_mut_ptr());
+                pred_node.next.store_release(my_node.as_mut_ptr());
 
-                while myNode.wait.load_acquire() {
+                while my_node.wait.load_acquire() {
                     spin_loop();
                 }
 
-                if myNode.completed.load_acquire() {
-                    return myNode.data.get().read().assume_init();
+                if my_node.completed.load_acquire() {
+                    return my_node.data.get().read().assume_init();
                 }
             }
 
@@ -110,7 +110,7 @@ where
             #[cfg(feature = "combiner_stat")]
             let begin = __rdtscp(&mut aux);
 
-            let mut tmp_node = myNode;
+            let mut tmp_node = my_node;
 
             let mut counter: u32 = 0;
 
@@ -149,11 +149,11 @@ where
                     .compare_exchange(tmp_node.as_mut_ptr(), null_mut(), Acquire, Relaxed)
                     .is_ok()
                 {
-                    // The completed should always be true and wait should always be false because no other node is avaliable in the list
+                    // The completed should always be true and wait should always be false because no other node is available in the list
                     // It is not sure whether the acquire ordering is required because the current thread
-                    // should be the combinier which means it should handle its own node.
-                    if myNode.completed.load_acquire() {
-                        return myNode.data.get().read().assume_init();
+                    // should be the combiner which means it should handle its own node.
+                    if my_node.completed.load_acquire() {
+                        return my_node.data.get().read().assume_init();
                     }
 
                     unreachable!("This should not happen");
@@ -182,7 +182,7 @@ where
                 *thread_data.combiner_time_stat.get() += end - begin;
             }
 
-            return myNode.data.get().read().assume_init();
+            return my_node.data.get().read().assume_init();
         }
     }
 

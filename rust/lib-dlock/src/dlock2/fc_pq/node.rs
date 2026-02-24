@@ -15,7 +15,7 @@ pub enum ActiveState {
 pub struct Node<T> {
     pub usage: AtomicU64,
     pub active: CachePadded<AtomicBool>,
-    pub data: SyncUnsafeCell<T>,
+    pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
     pub combiner_time_stat: u64,
@@ -30,15 +30,9 @@ impl<T> Node<T> {
             usage: AtomicU64::new(0),
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
-            data: unsafe { MaybeUninit::uninit().assume_init() },
+            data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
-    }
-}
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        // don't drop anything
     }
 }

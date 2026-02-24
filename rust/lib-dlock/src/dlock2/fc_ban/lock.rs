@@ -1,8 +1,8 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::max,
-    ops::{Add, AddAssign},
+    mem::MaybeUninit,
+    ops::AddAssign,
     ptr::{self, null_mut, NonNull},
     sync::atomic::{AtomicI64, AtomicPtr, AtomicU32, Ordering::*},
 };
@@ -31,8 +31,6 @@ where
     pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     delegate: F,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicI64,
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<I>>,
@@ -50,8 +48,6 @@ where
         Self {
             pass: AtomicU32::new(0),
             combiner_lock: CachePadded::new(L::INIT),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicI64::new(0),
             delegate,
             data: SyncUnsafeCell::new(data),
@@ -95,14 +91,17 @@ where
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        let mut work_begin: u64;
+
         unsafe {
-            begin = __rdtscp(&mut aux);
+            let mut aux: u32 = 0;
+            work_begin = __rdtscp(&mut aux);
+
+            #[cfg(feature = "combiner_stat")]
+            {
+                begin = work_begin;
+            }
         }
-
-        let mut num_exec = unsafe { self.num_exec.get().read() };
-        let mut avg_cs = unsafe { self.avg_cs.get().read() };
-
-        let mut work_begin = begin;
 
         while let Some(current_nonnull) = current_ptr {
             let current = unsafe { current_nonnull.as_ref() };
@@ -115,13 +114,12 @@ where
                     // if banned, skip
 
                     if work_begin >= current.banned_until.get().read() {
-                        current.data.get().write(
+                        current.data.get().write(MaybeUninit::new(
                             (self.delegate)(
                                 self.data.get().as_mut().unwrap_unchecked(),
-                                ptr::read(current.data.get()),
-                            )
-                            .into(),
-                        );
+                                current.data.get().read().assume_init(),
+                            ),
+                        ));
                         current.complete.store(true, Release);
 
                         let work_end = __rdtscp(&mut aux);
@@ -140,11 +138,6 @@ where
             }
 
             current_ptr = NonNull::new(current.next.load(Acquire));
-        }
-
-        unsafe {
-            self.num_exec.get().write(num_exec);
-            self.avg_cs.get().write(avg_cs);
         }
 
         #[cfg(feature = "combiner_stat")]
@@ -201,7 +194,7 @@ where
 
         let node = unsafe { &mut *node.get() };
 
-        node.data = data.into();
+        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -233,7 +226,7 @@ where
             }
         }
 
-        unsafe { ptr::read(node.data.get()) }
+        unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]

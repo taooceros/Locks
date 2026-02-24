@@ -1,7 +1,7 @@
 use std::{
-    cell::{SyncUnsafeCell},
+    cell::SyncUnsafeCell,
     mem::MaybeUninit,
-    sync::atomic::{AtomicBool},
+    sync::atomic::AtomicBool,
 };
 
 use crossbeam::utils::CachePadded;
@@ -9,7 +9,7 @@ use crossbeam::utils::CachePadded;
 pub struct Node<T> {
     pub usage: u64,
     pub active: CachePadded<AtomicBool>,
-    pub data: SyncUnsafeCell<T>,
+    pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
     pub combiner_time_stat: u64,
@@ -24,15 +24,9 @@ impl<T> Node<T> {
             usage: 0,
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
-            data: unsafe { MaybeUninit::uninit().assume_init() },
+            data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
-    }
-}
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        // don't drop anything
     }
 }

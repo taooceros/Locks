@@ -1,8 +1,9 @@
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
+    mem::MaybeUninit,
     ptr::{self, null_mut, NonNull},
-    sync::atomic::{AtomicPtr, Ordering::*},
+    sync::atomic::{AtomicPtr, AtomicU32, Ordering::*},
 };
 
 use crossbeam::utils::{Backoff, CachePadded};
@@ -23,7 +24,7 @@ where
     F: Fn(&mut T, I) -> I,
     L: RawMutex,
 {
-    pass: SyncUnsafeCell<u32>,
+    pass: AtomicU32,
     combiner_lock: CachePadded<L>,
     delegate: F,
     data: SyncUnsafeCell<T>,
@@ -40,7 +41,7 @@ where
 {
     pub fn new(data: T, delegate: F) -> Self {
         Self {
-            pass: SyncUnsafeCell::new(0),
+            pass: AtomicU32::new(0),
             combiner_lock: CachePadded::new(L::INIT),
             delegate,
             data: SyncUnsafeCell::new(data),
@@ -76,16 +77,14 @@ where
     fn combine(&self) {
         let mut current_ptr = NonNull::new(self.head.load(Acquire));
 
-        let pass = unsafe { self.pass.get().read() };
-        unsafe {
-            self.pass.get().write(pass + 1);
-        }
+        let pass = self.pass.fetch_add(1, Relaxed);
 
         #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        #[cfg(feature = "combiner_stat")]
         unsafe {
             begin = __rdtscp(&mut aux);
         }
@@ -96,11 +95,10 @@ where
             if current.active.load(Acquire) && !current.complete.load(Acquire) {
                 unsafe {
                     (*current.age.get()) = pass;
-                    *current.data.get() = (self.delegate)(
+                    current.data.get().write(MaybeUninit::new((self.delegate)(
                         self.data.get().as_mut().unwrap_unchecked(),
-                        ptr::read(current.data.get()),
-                    )
-                    .into();
+                        current.data.get().read().assume_init(),
+                    )));
                 }
 
                 current.complete.store(true, Release);
@@ -156,7 +154,7 @@ where
 
         let node = unsafe { &mut *node.get() };
 
-        node.data = data.into();
+        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -165,7 +163,7 @@ where
             if self.combiner_lock.try_lock() {
                 self.combine();
                 unsafe {
-                    let pass = self.pass.get().read();
+                    let pass = self.pass.load(Relaxed);
 
                     if pass % CLEAN_UP_AGE == 0 {
                         self.clean_unactive_node(&self.head, pass);
@@ -179,21 +177,21 @@ where
                 }
             } else {
                 let backoff = Backoff::new();
-                let mut count = 8;
+                let mut count: u32 = 8;
                 loop {
                     if node.complete.load(Acquire) {
                         break 'outer;
                     }
                     backoff.spin();
-                    count -= 1;
-                    if count < 0 {
+                    count = count.wrapping_sub(1);
+                    if count == 0 {
                         continue 'outer;
                     }
                 }
             }
         }
 
-        unsafe { ptr::read(node.data.get()) }
+        unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]

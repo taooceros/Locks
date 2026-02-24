@@ -2,10 +2,10 @@ use crate::dlock2::DLock2;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    cmp::max,
+    mem::MaybeUninit,
     ops::AddAssign,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicI64, AtomicPtr, AtomicU64, Ordering::*},
+    sync::atomic::{AtomicPtr, AtomicU64, Ordering::*},
 };
 
 use crossbeam::utils::Backoff;
@@ -21,7 +21,7 @@ pub struct ThreadData<T> {
     pub combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CCBan<T, I, F>
 where
     F: DLock2Delegate<T, I>,
@@ -29,8 +29,6 @@ where
     delegate: F,
     data: SyncUnsafeCell<T>,
     tail: AtomicPtr<Node<I>>,
-    avg_cs: SyncUnsafeCell<i64>,
-    num_exec: SyncUnsafeCell<i64>,
     num_waiting_threads: AtomicU64,
     local_node: ThreadLocal<ThreadData<I>>,
 }
@@ -45,20 +43,12 @@ where
             data: SyncUnsafeCell::new(data),
             tail: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
             local_node: ThreadLocal::new(),
-            avg_cs: SyncUnsafeCell::new(0),
-            num_exec: SyncUnsafeCell::new(0),
             num_waiting_threads: AtomicU64::new(0),
         }
     }
 
     fn ban(&self, data: &ThreadData<I>, panelty: u64) {
         unsafe {
-            // println!(
-            //     "current cs {}; avg cs {}",
-            //     current_cs,
-            //     self.avg_cs.load_consume()
-            // );
-
             data.banned_until
                 .get()
                 .as_mut()
@@ -119,7 +109,7 @@ where
         let current_node = unsafe { current_ptr.as_ref().unwrap_unchecked() };
 
         unsafe {
-            *current_node.data.get() = data;
+            current_node.data.get().write(MaybeUninit::new(data));
             current_node.next.store(next_node, Release);
             self.local_node
                 .get()
@@ -128,12 +118,9 @@ where
                 .store(current_ptr, Relaxed)
         }
 
-        let backoff = Backoff::new();
-
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
             // spin
-            // backoff.snooze();
         }
 
         // check whether the current node is completed
@@ -141,7 +128,7 @@ where
             unsafe {
                 self.ban(thread_data, current_node.panelty.get().read());
             }
-            return unsafe { ptr::read(current_node.data.get()) };
+            return unsafe { current_node.data.get().read().assume_init() };
         }
 
         // combiner
@@ -155,7 +142,10 @@ where
 
         let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
 
-        let mut work_begin = begin;
+        let mut work_begin: u64;
+        unsafe {
+            work_begin = __rdtscp(&mut aux);
+        }
 
         while let Some(next_nonnull) = next_ptr {
             if counter >= H {
@@ -166,19 +156,18 @@ where
             let next_node = unsafe { next_nonnull.as_ref() };
 
             unsafe {
-                ptr::write(
-                    tmp_node.data.get(),
+                tmp_node.data.get().write(MaybeUninit::new(
                     (self.delegate)(
                         self.data.get().as_mut().unwrap_unchecked(),
-                        ptr::read(tmp_node.data.get()),
+                        tmp_node.data.get().read().assume_init(),
                     ),
-                );
+                ));
                 let work_end = __rdtscp(&mut aux);
 
                 tmp_node.completed.store(true, Release);
                 tmp_node.wait.store(false, Release);
 
-                let cs = work_end - work_begin;;
+                let cs = work_end - work_begin;
                 tmp_node
                     .panelty
                     .get()
@@ -204,7 +193,7 @@ where
             (*thread_data.combiner_time_stat.get()) += end - begin;
         }
 
-        return unsafe { current_node.data.get().read() };
+        return unsafe { current_node.data.get().read().assume_init() };
     }
 
     #[cfg(feature = "combiner_stat")]

@@ -2,12 +2,11 @@ use derivative::Derivative;
 use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::mem::MaybeUninit;
 use std::thread::current;
 use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
-    mem::transmute,
     ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
@@ -16,15 +15,12 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
-use crate::{__jmp_buf, rand};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
     spin_lock::RawSpinLock,
 };
-
-use arrayvec::ArrayVec;
 
 mod buffer;
 
@@ -110,7 +106,6 @@ where
     }
 
     fn combine(&self) {
-        #[cfg(feature = "combiner_stat")]
         let mut aux: u32 = 0;
         let mut begin: u64;
 
@@ -164,13 +159,12 @@ where
                     // which would result in a slightly inaccurate usage
                     begin = __rdtscp(&mut aux);
 
-                    node.data.get().write(
+                    node.data.get().write(MaybeUninit::new(
                         (self.delegate)(
                             self.data.get().as_mut().unwrap_unchecked(),
-                            ptr::read(node.data.get()),
-                        )
-                        .into(),
-                    );
+                            node.data.get().read().assume_init(),
+                        ),
+                    ));
 
                     let end = __rdtscp(&mut aux);
 
@@ -229,7 +223,7 @@ where
 
         let node = unsafe { &mut *node.get() };
 
-        node.data = data.into();
+        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -259,7 +253,7 @@ where
             }
         }
 
-        unsafe { ptr::read(node.data.get()) }
+        unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]
