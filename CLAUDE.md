@@ -12,9 +12,13 @@ Research project implementing **usage-fair delegation locks** in Rust, targeting
 
 **Core thesis:** Delegation locks decouple fairness from data locality. Shared data stays in the combiner's L1 regardless of serving order, so reordering for fairness is essentially free — unlike traditional locks (CFL, MCS) where fair handoff forces cross-core cache migration.
 
-## Build
+## Workflow
 
-All Rust code lives under `rust/`. Requires nightly Rust, GCC/Clang, x86_64. Always use `--release` (debug builds are extremely slow for concurrent code). See [rust/README.md](rust/README.md) for full CLI reference.
+Read spec before reading code.
+
+## Build & Test
+
+See [BUILD.md](BUILD.md) for all commands, workspace layout gotchas, and troubleshooting.
 
 ## Research Context
 

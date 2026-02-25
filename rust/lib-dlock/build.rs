@@ -23,8 +23,10 @@ fn main() {
             "../../c/CCsynch/ccsynch.c",
             "../../c/FlatCombining/original/flatcombining.c",
             "../../c/u-scl/fairlock.c",
+            "../../c/shfllock/aqs.c",
         ])
         .include("../../c/shared")
+        .include("../../c/shfllock")
         .opt_level(2)
         .warnings(false)
         .compile("dlock");

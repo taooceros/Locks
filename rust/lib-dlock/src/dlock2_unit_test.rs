@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     dlock2::{
+        c_aqs::RawCAqs,
         cc::CCSynch,
         cc_ban::CCBan,
         dsm::DSMSynch,
@@ -16,6 +17,7 @@ use crate::{
         fc_pq::{UsageNode, FCPQ},
         fc_sl::FCSL,
         mcs::RawMcsLock,
+        shfl_lock::RawShflLock,
         spinlock::DLock2Wrapper,
         DLock2,
     },
@@ -213,4 +215,14 @@ dlock2_counter_tests!(fc_pq_bheap, FCPQBHeap::new(0_u64, counter_delegate));
 dlock2_counter_tests!(
     mcs,
     DLock2Wrapper::<u64, u64, Delegate, RawMcsLock>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    shfl_lock,
+    DLock2Wrapper::<u64, u64, Delegate, RawShflLock>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    c_aqs,
+    DLock2Wrapper::<u64, u64, Delegate, RawCAqs>::new(0_u64, counter_delegate)
 );

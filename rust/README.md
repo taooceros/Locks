@@ -46,7 +46,7 @@ GLOBAL OPTIONS:
 
 ### DLock2 Lock Targets (`--lock-targets`)
 
-`fc`, `fc-ban`, `cc`, `cc-ban`, `dsm`, `fc-sl`, `fc-pq-b-tree`, `fc-pq-b-heap`, `spin-lock`, `mcs`, `mutex`, `uscl`, `fc-c`, `cc-c`
+`fc`, `fc-ban`, `cc`, `cc-ban`, `dsm`, `fc-sl`, `fc-pq-b-tree`, `fc-pq-b-heap`, `spin-lock`, `mcs`, `mutex`, `uscl`, `fc-c`, `cc-c`, `shfl-lock`, `aqs-c`
 
 ### Examples
 

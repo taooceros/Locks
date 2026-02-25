@@ -11,7 +11,9 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock, mutex::DLock2Mutex, spinlock::DLock2Wrapper, uscl::DLock2USCL
+    c_aqs::RawCAqs, cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL,
+    mcs::RawMcsLock, mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
+    uscl::DLock2USCL,
 };
 
 pub mod cc;
@@ -27,6 +29,8 @@ pub mod mcs;
 pub mod spinlock;
 pub mod uscl;
 pub mod fc_pq;
+pub mod shfl_lock;
+pub mod c_aqs;
 
 pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
 impl<T, I, F> DLock2Delegate<T, I> for F where F: Fn(&mut T, I) -> I + Send + Sync {}
@@ -62,4 +66,6 @@ where
     USCL(DLock2USCL<T, I, F>),
     C_FC(CFlatCombining<T, F, I>),
     C_CC(CCCSynch<T, F, I>),
+    ShflLock(DLock2Wrapper<T, I, F, RawShflLock>),
+    C_AQS(DLock2Wrapper<T, I, F, RawCAqs>),
 }

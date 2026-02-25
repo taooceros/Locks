@@ -13,8 +13,9 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, fc::FC, fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex, spinlock::DLock2Wrapper,
-        uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
+        self, c_aqs::RawCAqs, fc::FC, fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex,
+        shfl_lock::RawShflLock, spinlock::DLock2Wrapper, uscl::DLock2USCL, DLock2Delegate,
+        DLock2Impl,
     },
     parker::Parker,
     spin_lock::{RawSpinLock, SpinLock},
@@ -135,6 +136,10 @@ pub enum DLock2Target {
     CcC,
     /// Benchmark MCS queue spin lock
     MCS,
+    /// Benchmark ShflLock (Rust)
+    ShflLock,
+    /// Benchmark ShflLock AQS (C)
+    AqsC,
 }
 
 impl DLock2Target {
@@ -153,7 +158,9 @@ impl DLock2Target {
             DLock2Target::Mutex
             | DLock2Target::SpinLock
             | DLock2Target::USCL
-            | DLock2Target::MCS => false,
+            | DLock2Target::MCS
+            | DLock2Target::ShflLock
+            | DLock2Target::AqsC => false,
         }
     }
 
@@ -182,6 +189,8 @@ impl DLock2Target {
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
             DLock2Target::FcC => CFlatCombining::new(data, f).into(),
             DLock2Target::CcC => CCCSynch::new(data, f).into(),
+            DLock2Target::ShflLock => DLock2Wrapper::<_, _, _, RawShflLock>::new(data, f).into(),
+            DLock2Target::AqsC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
         })
     }
 }
