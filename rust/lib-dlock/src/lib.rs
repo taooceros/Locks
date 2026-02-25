@@ -12,6 +12,8 @@ mod syncptr;
 pub mod u_scl;
 #[cfg(test)]
 mod unit_test;
+#[cfg(test)]
+mod dlock2_unit_test;
 
 pub mod dlock;
 pub mod dlock2;
