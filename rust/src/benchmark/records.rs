@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fs::File,
     path::Path,
-    time::Duration,
+    sync::atomic::Ordering,
 };
 
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
@@ -40,11 +40,15 @@ pub struct Records {
     pub num_acquire: u64,
     pub cs_length: u64,
     pub duration: u64,
+    /// Trial index (0-based) within a multi-trial run.
+    pub trial: u64,
     pub non_cs_length: Option<u64>,
     pub combiner_latency: Vec<u64>,
     pub waiter_latency: Vec<u64>,
     pub hold_time: u64,
     pub combine_time: Option<u64>,
+    pub jfi: f64,
+    pub normalized_share: f64,
     pub locktype: String,
     pub waiter_type: String,
 }
@@ -55,6 +59,7 @@ impl Records {
             cpu_num: bencher.num_cpu,
             thread_num: bencher.num_thread,
             duration: bencher.duration,
+            trial: bencher.trial.load(Ordering::Relaxed),
             ..Default::default()
         }
     }

@@ -14,7 +14,7 @@ use std::{
 
 use bitvec::prelude::*;
 use itertools::izip;
-use libdlock::{dlock2::DLock2, FILENAME_MAX};
+use libdlock::dlock2::DLock2;
 
 use crate::{
     benchmark::{
@@ -178,14 +178,20 @@ fn start_benchmark<L>(
 where
     L: DLock2<Data> + 'static + Display,
 {
-    println!("Start benchmark for {}", lock);
+    println!(
+        "Start benchmark for {} (warmup={}s, duration={}s, trial={})",
+        lock,
+        bencher.warmup,
+        bencher.duration,
+        bencher.current_trial(),
+    );
 
     let stop_signal = Arc::new(AtomicBool::new(false));
+    // Starts as `false` when warmup > 0 so threads skip accumulation during warmup.
+    let warmup_done = Arc::new(AtomicBool::new(bencher.warmup == 0));
 
     let core_ids = core_affinity::get_core_ids().unwrap();
     let core_ids = core_ids.iter().take(bencher.num_thread);
-
-    // println!("{:?}", bencher);
 
     thread::scope(move |scope| {
         let handles = izip!(cs_loop.cycle(), non_cs_loop.cycle(), core_ids.cycle(),)
@@ -195,6 +201,7 @@ where
                 let lock_ref = lock.clone();
                 let core_id = *core_id;
                 let stop_signal = stop_signal.clone();
+                let warmup_done = warmup_done.clone();
                 let stat_response_time = bencher.stat_response_time;
 
                 scope.spawn(move || {
@@ -203,8 +210,8 @@ where
                     let stop_signal = stop_signal;
                     let mut latencies = vec![];
                     let mut is_combiners: BitVec<usize, Lsb0> = BitVec::new();
-                    let mut loop_count = 0;
-                    let mut num_acquire = 0;
+                    let mut loop_count = 0u64;
+                    let mut num_acquire = 0u64;
                     let mut aux = 0;
 
                     let data = Data::Input {
@@ -212,10 +219,13 @@ where
                         thread_id: current().id(),
                     };
 
-                    let mut hold_time = 0;
+                    let mut hold_time = 0u64;
 
                     while !stop_signal.load(Ordering::Acquire) {
-                        let begin = if stat_response_time {
+                        // Only accumulate stats after warmup has elapsed.
+                        let measuring = warmup_done.load(Ordering::Acquire);
+
+                        let begin = if stat_response_time && measuring {
                             unsafe { __rdtscp(&mut aux) }
                         } else {
                             0
@@ -223,35 +233,35 @@ where
 
                         let output = lock_ref.lock(data);
 
-                        num_acquire += 1;
-
                         if let Data::Output {
                             is_combiner,
                             hold_time: current_hold_time,
                             ..
                         } = output
                         {
-                            if stat_response_time {
-                                let end = unsafe { __rdtscp(&mut aux) };
-                                latencies.push(end - begin);
-                                is_combiners.push(is_combiner);
-                            }
+                            if measuring {
+                                num_acquire += 1;
 
-                            if stat_hold_time {
-                                hold_time += current_hold_time;
+                                if stat_response_time {
+                                    let end = unsafe { __rdtscp(&mut aux) };
+                                    latencies.push(end - begin);
+                                    is_combiners.push(is_combiner);
+                                }
+
+                                if stat_hold_time {
+                                    hold_time += current_hold_time;
+                                }
+
+                                loop_count += cs_loop;
                             }
                         } else {
                             unreachable!();
                         }
 
-                        loop_count += cs_loop;
-
                         for i in 0..non_cs_loop {
                             black_box(i);
                         }
                     }
-
-                    // make the branch prediction fail at the end
 
                     let combiner_count = is_combiners.count_ones();
 
@@ -286,6 +296,13 @@ where
             })
             .collect::<Vec<_>>();
 
+        // Warmup phase: threads run but stats are not counted.
+        if bencher.warmup > 0 {
+            thread::sleep(Duration::from_secs(bencher.warmup));
+            warmup_done.store(true, Ordering::Release);
+        }
+
+        // Measurement phase.
         thread::sleep(Duration::from_secs(bencher.duration));
 
         stop_signal.store(true, Ordering::Release);
@@ -297,11 +314,11 @@ where
     })
 }
 
-fn finish_benchmark<'a>(
+fn finish_benchmark(
     output_path: &Path,
     file_name: &str,
     lock_name: &str,
-    records: impl AsRef<Vec<Records>>,
+    mut records: Vec<Records>,
 ) {
     let folder = output_path.join(lock_name);
 
@@ -309,9 +326,43 @@ fn finish_benchmark<'a>(
         std::fs::create_dir_all(&folder).unwrap();
     }
 
-    let records = records.as_ref();
+    // Compute Jain's Fairness Index and per-thread normalized share from hold_time.
+    // Only meaningful when hold_time tracking is enabled (i.e. not all zeros).
+    let n = records.len();
+    let any_hold_time = records.iter().any(|r| r.hold_time > 0);
+    if n > 0 && any_hold_time {
+        let hold_times: Vec<f64> = records.iter().map(|r| r.hold_time as f64).collect();
+        let sum: f64 = hold_times.iter().sum();
+        let sum_sq: f64 = hold_times.iter().map(|&x| x * x).sum();
 
-    write_results(&folder, file_name, records);
+        // JFI = (Σxi)² / (n · Σxi²)
+        let jfi = if sum_sq > 0.0 {
+            (sum * sum) / (n as f64 * sum_sq)
+        } else {
+            1.0
+        };
+
+        let mean = sum / n as f64;
+        let normalized_shares: Vec<f64> = hold_times
+            .iter()
+            .map(|&x| if mean > 0.0 { x / mean } else { 1.0 })
+            .collect();
+
+        for (record, &ns) in records.iter_mut().zip(normalized_shares.iter()) {
+            record.jfi = jfi;
+            record.normalized_share = ns;
+        }
+
+        let shares_str: Vec<String> = normalized_shares
+            .iter()
+            .map(|&x| format!("{:.4}", x))
+            .collect();
+        println!("Fairness Metrics:");
+        println!("  JFI: {:.4}", jfi);
+        println!("  Per-thread normalized share: [{}]", shares_str.join(", "));
+    }
+
+    write_results(&folder, file_name, &records);
 
     for record in records.iter() {
         println!("{}", record.loop_count);

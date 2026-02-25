@@ -29,6 +29,12 @@ pub struct GlobalOpts {
     pub stat_response_time: bool,
     #[arg(global = true, long, short, default_value = "5")]
     pub duration: u64,
+    /// Warmup period in seconds (threads run but stats are not counted).
+    #[arg(global = true, long, default_value = "2")]
+    pub warmup: u64,
+    /// Number of independent trial runs per configuration.
+    #[arg(global = true, long, default_value = "1")]
+    pub trials: u64,
     #[arg(global = true, long, short)]
     pub verbose: bool,
 }

@@ -12,7 +12,29 @@ use command_parser::*;
 mod benchmark;
 mod command_parser;
 
+/// Print CPU model, logical core count, and kernel version from /proc.
+fn print_env_info() {
+    if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+        let model = cpuinfo
+            .lines()
+            .find(|l| l.starts_with("model name"))
+            .and_then(|l| l.split(':').nth(1))
+            .map(str::trim)
+            .unwrap_or("unknown");
+        let cores = cpuinfo
+            .lines()
+            .filter(|l| l.starts_with("processor"))
+            .count();
+        println!("CPU: {} ({} logical cores)", model, cores);
+    }
+    if let Ok(version) = std::fs::read_to_string("/proc/version") {
+        println!("Kernel: {}", version.trim());
+    }
+}
+
 fn main() {
+    print_env_info();
+
     let mut app = App::parse();
 
     if app.global_opts.cpus.len() != 1 {

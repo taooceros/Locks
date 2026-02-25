@@ -28,6 +28,8 @@ pub fn benchmark(
             .into_boxed_path(),
         options.stat_response_time,
         options.duration,
+        options.warmup,
+        options.trials,
         options.verbose,
     );
 

@@ -1,4 +1,10 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use libdlock::dlock::BenchmarkType;
 
@@ -18,6 +24,12 @@ pub struct Bencher<'a> {
     pub output_path: Box<Path>,
     pub stat_response_time: bool,
     pub duration: u64,
+    /// Warmup duration in seconds. Threads run but do not accumulate stats.
+    pub warmup: u64,
+    /// Total number of independent trials to run per configuration.
+    pub trials: u64,
+    /// Current trial index (0-based); written by the dispatch loop, read by workers via `from_bencher`.
+    pub trial: AtomicU64,
     pub verbose: bool,
 }
 
@@ -29,6 +41,8 @@ impl<'a> Bencher<'a> {
         output_path: Box<Path>,
         stat_response_time: bool,
         duration: u64,
+        warmup: u64,
+        trials: u64,
         verbose: bool,
     ) -> Self {
         Self {
@@ -38,8 +52,16 @@ impl<'a> Bencher<'a> {
             output_path,
             stat_response_time,
             duration,
+            warmup,
+            trials,
+            trial: AtomicU64::new(0),
             verbose,
         }
+    }
+
+    /// Returns the current trial index (for use in Records).
+    pub fn current_trial(&self) -> u64 {
+        self.trial.load(Ordering::Relaxed)
     }
 
     pub fn benchmark(&self) {
