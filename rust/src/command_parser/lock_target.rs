@@ -13,11 +13,11 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, fc::FC, fc_ban::FCBan, fc_pq::UsageNode, mutex::DLock2Mutex, spinlock::DLock2Wrapper,
+        self, fc::FC, fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex, spinlock::DLock2Wrapper,
         uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
-    spin_lock::SpinLock,
+    spin_lock::{RawSpinLock, SpinLock},
     u_scl::USCL,
 };
 use serde::Serialize;
@@ -133,6 +133,8 @@ pub enum DLock2Target {
     FcC,
     /// Benchmark CCSynch (C)
     CcC,
+    /// Benchmark MCS queue spin lock
+    MCS,
 }
 
 impl DLock2Target {
@@ -148,7 +150,7 @@ impl DLock2Target {
             | DLock2Target::FcSL
             | DLock2Target::FcPqBHeap
             | DLock2Target::FcPqBTree => true,
-            DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL => false,
+            DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL | DLock2Target::MCS => false,
         }
     }
 
@@ -171,7 +173,8 @@ impl DLock2Target {
             DLock2Target::FcPqBHeap => {
                 dlock2::fc_pq::FCPQ::<T, I, BinaryHeap<_>, F>::new(data, f).into()
             }
-            DLock2Target::SpinLock => DLock2Wrapper::new(data, f).into(),
+            DLock2Target::SpinLock => DLock2Wrapper::<_, _, _, RawSpinLock>::new(data, f).into(),
+            DLock2Target::MCS => DLock2Wrapper::<_, _, _, RawMcsLock>::new(data, f).into(),
             DLock2Target::Mutex => DLock2Mutex::new(data, f).into(),
             DLock2Target::USCL => DLock2USCL::new(data, f).into(),
             DLock2Target::FcC => CFlatCombining::new(data, f).into(),
