@@ -22,6 +22,17 @@ where
     phantom: std::marker::PhantomData<I>,
 }
 
+// SAFETY: The C flat-combining lock serialises all concurrent accesses; the
+// shared state is never touched outside the combiner critical section, and
+// `fc_lock_t` is designed for multi-threaded use.
+unsafe impl<T, F, I> Send for CFlatCombining<T, F, I>
+where
+    T: Sized,
+    F: DLock2Delegate<T, I>,
+    I: Send,
+{
+}
+
 unsafe impl<T, F, I> Sync for CFlatCombining<T, F, I>
 where
     T: Sized,

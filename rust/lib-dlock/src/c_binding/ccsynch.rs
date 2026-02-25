@@ -22,6 +22,17 @@ where
     phantom: std::marker::PhantomData<I>,
 }
 
+// SAFETY: The C CC-Synch lock serialises all concurrent accesses; the shared
+// state is only accessed by the current combiner, and `cc_synch_t` is designed
+// for multi-threaded use.
+unsafe impl<T, F, I> Send for CCCSynch<T, F, I>
+where
+    T: Sized,
+    F: DLock2Delegate<T, I>,
+    I: Send,
+{
+}
+
 unsafe impl<T, F, I> Sync for CCCSynch<T, F, I>
 where
     T: Sized,
