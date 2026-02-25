@@ -150,7 +150,10 @@ impl DLock2Target {
             | DLock2Target::FcSL
             | DLock2Target::FcPqBHeap
             | DLock2Target::FcPqBTree => true,
-            DLock2Target::Mutex | DLock2Target::SpinLock | DLock2Target::USCL | DLock2Target::MCS => false,
+            DLock2Target::Mutex
+            | DLock2Target::SpinLock
+            | DLock2Target::USCL
+            | DLock2Target::MCS => false,
         }
     }
 
