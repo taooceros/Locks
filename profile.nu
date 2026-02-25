@@ -1,5 +1,3 @@
-cd rust
-
 let simple_cs = "1,3"
 let dlock2 = "target/release/dlock"
 
@@ -43,6 +41,5 @@ let locks = [
 let thread_num = 36
 
 for lock in $locks {
-    perf stat -e $perf_arg $dlock2 d-lock2 -t $thread_num --lock-targets $lock counter-proportional --cs ($simple_cs) --non-cs 0 -d $duration out> $"../profiles/dlock2-($lock).txt" err> $"../profiles/dlock2-($lock).stats"
+    perf stat -e $perf_arg $dlock2 d-lock2 -t $thread_num --lock-targets $lock counter-proportional --cs ($simple_cs) --non-cs 0 -d $duration out> $"profiles/dlock2-($lock).txt" err> $"profiles/dlock2-($lock).stats"
 }
-

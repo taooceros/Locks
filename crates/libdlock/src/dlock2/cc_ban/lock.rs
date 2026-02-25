@@ -1,0 +1,205 @@
+use crate::dlock2::DLock2;
+use std::{
+    arch::x86_64::__rdtscp,
+    cell::SyncUnsafeCell,
+    mem::MaybeUninit,
+    ops::AddAssign,
+    ptr::{self, NonNull},
+    sync::atomic::{AtomicPtr, AtomicU64, Ordering::*},
+};
+
+use crossbeam::utils::Backoff;
+use thread_local::ThreadLocal;
+
+use super::node::Node;
+use crate::dlock2::DLock2Delegate;
+
+#[derive(Debug)]
+pub struct ThreadData<T> {
+    pub(crate) node: AtomicPtr<Node<T>>,
+    pub(crate) banned_until: SyncUnsafeCell<u64>,
+    pub combiner_time_stat: SyncUnsafeCell<u64>,
+}
+
+#[derive(Debug)]
+pub struct CCBan<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
+    delegate: F,
+    data: SyncUnsafeCell<T>,
+    tail: AtomicPtr<Node<I>>,
+    num_waiting_threads: AtomicU64,
+    local_node: ThreadLocal<ThreadData<I>>,
+}
+
+impl<T, I, F> CCBan<T, I, F>
+where
+    F: DLock2Delegate<T, I>,
+{
+    pub fn new(data: T, delegate: F) -> Self {
+        Self {
+            delegate,
+            data: SyncUnsafeCell::new(data),
+            tail: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
+            local_node: ThreadLocal::new(),
+            num_waiting_threads: AtomicU64::new(0),
+        }
+    }
+
+    fn ban(&self, data: &ThreadData<I>, penalty: u64) {
+        unsafe {
+            data.banned_until
+                .get()
+                .as_mut()
+                .unwrap_unchecked()
+                .add_assign(penalty);
+        }
+    }
+}
+
+const H: u32 = 16;
+
+unsafe impl<T, I, F> DLock2<I> for CCBan<T, I, F>
+where
+    T: Send + Sync,
+    F: DLock2Delegate<T, I>,
+{
+    fn lock(&self, data: I) -> I {
+        let thread_data = self.local_node.get_or(|| {
+            self.num_waiting_threads.fetch_add(1, Relaxed);
+
+            let current_tsc = unsafe {
+                let mut aux = 0;
+                __rdtscp(&mut aux)
+            };
+
+            ThreadData {
+                node: AtomicPtr::new(Box::leak(Box::new(Node::default()))),
+                banned_until: current_tsc.into(),
+                combiner_time_stat: 0.into(),
+            }
+        });
+
+        let mut aux = 0;
+
+        unsafe {
+            let banned_until = thread_data.banned_until.get().read();
+
+            let backoff = Backoff::default();
+            loop {
+                let current = __rdtscp(&mut aux);
+
+                if current >= banned_until {
+                    break;
+                }
+                backoff.snooze();
+            }
+        }
+
+        let mut aux = 0;
+        // use thread local node as next node
+        let next_node = unsafe { &mut *thread_data.node.load(Acquire) };
+
+        next_node.next.store(std::ptr::null_mut(), Release);
+        next_node.wait.store(true, Release);
+        next_node.completed.store(false, Release);
+
+        let current_ptr = self.tail.swap(next_node, AcqRel);
+        let current_node = unsafe { current_ptr.as_ref().unwrap_unchecked() };
+
+        unsafe {
+            current_node.data.get().write(MaybeUninit::new(data));
+            current_node.next.store(next_node, Release);
+            self.local_node
+                .get()
+                .unwrap_unchecked()
+                .node
+                .store(current_ptr, Relaxed)
+        }
+
+        // wait for the current node to be waked
+        while current_node.wait.load(Acquire) {
+            // spin
+        }
+
+        // check whether the current node is completed
+        if current_node.completed.load(Acquire) {
+            unsafe {
+                self.ban(thread_data, current_node.penalty.get().read());
+            }
+            return unsafe { current_node.data.get().read().assume_init() };
+        }
+
+        // combiner
+
+        #[cfg(feature = "combiner_stat")]
+        let begin = unsafe { __rdtscp(&mut aux) };
+
+        let mut tmp_node = current_node;
+
+        let mut counter: u32 = 0;
+
+        let mut next_ptr = NonNull::new(tmp_node.next.load(Acquire));
+
+        let mut work_begin: u64;
+        unsafe {
+            work_begin = __rdtscp(&mut aux);
+        }
+
+        while let Some(next_nonnull) = next_ptr {
+            if counter >= H {
+                break;
+            }
+
+            counter += 1;
+            let next_node = unsafe { next_nonnull.as_ref() };
+
+            unsafe {
+                tmp_node.data.get().write(MaybeUninit::new((self.delegate)(
+                    self.data.get().as_mut().unwrap_unchecked(),
+                    tmp_node.data.get().read().assume_init(),
+                )));
+                let work_end = __rdtscp(&mut aux);
+
+                tmp_node.completed.store(true, Release);
+                tmp_node.wait.store(false, Release);
+
+                let cs = work_end - work_begin;
+                tmp_node
+                    .penalty
+                    .get()
+                    .write(cs * (self.num_waiting_threads.load(Relaxed)));
+
+                work_begin = work_end;
+            }
+
+            tmp_node = next_node;
+            next_ptr = NonNull::new(tmp_node.next.load(Acquire));
+        }
+
+        tmp_node.wait.store(false, Release);
+
+        unsafe {
+            self.ban(thread_data, current_node.penalty.get().read());
+        }
+
+        #[cfg(feature = "combiner_stat")]
+        unsafe {
+            let end = __rdtscp(&mut aux);
+
+            (*thread_data.combiner_time_stat.get()) += end - begin;
+        }
+
+        return unsafe { current_node.data.get().read().assume_init() };
+    }
+
+    #[cfg(feature = "combiner_stat")]
+    fn get_combine_time(&self) -> Option<u64> {
+        unsafe {
+            self.local_node
+                .get()
+                .map(|local_node| (*local_node.combiner_time_stat.get()))
+        }
+    }
+}

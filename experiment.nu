@@ -1,5 +1,3 @@
-cd rust
-
 cargo build --release
 
 let threads = seq 1 6 | each { |it| 2 ** $it} | str join ","

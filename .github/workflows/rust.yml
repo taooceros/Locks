@@ -13,9 +13,6 @@ jobs:
   build:
     permissions: write-all
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rust
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,12 +39,12 @@ jobs:
           components: rustfmt, clippy
       - uses: mbrobbel/rustfmt-check@master
         with:
-          args: --manifest-path=rust/Cargo.toml
+          args: --manifest-path=Cargo.toml
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Load/Store Cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "rust -> rust/target"
+          workspaces: ". -> target"
       - name: Build
         run: CC=gcc cargo build --release --verbose
         

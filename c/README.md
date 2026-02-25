@@ -1,6 +1,6 @@
 # c/ — C Reference Implementations
 
-Reference C lock implementations used for cross-language comparison. Compiled by `rust/lib-dlock/build.rs` via the `cc` crate and accessed through `bindgen`-generated FFI bindings.
+Reference C lock implementations used for cross-language comparison. Compiled by `crates/libdlock/build.rs` via the `cc` crate and accessed through `bindgen`-generated FFI bindings.
 
 ## Compiled Sources
 
@@ -22,7 +22,7 @@ Reference C lock implementations used for cross-language comparison. Compiled by
 
 ## Build Configuration
 
-Defined in `rust/lib-dlock/build.rs`:
+Defined in `crates/libdlock/build.rs`:
 - `CYCLE_PER_US = 2400` (assumed CPU frequency for timing)
 - `FC_THREAD_MAX_CYCLE = CYCLE_PER_MS` (FC combiner time limit)
 - Optimization: `-O2`

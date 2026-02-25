@@ -18,7 +18,7 @@ Read spec before reading code.
 
 ## Build & Test
 
-See [BUILD.md](BUILD.md) for all commands, workspace layout gotchas, and troubleshooting.
+See [BUILD.md](BUILD.md) for all commands and troubleshooting.
 
 ## Research Context
 
@@ -32,12 +32,12 @@ See [BUILD.md](BUILD.md) for all commands, workspace layout gotchas, and trouble
 
 | Component | Spec |
 |-----------|------|
-| Binary crate (`dlock`): CLI, benchmarks | [rust/README.md](rust/README.md) |
-| Library crate (`libdlock`): locks, traits, tests | [rust/lib-dlock/README.md](rust/lib-dlock/README.md) |
-| DLock2 (function-delegate locks, primary API) | [rust/lib-dlock/src/dlock2/README.md](rust/lib-dlock/src/dlock2/README.md) |
-| DLock1 (callback-based locks, legacy API) | [rust/lib-dlock/src/dlock/README.md](rust/lib-dlock/src/dlock/README.md) |
-| Parker (thread waiting strategies) | [rust/lib-dlock/src/parker/README.md](rust/lib-dlock/src/parker/README.md) |
-| Benchmark harness | [rust/src/benchmark/README.md](rust/src/benchmark/README.md) |
+| Binary crate (`dlock`): CLI, benchmarks | [README.md](README.md) |
+| Library crate (`libdlock`): locks, traits, tests | [crates/libdlock/README.md](crates/libdlock/README.md) |
+| DLock2 (function-delegate locks, primary API) | [crates/libdlock/src/dlock2/README.md](crates/libdlock/src/dlock2/README.md) |
+| DLock1 (callback-based locks, legacy API) | [crates/libdlock/src/dlock/README.md](crates/libdlock/src/dlock/README.md) |
+| Parker (thread waiting strategies) | [crates/libdlock/src/parker/README.md](crates/libdlock/src/parker/README.md) |
+| Benchmark harness | [src/benchmark/README.md](src/benchmark/README.md) |
 | C reference implementations | [c/README.md](c/README.md) |
 
 ## CI
