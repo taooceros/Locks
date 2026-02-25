@@ -6,15 +6,11 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ## Phase 0: Foundation & Cleanup
 
-- [ ] **Implement Jain's Fairness Index computation.**
-  Add JFI calculation to the benchmark output pipeline. Input: per-thread
-  lock-holding time vector. Output: single float in [1/n, 1.0]. This is
-  a prerequisite for every fairness table in the paper.
+- [x] **Implement Jain's Fairness Index computation.**
+  *(Done: `a3131ac` — JFI computed from hold_time in `finish_benchmark()`.)*
 
-- [ ] **Add per-thread normalized share output (U-SCL style).**
-  For each thread, compute `actual_lock_holding_time / (total_lock_time / N)`.
-  Perfectly fair = 1.0 for all threads. Output alongside raw counters in
-  Arrow/CSV. This is the primary fairness visualization.
+- [x] **Add per-thread normalized share output (U-SCL style).**
+  *(Done: `a3131ac` — `normalized_share` field in Records, printed per run.)*
 
 - [ ] **Add response time CDF output.**
   Currently latencies are collected as `Vec<u64>`. Add percentile computation
@@ -33,9 +29,9 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   - Full experiment suite (all configs, 15s each)
   - Response time focused (fewer configs, --stat-response-time)
 
-- [ ] **Stabilize DSMSynch implementation.**
-  Verify correctness under stress (high thread counts, long duration). The
-  double-buffer swap mechanism is subtle — add a targeted correctness test.
+- [x] **Stabilize DSMSynch implementation.**
+  *(Done: `dfc261e` — multi-threaded correctness tests added for all DLock2
+  variants including DSM at 2/4/8 threads.)*
 
 ---
 
@@ -51,9 +47,9 @@ L1 regardless of serving order.
   standalone wrapped baseline). This is NOT optional — CFL is the direct
   comparison point for our fairness-is-free argument.
 
-- [ ] **Implement MCS lock in DLock2 framework.**
-  MCS is the canonical acquisition-fair (FIFO) queue spin lock. Needed as
-  the "unfair traditional lock" baseline alongside CFL.
+- [x] **Implement MCS lock in DLock2 framework.**
+  *(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`,
+  uses per-lock ThreadLocal for queue nodes.)*
 
 - [ ] **Run the tradeoff experiment.**
   - Workload: proportional counter with 3:1 CS ratio, 8/16/32 threads
@@ -116,11 +112,9 @@ L1 regardless of serving order.
 Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 (see RESEARCH_PLAN.md Section 4.6).
 
-- [ ] **Newcomer usage initialization (from CFL).**
-  FC-PQ/FC-SL currently initialize new threads' usage to 0, causing them to
-  be served before all existing threads. Initialize to the current average
-  usage instead (combiner tracks running average). Prevents priority
-  inversion when threads join late.
+- [x] **Newcomer usage initialization (from CFL).**
+  *(Done: `8403d71` — combiner tracks `total_usage / total_served`, newcomers
+  with usage=0 initialized to running average in both FCPQ and FCSL.)*
 
 - [ ] **Starvation counter (from ShflLock).**
   Add a counter to each FC-PQ node tracking how many combining passes it has
@@ -309,13 +303,14 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 | Item | Blocks | Notes |
 |------|--------|-------|
-| JFI implementation | Phase 1, Phase 8 | Simple computation, do first |
+| ~~JFI implementation~~ | ~~Phase 1, Phase 8~~ | Done (`a3131ac`) |
 | CFL baseline implementation | Phase 1 | Critical for the central claim |
-| MCS baseline implementation | Phase 1 | Also critical for tradeoff comparison |
+| ~~MCS baseline implementation~~ | ~~Phase 1~~ | Done (`4d57e13`) |
 | Response time CDF tooling | Phase 2, Phase 5 | Reusable across all experiments |
 | NUMA machine access | Phase 6 | Apply for Cloudlab allocation early |
 | End-to-end app design | Phase 5, Phase 8 | Needs agreement on which apps are most compelling |
 | Combiner penalty data | Phase 8 (intro figures) | The motivating figure needs this data |
+| Scope the O(C_max) claim | Phase 8 | See note below |
 
 ---
 
@@ -334,6 +329,15 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 Phase 1 is the most important because it validates the paper's strongest
 claim. If FC→FC-PQ throughput gap is small and MCS→CFL gap is large, the
 story writes itself. If not, we need to rethink the framing.
+
+**Framing note (2025-02-25):** The O(C_max) usage-fairness bound is real
+but must be scoped carefully. It bounds *cumulative lock-holding time* gap,
+NOT response time. The PQ maintenance adds O(N log N) work per combining
+pass vs CFL's O(N) queue traversal — the asymptotic cost is worse, but
+over L1-hot sequential data vs remote CAS. The paper claim should be:
+"adding fairness to delegation is cheaper than adding fairness to
+traditional locks" — compare the FC→FC-PQ delta vs MCS→CFL delta, not
+FC-PQ vs CFL directly. They solve fairness in different paradigms.
 
 ---
 

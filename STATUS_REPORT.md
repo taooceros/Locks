@@ -1,5 +1,5 @@
 # Status Report: Usage-Fair Delegation Locks
-**Date:** 2026-02-24
+**Date:** 2026-02-25 (updated)
 **Target:** PPoPP 2027 (Aug 2026 deadline) / EuroSys 2027 fallback (Oct 2026)
 
 Multi-agent code review of the entire project (architecture, algorithms,
@@ -9,33 +9,15 @@ evaluation, paper framing, applications). Findings organized by priority.
 
 ## Critical Bugs (Fix Before Any Experiments)
 
-### BUG-1: Arrow IPC files never `finish()`ed [SEVERITY: DATA LOSS]
-**File:** `rust/src/benchmark/records.rs`
-`FileWriter<File>` handles are inserted into a thread-local map but
-`finish()` is never called. Without `finish()`, the Arrow IPC footer is
-never written. **All benchmark output files are likely corrupt/truncated.**
-Any downstream analysis may fail silently or produce wrong results.
+### ~~BUG-1: Arrow IPC files never `finish()`ed~~ [RESOLVED]
+*(Fixed: `353f1ca` — `WriterMap` wrapper with `Drop` impl calls `finish()`
+on all FileWriters when dropped.)*
 
-**Fix:** Restructure to call `writer.finish()` at program exit or scope end.
+### ~~BUG-2: Non-atomic writes to AtomicPtr~~ [RESOLVED]
+*(Fixed: `353f1ca` — replaced raw pointer dereference with atomic load/store.)*
 
-### BUG-2: Non-atomic writes to AtomicPtr [SEVERITY: UB]
-**Files:** `rust/lib-dlock/src/dlock2/fc/lock.rs:132`,
-`rust/lib-dlock/src/dlock2/fc_ban/lock.rs:165`
-```rust
-// WRONG: non-atomic store to atomic variable
-(*previous.next.as_ptr()) = *current.next.as_ptr();
-// CORRECT:
-previous.next.store(current.next.load(Acquire), Release);
-```
-`AtomicPtr::as_ptr()` returns a raw pointer; writing through it is a
-non-atomic store — undefined behavior. Audit entire codebase for this
-pattern (also in DSMSynch).
-
-### BUG-3: `UnsafeCell` instead of `SyncUnsafeCell` [SEVERITY: SOUNDNESS]
-**File:** `rust/lib-dlock/src/dlock2/fc_ban/node.rs:8`
-`age: UnsafeCell<u32>` is accessed cross-thread by the combiner.
-`UnsafeCell<T>` is not `Sync`. The CC variant correctly uses
-`SyncUnsafeCell<u32>` — this is an inconsistency.
+### ~~BUG-3: `UnsafeCell` instead of `SyncUnsafeCell`~~ [RESOLVED]
+*(Fixed: `353f1ca` — `age` field changed to `SyncUnsafeCell` in FC and FC-Ban.)*
 
 ### BUG-4: `num_waiting_threads` overestimation [SEVERITY: CORRECTNESS]
 **FC-Ban:** Counter incremented in `push_node()`, decremented only in
@@ -49,18 +31,12 @@ Counts total threads ever participated, not currently active.
 **Fix (CC-Ban):** Decrement when ban expires and thread re-joins queue, or
 use a separate `currently_queued` atomic.
 
-### BUG-5: FC-SL `active` flag never set [SEVERITY: CORRECTNESS]
-**File:** `rust/lib-dlock/src/dlock2/fc_sl/lock.rs`
-`push_node` inserts into SkipSet but never sets `node.active = true`.
-Guard in `push_if_unactive` never fires. Correctness currently relies on
-SkipSet duplicate-key semantics (fragile). Either use the flag correctly
-or remove it.
+### ~~BUG-5: FC-SL `active` flag never set~~ [RESOLVED]
+*(Fixed: `353f1ca` — active flag set/cleared properly in push_node/combine.)*
 
-### BUG-6: `PairingHeap` and `lockfree_queue` are `todo!()` [SEVERITY: PANIC]
-**Files:** `rust/src/command_parser/experiment.rs:81`,
-`rust/src/benchmark/dlock2/queue.rs:26`
-Users selecting these from CLI get runtime panics. Remove from `ValueEnum`
-or implement.
+### ~~BUG-6: `PairingHeap` and `lockfree_queue` are `todo!()`~~ [RESOLVED]
+*(Fixed: `353f1ca` — PairingHeap removed from CLI. lockfree_queue still
+unimplemented but not exposed as a selectable option.)*
 
 ---
 
@@ -76,39 +52,19 @@ CFL = MCS queue + per-thread vLHT accounting + Lock Scheduler thread
 that reorders queue off-path. If original code is on GitHub, benchmark
 both (ours vs. theirs) for credibility.
 
-### BLOCK-2: Implement MCS Lock [Est: 1-2 days]
-MCS is ~100 lines of Rust. Add as `DLock2Wrapper<MCSLock<T>>` using the
-existing spinlock wrapper pattern. Add `MCS` to `DLock2Target` enum.
-Required for the fairness-performance tradeoff scatter plot.
+### ~~BLOCK-2: Implement MCS Lock~~ [RESOLVED]
+*(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`.)*
 
-### BLOCK-3: Fix Newcomer Usage Initialization [Est: 1 day]
-**Files:** FC-PQ, FC-SL
-Currently initialize new thread usage to 0. A late-joining thread
-immediately jumps in front of all existing threads. This:
-- Violates the O(C_max) fairness bound
-- Is a correctness issue reviewers will discover
-- Is already on TODO but should be Phase 0, not Phase 4
+### ~~BLOCK-3: Fix Newcomer Usage Initialization~~ [RESOLVED]
+*(Done: `8403d71` — Combiner tracks running average, newcomers initialized.)*
 
-**Fix:** Combiner tracks `total_usage / total_served`. New threads
-initialize to the running average.
+### ~~BLOCK-4: Write DLock2 Correctness Tests~~ [RESOLVED]
+*(Done: `dfc261e` — Multi-threaded counter tests for all variants at 2/4/8
+threads. Fairness validation and ban-specific tests still TODO.)*
 
-### BLOCK-4: Write DLock2 Correctness Tests [Est: 2-3 days]
-`unit_test.rs` tests ONLY the old DLock1 module. **DLock2 has zero unit
-tests.** Minimum required:
-- Multi-threaded counter test for all 7 variants (FC, FCBan, CC, CCBan,
-  DSM, FCSL, FCPQ)
-- Fairness validation: 3:1 CS ratio, verify fair variants JFI > 0.9
-- Ban mechanism: verify thread is not served while banned
-- Newcomer priority inversion test
-- DSMSynch stress test (flagged in existing TODO)
-
-### BLOCK-5: JFI + Per-Thread Normalized Share [Est: 1 day]
-The `hold_time` field is tracked per thread but JFI is never computed
-anywhere. Required for every fairness table/figure in the paper.
-```
-JFI = (sum xi)^2 / (n * sum xi^2)
-normalized_share_i = hold_time_i / (total_hold_time / N)
-```
+### ~~BLOCK-5: JFI + Per-Thread Normalized Share~~ [RESOLVED]
+*(Done: `a3131ac` — JFI and normalized_share computed in `finish_benchmark()`,
+added to Records struct, printed per run.)*
 
 ---
 
@@ -126,8 +82,17 @@ Next minimum is >= U_min. By induction, no thread advances more than
 C_max ahead of current minimum.
 
 This is **strictly stronger** than CFL's O(N * C_max) per pass or
-U-SCL's settling time. Should be the paper's primary theoretical claim.
-Requires the newcomer initialization fix to hold.
+U-SCL's settling time. Newcomer initialization fix landed (`8403d71`),
+so the bound now holds in the implementation.
+
+**Scope this claim carefully (2025-02-25 review):**
+- The bound is on *cumulative lock-holding time*, NOT response time.
+  Response time includes waiting for the combiner's full pass (up to H ops).
+- PQ maintenance is O(N log N) per combining pass vs CFL's O(N) traversal.
+  The asymptotic cost is worse, but over L1-hot sequential data vs remote CAS.
+- The paper should frame as: "cost of adding fairness to delegation is
+  smaller than cost of adding fairness to traditional locks" — compare
+  FC→FC-PQ delta vs MCS→CFL delta. Not FC-PQ vs CFL directly.
 
 **Starvation freedom:** Also provable — every thread eventually reaches
 U_min and gets served (requires starvation counter for adversarial
@@ -210,11 +175,10 @@ Reviewers will notice the absence of:
 ## Evaluation Improvements
 
 ### Statistical Rigor
-- [ ] **Multiple trials (>=3)** — `experiment.nu` runs each config once.
-  Add `--trials N`, report mean +/- stddev. PPoPP reviewers will ask for
-  error bars.
-- [ ] **Warmup phase** — benchmarks start timing immediately. Add 2s
-  warmup before recording. Critical for latency experiments.
+- [x] **Multiple trials (>=3)** — *(Done: `a3131ac` — `--trials N` flag,
+  trial index tracked in Records.)*
+- [x] **Warmup phase** — *(Done: `a3131ac` — `--warmup` flag, threads run
+  but `warmup_done` gate suppresses stat accumulation.)*
 - [ ] **CPU frequency pinning** — add `cpupower frequency-set -g
   performance` to experiment scripts. Standard practice.
 - [ ] **Environment capture** — log `lscpu`, `numactl --hardware`,
