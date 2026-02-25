@@ -68,6 +68,10 @@ where
     waiting_nodes: ConcurrentRingBuffer<(AtomicPtr<Node<I>>, u64), 64>,
     data: SyncUnsafeCell<T>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<I>>>,
+    /// Running total of CS time across all served requests (combiner-only access)
+    total_usage: SyncUnsafeCell<u64>,
+    /// Running count of served requests (combiner-only access)
+    total_served: SyncUnsafeCell<u64>,
 }
 
 impl<T, I, PQ, F, L> FCPQ<T, I, PQ, F, L>
@@ -86,6 +90,8 @@ where
             waiting_nodes: ConcurrentRingBuffer::new(),
             data: SyncUnsafeCell::new(data),
             local_node: ThreadLocal::new(),
+            total_usage: SyncUnsafeCell::new(0),
+            total_served: SyncUnsafeCell::new(0),
         }
     }
 
@@ -129,8 +135,15 @@ where
                 count += 1;
                 unsafe {
                     let node = &*node.load_acquire();
+                    let mut raw_usage = node.usage.load_acquire();
+                    // Newcomer initialization: if usage is 0 and we have history,
+                    // initialize to the running average to prevent priority inversion
+                    let served = *self.total_served.get();
+                    if raw_usage == 0 && served > 0 {
+                        raw_usage = *self.total_usage.get() / served;
+                    }
                     job_queue.push(UsageNode {
-                        usage: node.usage.load_acquire(),
+                        usage: raw_usage,
                         tie_breaker: id,
                         node,
                     });
@@ -167,8 +180,13 @@ where
                     ));
 
                     let end = __rdtscp(&mut aux);
+                    let cs_time = end - begin;
 
-                    current.usage += end - begin;
+                    current.usage += cs_time;
+
+                    // Track running average for newcomer initialization
+                    *self.total_usage.get() += cs_time;
+                    *self.total_served.get() += 1;
 
                     node.complete.store(true, Release);
 
