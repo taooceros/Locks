@@ -12,22 +12,19 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 - [x] **Add per-thread normalized share output (U-SCL style).**
   *(Done: `a3131ac` — `normalized_share` field in Records, printed per run.)*
 
-- [ ] **Add response time CDF output.**
-  Currently latencies are collected as `Vec<u64>`. Add percentile computation
-  (p50, p95, p99, p99.9) and CDF data export. Split by combiner vs. waiter
-  role. This is critical for tail-latency analysis.
+- [x] **Add response time CDF output.**
+  *(Done: `566a303` — percentile computation (p50/p95/p99/p99.9) and CDF CSV
+  export in `counter_common.rs`. Split by combiner/waiter role.)*
 
-- [ ] **Unify response time tracking across all DLock2 variants.**
-  Verify that `--stat-response-time` works correctly for FC, FC-Ban, CC,
-  CC-Ban, FC-PQ, FC-SL, DSM, Mutex, SpinLock, U-SCL. Some variants may not
-  properly split combiner vs. waiter latency — audit and fix.
+- [x] **Unify response time tracking across all DLock2 variants.**
+  *(Done: `e1e0f99` — `report_response_times()` extracted as shared function,
+  called from all four benchmark variants: counter, counter-array,
+  fetch-and-multiply, queue/priority-queue.)*
 
-- [ ] **Clean up experiment.nu script.**
-  Enable the currently-commented-out benchmarks (fetch-and-multiply, queue,
-  priority-queue). Create separate scripts or flags for:
-  - Quick smoke test (2 configs, short duration)
-  - Full experiment suite (all configs, 15s each)
-  - Response time focused (fewer configs, --stat-response-time)
+- [x] **Clean up experiment.nu script.**
+  *(Done: `2dc6882` — Rewritten with functions per experiment group (1-5, 8, 2b),
+  smoke test, consistent parameters matching EXPERIMENT_PLAN.md. profile.nu
+  updated to cover all 14 lock variants.)*
 
 - [x] **Stabilize DSMSynch implementation.**
   *(Done: `dfc261e` — multi-threaded correctness tests added for all DLock2
