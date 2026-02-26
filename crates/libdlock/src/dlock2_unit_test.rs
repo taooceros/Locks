@@ -19,6 +19,7 @@ use crate::{
         fc_pq::{UsageNode, FCPQ},
         fc_sl::FCSL,
         mcs::RawMcsLock,
+        pthread_mutex::DLock2PthreadMutex,
         shfl_lock::RawShflLock,
         spinlock::DLock2Wrapper,
         ticket::RawTicketLock,
@@ -257,5 +258,10 @@ dlock2_counter_tests!(
 dlock2_counter_tests!(
     clh,
     DLock2Wrapper::<u64, u64, Delegate, RawClhLock>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    pthread_mutex,
+    DLock2PthreadMutex::<u64, u64, Delegate>::new(0_u64, counter_delegate)
 );
 

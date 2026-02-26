@@ -14,8 +14,9 @@ use libdlock::{
     },
     dlock2::{
         self, c_aqs::RawCAqs, cfl::RawCflLock, clh::RawClhLock, fc::FC, fc_ban::FCBan,
-        mcs::RawMcsLock, mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
-        ticket::RawTicketLock, uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
+        mcs::RawMcsLock, mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex,
+        shfl_lock::RawShflLock, spinlock::DLock2Wrapper, ticket::RawTicketLock,
+        uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
     spin_lock::{RawSpinLock, SpinLock},
@@ -146,6 +147,8 @@ pub enum DLock2Target {
     Ticket,
     /// Benchmark CLH queue spin lock
     CLH,
+    /// Benchmark pthread mutex (PTHREAD_MUTEX_NORMAL, no userspace spinning)
+    PthreadMutex,
 }
 
 impl DLock2Target {
@@ -169,7 +172,8 @@ impl DLock2Target {
             | DLock2Target::ShflLockC
             | DLock2Target::CFL
             | DLock2Target::Ticket
-            | DLock2Target::CLH => false,
+            | DLock2Target::CLH
+            | DLock2Target::PthreadMutex => false,
         }
     }
 
@@ -203,6 +207,7 @@ impl DLock2Target {
             DLock2Target::CFL => DLock2Wrapper::<_, _, _, RawCflLock>::new(data, f).into(),
             DLock2Target::Ticket => DLock2Wrapper::<_, _, _, RawTicketLock>::new(data, f).into(),
             DLock2Target::CLH => DLock2Wrapper::<_, _, _, RawClhLock>::new(data, f).into(),
+            DLock2Target::PthreadMutex => DLock2PthreadMutex::new(data, f).into(),
         })
     }
 }
