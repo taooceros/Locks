@@ -30,6 +30,12 @@ use super::node::Node;
 
 const CLEAN_UP_AGE: u32 = 500;
 
+/// Maximum number of combining passes a node may wait before its usage is
+/// clamped to the current queue minimum.  Prevents unbounded starvation under
+/// adversarial arrival patterns where one long-CS thread accumulates high usage
+/// and is perpetually deprioritized by a stream of short-CS newcomers.
+const STARVATION_THRESHOLD: u64 = 8;
+
 #[derive(Derivative, Debug)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct UsageNode<'a, I> {
@@ -37,6 +43,11 @@ pub struct UsageNode<'a, I> {
     tie_breaker: u64,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     node: &'a Node<I>,
+    /// Combining pass number when this node was (re-)inserted into the PQ.
+    /// Used to detect starvation: if `current_pass - pass_entered > K`, clamp
+    /// usage to the queue minimum.
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    pass_entered: u64,
 }
 
 impl<T> Clone for UsageNode<'_, T> {
@@ -45,6 +56,7 @@ impl<T> Clone for UsageNode<'_, T> {
             usage: self.usage,
             tie_breaker: self.tie_breaker,
             node: self.node,
+            pass_entered: self.pass_entered,
         }
     }
 }
@@ -72,6 +84,8 @@ where
     total_usage: SyncUnsafeCell<u64>,
     /// Running count of served requests (combiner-only access)
     total_served: SyncUnsafeCell<u64>,
+    /// Monotonically increasing combining pass counter (combiner-only access)
+    combine_pass: SyncUnsafeCell<u64>,
 }
 
 impl<T, I, PQ, F, L> FCPQ<T, I, PQ, F, L>
@@ -92,6 +106,7 @@ where
             local_node: ThreadLocal::new(),
             total_usage: SyncUnsafeCell::new(0),
             total_served: SyncUnsafeCell::new(0),
+            combine_pass: SyncUnsafeCell::new(0),
         }
     }
 
@@ -124,6 +139,13 @@ where
         // only one thread would combine so this is safe
         let job_queue: &mut PQ = unsafe { &mut *self.job_queue.get() };
 
+        // Advance the combining pass counter (combiner-only, no atomics needed)
+        let current_pass = unsafe {
+            let pass = &mut *self.combine_pass.get();
+            *pass += 1;
+            *pass
+        };
+
         if !self.waiting_nodes.empty() {
             let iterator = unsafe { self.waiting_nodes.iter() };
 
@@ -146,6 +168,7 @@ where
                         usage: raw_usage,
                         tie_breaker: id,
                         node,
+                        pass_entered: current_pass,
                     });
                 }
             }
@@ -168,6 +191,15 @@ where
                 let node = current.node;
 
                 if !node.complete.load(Acquire) {
+                    // Anti-starvation: if this node has been waiting too many
+                    // passes, clamp its usage to the current queue minimum so
+                    // it gets served promptly.
+                    if current_pass - current.pass_entered > STARVATION_THRESHOLD {
+                        if let Some(min_node) = job_queue.peek() {
+                            current.usage = current.usage.min(min_node.usage);
+                        }
+                    }
+
                     // alternatively we can potentially save one __rdtscp by using `end` here
                     // which would result in a slightly inaccurate usage
                     begin = __rdtscp(&mut aux);
@@ -188,6 +220,8 @@ where
 
                     node.complete.store(true, Release);
 
+                    // Re-insert with reset pass counter
+                    current.pass_entered = current_pass;
                     job_queue.push(current);
                 } else {
                     // if the buffer is full then push the nodes back to the job queue
