@@ -5,9 +5,8 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 use std::thread::current;
 use std::{
-    arch::x86_64::__rdtscp,
+    arch::x86_64::{__rdtscp, _mm_prefetch, _MM_HINT_T0},
     cell::SyncUnsafeCell,
-    ptr,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -198,6 +197,14 @@ where
                         if let Some(min_node) = job_queue.peek() {
                             current.usage = current.usage.min(min_node.usage);
                         }
+                    }
+
+                    // Prefetch the next waiter's data pointer into L1 while we
+                    // execute the current delegate.  This hides the memory
+                    // latency of loading the next request's input from a remote
+                    // core's cache line.
+                    if let Some(next) = job_queue.peek() {
+                        _mm_prefetch(next.node.data.get().cast::<i8>(), _MM_HINT_T0);
                     }
 
                     // alternatively we can potentially save one __rdtscp by using `end` here
