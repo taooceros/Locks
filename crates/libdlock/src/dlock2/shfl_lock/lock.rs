@@ -12,7 +12,7 @@
 
 use std::{
     ptr::null_mut,
-    sync::atomic::{AtomicPtr, AtomicU16, AtomicU8, Ordering},
+    sync::atomic::{AtomicPtr, AtomicU32, Ordering},
 };
 
 use lock_api::{GuardSend, RawMutex};
@@ -25,6 +25,16 @@ const THRESHOLD: u32 = 0xffff;
 
 /// Shuffle quota PRNG modulus (must be power of 2).
 const UNLOCK_COUNT_THRESHOLD: u32 = 1024;
+
+/// Bit mask for the locked byte (bits 0..7) within `val`.
+const LOCKED_MASK: u32 = 0xFF;
+
+/// Value representing "locked" in the `val` word (bit 0).
+const LOCKED_VAL: u32 = 1;
+
+/// Bit mask for the no_stealing flag (bit 8) within `val`.
+/// Matches C: `_AQS_NOSTEAL_VAL = 1U << 8 = 0x100`.
+const NOSTEAL_VAL: u32 = 1 << 8;
 
 // ---------------------------------------------------------------------------
 // NUMA topology detection (cached)
@@ -44,7 +54,11 @@ fn current_numa_node() -> i32 {
     }
     let cpu_number = TOPOLOGY.cpu_count;
     let numa_nodes = TOPOLOGY.numa_nodes;
-    (core / (cpu_number / numa_nodes)) as i32
+    let cores_per_node = cpu_number / numa_nodes;
+    if cores_per_node == 0 {
+        return 0;
+    }
+    (core / cores_per_node) as i32
 }
 
 struct Topology {
@@ -53,9 +67,16 @@ struct Topology {
 }
 
 static TOPOLOGY: std::sync::LazyLock<Topology> = std::sync::LazyLock::new(|| {
-    let cpu_count = std::thread::available_parallelism()
-        .map(|n| n.get() as u32)
-        .unwrap_or(1);
+    // Use num_cpus::get() which returns the system-wide CPU count
+    // regardless of thread affinity.  This matches C's
+    // sysconf(_SC_NPROCESSORS_ONLN).
+    //
+    // std::thread::available_parallelism() is WRONG here because it
+    // respects the calling thread's affinity mask.  If the LazyLock is
+    // first triggered by a pinned benchmark thread, it could return 1
+    // while numa_nodes is 2, causing cpu_count / numa_nodes = 0 and a
+    // divide-by-zero in current_numa_node().
+    let cpu_count = (num_cpus::get() as u32).max(1);
 
     // Count NUMA nodes from sysfs.
     let mut nodes = 0u32;
@@ -112,38 +133,20 @@ fn keep_lock_local() -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for atomic byte access (matching C's no_stealing control)
-// ---------------------------------------------------------------------------
-
-/// Atomically read `locked` and `no_stealing` as a single u16.
-/// Layout (little-endian x86): byte 0 = locked, byte 1 = no_stealing.
-#[inline]
-fn load_locked_no_stealing(locked: &AtomicU8, no_stealing: &AtomicU8) -> u16 {
-    // The two bytes are adjacent in memory.  We do a single 16-bit atomic
-    // load by reinterpreting the pointer.
-    let ptr = locked as *const AtomicU8 as *const AtomicU16;
-    unsafe { (*ptr).load(Ordering::Acquire) }
-}
-
-/// CAS on the combined locked+no_stealing u16 word.
-#[inline]
-fn cas_locked_no_stealing(locked: &AtomicU8, old: u16, new: u16) -> Result<u16, u16> {
-    let ptr = locked as *const AtomicU8 as *const AtomicU16;
-    unsafe { (*ptr).compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire) }
-}
-
-// ---------------------------------------------------------------------------
 // RawShflLock
 // ---------------------------------------------------------------------------
 
 /// Raw ShflLock (AQS) implementing [`lock_api::RawMutex`].
+///
+/// The `val` field mirrors the C `aqs_mutex_t` union layout (little-endian):
+///   bits  0..7  = locked byte (0 = unlocked, 1 = locked)
+///   bits  8..15 = no_stealing byte (0 = stealing enabled, 0x100 = disabled)
+///   bits 16..31 = reserved (always 0)
 #[derive(Debug)]
 pub struct RawShflLock {
     tail: AtomicPtr<QNode>,
-    /// Lock byte: 0 = unlocked, 1 = locked.
-    locked: AtomicU8,
-    /// No-stealing flag: 1 = stealing disabled (queue head waiting).
-    no_stealing: AtomicU8,
+    /// Combined lock state word.  Matches C `aqs_mutex_t.val`.
+    val: AtomicU32,
     /// Per-thread queue nodes.
     local_node: ThreadLocal<QNode>,
 }
@@ -152,17 +155,31 @@ pub struct RawShflLock {
 unsafe impl Send for RawShflLock {}
 unsafe impl Sync for RawShflLock {}
 
-const _AQS_NOSTEAL_VAL: u8 = 1;
-
 impl RawShflLock {
+    /// Clear the no_stealing flag.  Atomic RMW on u32, matching
+    /// C: `atomic_andnot(_AQS_NOSTEAL_VAL, &lock->val)`.
     #[inline]
     fn enable_stealing(&self) {
-        self.no_stealing.store(0, Ordering::Release);
+        self.val.fetch_and(!NOSTEAL_VAL, Ordering::Release);
     }
 
+    /// Set the no_stealing flag.  Atomic RMW on u32, matching
+    /// C: `atomic_fetch_or_acquire(_AQS_NOSTEAL_VAL, &lock->val)`.
     #[inline]
     fn disable_stealing(&self) {
-        self.no_stealing.store(_AQS_NOSTEAL_VAL, Ordering::Release);
+        self.val.fetch_or(NOSTEAL_VAL, Ordering::Acquire);
+    }
+
+    /// Pass shuffle leadership to `sleader`, recording `qend` as the
+    /// last-visited position.  Matches C `set_sleader()`.
+    ///
+    /// SAFETY: `sleader` must be a valid, live queue node.
+    #[inline]
+    unsafe fn set_sleader(sleader: *mut QNode, qend: *mut QNode) {
+        (*sleader).sleader.store(true, Ordering::Release);
+        if qend != sleader {
+            (*sleader).last_visited.store(qend, Ordering::Release);
+        }
     }
 
     /// Core NUMA-aware queue reordering.
@@ -197,10 +214,11 @@ impl RawShflLock {
 
         // Probabilistic exit: occasionally stop shuffling to let
         // remote-socket threads through (starvation prevention).
+        // C: goto out (sleader = node->next, qend stays NULL).
         if !keep_lock_local() {
             sleader = (*node).next.load(Ordering::Acquire);
             if !sleader.is_null() {
-                (*sleader).sleader.store(true, Ordering::Release);
+                Self::set_sleader(sleader, qend);
             }
             return;
         }
@@ -251,7 +269,7 @@ impl RawShflLock {
             }
 
             // Early exit: lock became available or we were promoted.
-            let lock_ready = self.locked.load(Ordering::Acquire) == 0;
+            let lock_ready = (self.val.load(Ordering::Acquire) & LOCKED_MASK) == 0;
             if one_shuffle
                 && ((is_next_waiter && lock_ready)
                     || (!is_next_waiter
@@ -265,10 +283,7 @@ impl RawShflLock {
 
         // Pass shuffle leadership.
         if !sleader.is_null() {
-            (*sleader).sleader.store(true, Ordering::Release);
-            if qend != sleader && !qend.is_null() {
-                (*sleader).last_visited.store(qend, Ordering::Release);
-            }
+            Self::set_sleader(sleader, qend);
         }
     }
 }
@@ -277,8 +292,7 @@ unsafe impl RawMutex for RawShflLock {
     #[allow(clippy::declare_interior_mutable_const)]
     const INIT: Self = RawShflLock {
         tail: AtomicPtr::new(null_mut()),
-        locked: AtomicU8::new(0),
-        no_stealing: AtomicU8::new(0),
+        val: AtomicU32::new(0),
         local_node: ThreadLocal::new(),
     };
 
@@ -291,20 +305,21 @@ unsafe impl RawMutex for RawShflLock {
         let node = self.local_node.get_or(QNode::new);
         let node_ptr: *mut QNode = node as *const QNode as *mut QNode;
 
-        // --- Fast path: uncontended CAS on locked+no_stealing u16 ---
-        if cas_locked_no_stealing(&self.locked, 0, 1).is_ok() {
-            // Got the lock with no queue.  Hand off to successor if one
-            // appeared while we were doing the CAS.
-            unsafe {
-                self.fast_path_successor_handoff(node_ptr);
-            }
+        // --- Fast path: uncontended CAS on val ---
+        // CAS the full val word from 0 (unlocked, stealing enabled) to 1
+        // (locked).  Succeeds only when locked==0 AND no_stealing==0.
+        // Matches C: smp_cas(&lock->locked_no_stealing, 0, 1)
+        if self
+            .val
+            .compare_exchange_weak(0, LOCKED_VAL, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
             return;
         }
 
         // --- Slow path: MCS-style enqueue ---
         unsafe {
             (*node_ptr).next.store(null_mut(), Ordering::Relaxed);
-            // Clear all status bits (lstatus=0, sleader=0, wcount=0).
             (*node_ptr).lstatus.store(STATUS_WAIT, Ordering::Relaxed);
             (*node_ptr).sleader.store(false, Ordering::Relaxed);
             (*node_ptr).wcount.store(0, Ordering::Relaxed);
@@ -342,7 +357,7 @@ unsafe impl RawMutex for RawShflLock {
 
         // --- Head-of-queue: spin for the lock byte, shuffle while waiting ---
         loop {
-            if self.locked.load(Ordering::Acquire) == 0 {
+            if (self.val.load(Ordering::Acquire) & LOCKED_MASK) == 0 {
                 break;
             }
             let wcount = node.wcount.load(Ordering::Relaxed);
@@ -354,17 +369,20 @@ unsafe impl RawMutex for RawShflLock {
         }
 
         // CAS to acquire (fast-path stealers may race).
+        // We must preserve the no_stealing bit, so load-then-CAS on val.
+        // Matches C: smp_cas(&lock->locked, 0, 1)
         loop {
-            if self
-                .locked
-                .compare_exchange_weak(0, 1, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-            {
-                break;
+            let cur = self.val.load(Ordering::Acquire);
+            if (cur & LOCKED_MASK) == 0 {
+                if self
+                    .val
+                    .compare_exchange_weak(cur, cur | LOCKED_VAL, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    break;
+                }
             }
-            while self.locked.load(Ordering::Acquire) != 0 {
-                core::hint::spin_loop();
-            }
+            core::hint::spin_loop();
         }
 
         // Hand off to successor.
@@ -389,24 +407,21 @@ unsafe impl RawMutex for RawShflLock {
     }
 
     fn try_lock(&self) -> bool {
-        self.locked
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Relaxed)
+        // Matches C: smp_cas(&lock->locked, 0, 1)
+        // Must handle the no_stealing bit: load current val, check locked
+        // byte is clear, CAS to set it.
+        let cur = self.val.load(Ordering::Relaxed);
+        if (cur & LOCKED_MASK) != 0 {
+            return false;
+        }
+        self.val
+            .compare_exchange(cur, cur | LOCKED_VAL, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
     }
 
     unsafe fn unlock(&self) {
-        self.locked.store(0, Ordering::Release);
-    }
-}
-
-impl RawShflLock {
-    /// After the fast-path CAS succeeds, check if a successor enqueued
-    /// concurrently and hand off to them.
-    unsafe fn fast_path_successor_handoff(&self, node_ptr: *mut QNode) {
-        // In the fast path we didn't enqueue, so there's nothing to hand off.
-        // The successor (if any) will see locked==1 and wait; they'll be
-        // woken when we unlock.  This matches the C code's `goto release`
-        // after the fast-path CAS.
-        let _ = node_ptr;
+        // Clear the locked byte via atomic RMW, preserving no_stealing.
+        // Matches C: WRITE_ONCE(lock->locked, 0)
+        self.val.fetch_and(!LOCKED_MASK, Ordering::Release);
     }
 }
