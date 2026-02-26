@@ -25,7 +25,6 @@ pub mod fc_ban;
 pub mod fc_sl;
 pub mod rcl;
 
-pub mod adaptive_mutex;
 pub mod c_aqs;
 pub mod cfl;
 pub mod clh;
@@ -76,5 +75,4 @@ where
     CFL(DLock2Wrapper<T, I, F, RawCflLock>),
     Ticket(DLock2Wrapper<T, I, F, RawTicketLock>),
     CLH(DLock2Wrapper<T, I, F, RawClhLock>),
-    AdaptiveMutex(adaptive_mutex::DLock2AdaptiveMutex<T, I, F>),
 }

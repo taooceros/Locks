@@ -12,7 +12,6 @@ use crate::{
         cc::CCSynch,
         cc_ban::CCBan,
         cfl::RawCflLock,
-        adaptive_mutex::DLock2AdaptiveMutex,
         clh::RawClhLock,
         dsm::DSMSynch,
         fc::FC,
@@ -260,7 +259,3 @@ dlock2_counter_tests!(
     DLock2Wrapper::<u64, u64, Delegate, RawClhLock>::new(0_u64, counter_delegate)
 );
 
-dlock2_counter_tests!(
-    adaptive_mutex,
-    DLock2AdaptiveMutex::<u64, u64, Delegate>::new(0_u64, counter_delegate)
-);

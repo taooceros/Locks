@@ -144,9 +144,9 @@ L1 regardless of serving order.
   Spins on predecessor's node, implicit node recycling. FIFO-fair with
   O(1) remote memory references per handoff.)*
 
-- [x] **Benchmark pthread_mutex with PTHREAD_MUTEX_ADAPTIVE_NP.**
-  *(Done: `c35f434` — DLock2AdaptiveMutex wrapping raw pthread_mutex_t
-  with PTHREAD_MUTEX_ADAPTIVE_NP attribute. Added libc dependency.)*
+- [~] **~~Benchmark pthread_mutex with PTHREAD_MUTEX_ADAPTIVE_NP.~~**
+  *(Removed: Rust's `std::sync::Mutex` already spins 100 iterations before
+  blocking via futex, making it effectively adaptive. Redundant baseline.)*
 
 ---
 

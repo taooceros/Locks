@@ -146,8 +146,6 @@ pub enum DLock2Target {
     Ticket,
     /// Benchmark CLH queue spin lock
     CLH,
-    /// Benchmark adaptive pthread mutex (PTHREAD_MUTEX_ADAPTIVE_NP)
-    AdaptiveMutex,
 }
 
 impl DLock2Target {
@@ -171,8 +169,7 @@ impl DLock2Target {
             | DLock2Target::ShflLockC
             | DLock2Target::CFL
             | DLock2Target::Ticket
-            | DLock2Target::CLH
-            | DLock2Target::AdaptiveMutex => false,
+            | DLock2Target::CLH => false,
         }
     }
 
@@ -206,9 +203,6 @@ impl DLock2Target {
             DLock2Target::CFL => DLock2Wrapper::<_, _, _, RawCflLock>::new(data, f).into(),
             DLock2Target::Ticket => DLock2Wrapper::<_, _, _, RawTicketLock>::new(data, f).into(),
             DLock2Target::CLH => DLock2Wrapper::<_, _, _, RawClhLock>::new(data, f).into(),
-            DLock2Target::AdaptiveMutex => {
-                dlock2::adaptive_mutex::DLock2AdaptiveMutex::new(data, f).into()
-            }
         })
     }
 }
