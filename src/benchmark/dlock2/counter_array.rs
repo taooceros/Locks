@@ -1,81 +1,37 @@
 use std::{
     arch::x86_64::__rdtscp,
-    fmt::Display,
     hint::black_box,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     thread::current,
 };
 
-use libdlock::dlock2::DLock2;
-
-use crate::lock_target::DLock2Target;
+use crate::{
+    benchmark::bencher::Bencher,
+    lock_target::DLock2Target,
+};
 
 use super::counter_common::{finish_benchmark, start_benchmark, Data};
 
-struct FetchAddDlock2 {
-    data: AtomicUsize,
-}
+/// Array size for the protected data. 4096 u64s = 32 KiB, fits comfortably
+/// in L1 data cache (typically 32-48 KiB). Each CS invocation touches
+/// `cs_loop` consecutive elements, so the cache footprint scales with CS.
+const ARRAY_SIZE: usize = 4096;
 
-unsafe impl DLock2<Data> for FetchAddDlock2 {
-    #[inline(always)]
-    fn lock(&self, input: Data) -> Data {
-        let input = black_box(input);
-
-        if let Data::Input {
-            thread_id: _,
-            data: loop_limit,
-        } = input
-        {
-            // it is very important to have black_box here
-            let mut loop_limit = loop_limit;
-
-            let mut last_value = 0;
-
-            while loop_limit > 0 {
-                last_value = self.data.fetch_add(1, Ordering::AcqRel);
-                loop_limit -= 1;
-            }
-
-            return Data::Output {
-                hold_time: 0,
-                is_combiner: true,
-                data: last_value + 1,
-            };
-        }
-
-        panic!("Invalid input")
-    }
-
-    fn get_combine_time(&self) -> std::option::Option<u64> {
-        None
-    }
-}
-
-impl Display for FetchAddDlock2 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LockFree (Fetch&Add)")
-    }
-}
-
-pub fn proportional_counter<'a>(
-    bencher: &crate::benchmark::bencher::Bencher,
+pub fn counter_array<'a>(
+    bencher: &Bencher,
     file_name: &str,
     targets: impl Iterator<Item = &'a DLock2Target>,
     cs_loop: impl Iterator<Item = u64> + Clone,
     non_cs_loop: impl Iterator<Item = u64> + Clone,
-    include_lock_free: bool,
+    _include_lock_free: bool,
     stat_hold_time: bool,
 ) {
     for target in targets {
         let lock = target.to_locktype(
-            0usize,
+            [0u64; ARRAY_SIZE],
             Data::default(),
             #[inline(never)]
-            move |data: &mut usize, input: Data| {
-                let data = data;
+            move |data: &mut [u64; ARRAY_SIZE], input: Data| {
                 let input = input;
 
                 if let Data::Input {
@@ -91,8 +47,14 @@ pub fn proportional_counter<'a>(
                         }
                     };
 
+                    // Each iteration touches a distinct u64 in the array,
+                    // wrapping around. CS=100 means 100 different u64s
+                    // (800 bytes, ~13 cache lines) are accessed.
+                    let mut idx = 0usize;
                     while loop_limit > 0 {
-                        *black_box(&mut *data) += 1;
+                        data[idx % ARRAY_SIZE] =
+                            black_box(data[idx % ARRAY_SIZE]).wrapping_add(1);
+                        idx += 1;
                         loop_limit -= 1;
                     }
 
@@ -103,10 +65,11 @@ pub fn proportional_counter<'a>(
                         0
                     };
 
+                    // Sum first element as representative output value.
                     return Data::Output {
                         hold_time,
                         is_combiner: current().id() == thread_id,
-                        data: *data,
+                        data: data[0] as usize,
                     };
                 }
 
@@ -126,20 +89,5 @@ pub fn proportional_counter<'a>(
             );
             finish_benchmark(&bencher.output_path, file_name, &lock.to_string(), records);
         }
-    }
-
-    if include_lock_free {
-        let lock = FetchAddDlock2 {
-            data: AtomicUsize::new(0),
-        };
-
-        let records = start_benchmark(
-            bencher,
-            stat_hold_time,
-            cs_loop.clone(),
-            non_cs_loop.clone(),
-            Arc::new(lock),
-        );
-        finish_benchmark(&bencher.output_path, file_name, "Fetch&Add", records);
     }
 }

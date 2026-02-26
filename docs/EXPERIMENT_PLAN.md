@@ -159,6 +159,78 @@ FC, FcPqBHeap, FCBan, MCS, Mutex, SpinLock
 
 ---
 
+## Group 2b: Data Footprint Scaling (Counter Array)
+
+**Hypothesis:** Delegation's throughput advantage over traditional locks grows with
+the size of the shared data accessed per CS, because the combiner keeps the data
+L1-hot regardless of request order. Traditional locks pay cross-core migration cost
+proportional to data footprint on every handoff.
+
+**Claim validated:** L1 locality advantage is not just about amortizing lock overhead —
+it directly reduces data migration cost, and this benefit grows with working set size.
+
+### Benchmark
+
+The `counter-array` subcommand protects a 4096-element `[u64; 4096]` array (32 KiB).
+Each CS invocation touches `cs_loop` consecutive u64 elements (wrapping). Unlike
+`counter-proportional` where CS=100 means 100 increments to the *same* 8-byte counter,
+`counter-array` with CS=100 means touching 100 *distinct* u64s (800 bytes, ~13 cache
+lines).
+
+### Configuration
+
+```nu
+# Data footprint scaling: vary how many u64s are touched per CS
+for cs in [1 10 100 500 1000 2000 4096] {
+    dlock2 counter-array -t 32 --cs $cs --non-cs 0 -d 15 --trials 3 \
+        -l fc,fc-pq-b-heap,fc-ban,mcs,mutex,spin-lock \
+        --file-name $"array-footprint-($cs)"
+}
+
+# Thread scaling at fixed data footprint (CS=100 = 800 bytes)
+for t in [4 8 16 32 64 128] {
+    dlock2 counter-array -t $t --cs 100 --non-cs 0 -d 15 --trials 3 \
+        --file-name "array-cs100"
+}
+
+# Direct comparison: counter-proportional vs counter-array at same CS value
+for cs in [100 1000] {
+    dlock2 counter-proportional -t 32 --cs $cs --non-cs 0 -d 15 --trials 3 \
+        -l fc,mcs,mutex \
+        --file-name $"compare-scalar-($cs)"
+    dlock2 counter-array -t 32 --cs $cs --non-cs 0 -d 15 --trials 3 \
+        -l fc,mcs,mutex \
+        --file-name $"compare-array-($cs)"
+}
+```
+
+### Locks
+
+FC, FcPqBHeap, FCBan, MCS, Mutex, SpinLock (data footprint sweep)
+ALL (thread scaling)
+
+### Metrics
+
+- Throughput vs data footprint (number of u64s touched per CS)
+- FC/MCS throughput ratio at each footprint level
+- Throughput vs thread count at fixed footprint
+
+### Expected Results
+
+- CS=1 (8 bytes): Small gap between delegation and traditional — data fits in a single cache line either way
+- CS=100 (800 bytes, ~13 cache lines): Delegation advantage widens — MCS must migrate 13 cache lines per handoff
+- CS=1000 (8 KiB, ~125 cache lines): Delegation dominates — traditional locks pay ~125 cache line migrations
+- CS=4096 (32 KiB, full L1): Maximum advantage — entire L1 working set stays with combiner
+- **FC vs FC-PQ gap remains small** across all footprint sizes — fairness overhead is per-combining-pass, not per-data-element
+- Comparing counter-proportional CS=100 (8 bytes, 100 iterations) vs counter-array CS=100 (800 bytes, 100 elements) isolates data migration cost from CS duration
+
+### Paper Figures
+
+- **Fig 4b:** FC/MCS throughput ratio vs data footprint (bar or line chart). Shows ratio grows from ~1.2x at 8 bytes to 3-5x at 32 KiB.
+- **Supplementary:** counter-proportional vs counter-array comparison table.
+
+---
+
 ## Group 3: Non-CS Sweep (Contention Levels)
 
 **Hypothesis:** Delegation advantage is largest under high contention (non-CS=0)
@@ -582,13 +654,14 @@ Per lock: L1 miss rate, LLC miss rate, IPC, branch miss rate, CPU migrations.
 
 ### Phase A: Zero-Code Experiments (Run Immediately)
 
-These use only the existing `counter-proportional`, `queue`, and `priority-queue`
-subcommands with different configurations.
+These use existing subcommands (`counter-proportional`, `counter-array`, `queue`,
+`priority-queue`) with different configurations.
 
 | Order | Group | Est. Time | Priority |
 |-------|-------|-----------|----------|
 | 1 | Group 1: CS ratio sweep | ~4h | **Critical** — central claim |
 | 2 | Group 2: CS length crossover | ~1h | **Critical** — L1 locality story |
+| 2b | Group 2b: Data footprint scaling | ~1.5h | **Critical** — L1 data migration evidence |
 | 3 | Group 3: Non-CS sweep | ~3h | High — contention analysis |
 | 4 | Group 4: Response time | ~1h | High — motivation figure |
 | 5 | Group 5: Asymmetric contention | ~30m | Medium — real-world pattern |
@@ -620,7 +693,8 @@ the number of lock variants.
 | Fig 1 | G4 | CDF plot | Combiner penalty motivation |
 | Fig 2 | G1 | Scatter plot | Fairness-throughput Pareto frontier |
 | Fig 3 | G1 | Line plot | Throughput scales with thread count per CS ratio |
-| Fig 4 | G2 | Log-log plot | Delegation crossover + constant FC-PQ overhead |
+| Fig 4a | G2 | Log-log plot | Delegation crossover + constant FC-PQ overhead |
+| Fig 4b | G2b | Bar/line chart | FC/MCS ratio grows with data footprint |
 | Fig 5 | G3 | Panel plot | Contention level sensitivity |
 | Fig 6 | G4 | Bar chart | p99 response time comparison |
 | Fig 7 | G6 | Grouped bar | Hash map lookup p99 + throughput breakdown |

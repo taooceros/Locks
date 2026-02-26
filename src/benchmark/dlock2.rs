@@ -3,6 +3,7 @@ use std::{
     sync::atomic::Ordering,
 };
 
+use crate::benchmark::dlock2::counter_array::counter_array;
 use crate::benchmark::dlock2::fetch_and_multiply::fetch_and_multiply;
 use crate::experiment::*;
 use itertools::Itertools;
@@ -15,6 +16,8 @@ use crate::lock_target::DLock2Target;
 
 use super::bencher::Bencher;
 
+mod counter_array;
+mod counter_common;
 mod fetch_and_multiply;
 pub mod priority_queue;
 mod proportional_counter;
@@ -92,6 +95,26 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                         }
                     }
                 }
+                DLock2Experiment::CounterArray {
+                    cs_loops,
+                    non_cs_loops,
+                    file_name,
+                    include_lock_free,
+                    stat_hold_time,
+                } => counter_array(
+                    bencher,
+                    file_name.as_deref().unwrap_or_else(|| {
+                        name_maybe.insert(format!(
+                            "counter-array cs {:?} noncs {:?}",
+                            cs_loops, non_cs_loops
+                        ))
+                    }),
+                    targets.iter(),
+                    cs_loops.iter().copied(),
+                    non_cs_loops.iter().copied(),
+                    *include_lock_free,
+                    *stat_hold_time,
+                ),
             }
         }
     }

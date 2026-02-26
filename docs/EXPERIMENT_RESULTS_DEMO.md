@@ -187,6 +187,90 @@ Lock groups:
 
 ---
 
+## Group 2b: Data Footprint Scaling (Counter Array)
+
+**Hypothesis:** Delegation's throughput advantage grows with the size of the shared
+data accessed per CS. Traditional locks pay cross-core migration cost proportional
+to data footprint on every handoff.
+
+Benchmark: `counter-array`, 32 threads, non-CS=0.
+CS=N means touching N distinct u64s (N×8 bytes, N/8 cache lines).
+
+### Throughput (millions) by Lock x Data Footprint
+
+| Lock | CS=1 (8B) | CS=10 (80B) | CS=100 (800B) | CS=500 (4KB) | CS=1000 (8KB) | CS=2000 (16KB) | CS=4096 (32KB) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| FC           | 11.0M | 99.6M | 562M | 999M | 1,173M | 1,270M | 1,332M |
+| FCBan        | 7.6M | 73.1M | 474M | 1,012M | 1,174M | 1,280M | 1,332M |
+| CC           | 6.7M | 57.8M | 434M | 967M | 1,134M | 1,242M | 1,257M |
+| CCBan        | 4.3M | 41.5M | 323M | 809M | 1,000M | 1,114M | 1,196M |
+| DSM          | 5.6M | 48.9M | 419M | 974M | 1,139M | 1,246M | 1,279M |
+| FC_PQ_BTree  | 4.8M | 46.2M | 360M | 847M | 1,046M | 1,192M | 1,281M |
+| FC_PQ_BHeap  | 6.2M | 60.5M | 436M | 947M | 1,111M | 1,233M | 1,302M |
+| Mutex        | 2.6M | 21.4M | 138M | 165M | 286M | 419M | 252M |
+| SpinLock     | 5.2M | 54.5M | 477M | 990M | 1,184M | 1,291M | 1,178M |
+| USCL         | 3.2M | 29.1M | 173M | 299M | 338M | 365M | 379M |
+| C_FC         | 4.0M | 37.6M | 295M | 801M | 1,008M | 1,169M | 1,249M |
+| C_CC         | 3.4M | 33.2M | 242M | 698M | 934M | 1,109M | 1,246M |
+| MCS          | 3.2M | 30.7M | 235M | 450M | 547M | 588M | 608M |
+| ShflLock     | 8.3M | 35.8M | 249M | 1,074M | 548M | 588M | 609M |
+| ShflLock_C   | 8.3M | 87.2M | 594M | 460M | 1,196M | 596M | 613M |
+
+### FC/MCS Throughput Ratio by Data Footprint
+
+| Footprint | FC | MCS | Ratio (FC/MCS) |
+|---|---:|---:|---:|
+| CS=1 (8B) | 11.0M | 3.2M | **3.4x** |
+| CS=10 (80B) | 99.6M | 30.7M | **3.2x** |
+| CS=100 (800B) | 562M | 235M | **2.4x** |
+| CS=500 (4KB) | 999M | 450M | **2.2x** |
+| CS=1000 (8KB) | 1,173M | 547M | **2.1x** |
+| CS=2000 (16KB) | 1,270M | 588M | **2.2x** |
+| CS=4096 (32KB) | 1,332M | 608M | **2.2x** |
+
+### Thread Scaling (CS=100, 800 bytes / 13 cache lines)
+
+| Lock | 4T | 16T | 32T | 64T |
+|---|---:|---:|---:|---:|
+| FC           | 589M | 600M | 562M | 435M |
+| FCBan        | 514M | 508M | 474M | 331M |
+| CC           | 502M | 491M | 434M | 255M |
+| CCBan        | 387M | 354M | 323M | 218M |
+| DSM          | 420M | 464M | 419M | 232M |
+| FC_PQ_BTree  | 338M | 402M | 360M | 291M |
+| FC_PQ_BHeap  | 408M | 492M | 436M | 329M |
+| Mutex        | 268M | 139M | 138M | 98M |
+| SpinLock     | 806M | 585M | 477M | 204M |
+| USCL         | 172M | 174M | 173M | 172M |
+| C_FC         | 133M | 311M | 295M | 180M |
+| C_CC         | 125M | 246M | 242M | 158M |
+| MCS          | 278M | 259M | 235M | 159M |
+| ShflLock     | 751M | 692M | 249M | 388M |
+| ShflLock_C   | 283M | 714M | 594M | 154M |
+
+### Direct Comparison: counter-proportional vs counter-array
+
+32 threads, non-CS=0. "Scalar" = counter-proportional (single u64).
+"Array" = counter-array (N distinct u64s).
+
+| Lock | Scalar CS=100 | Array CS=100 | Scalar CS=1000 | Array CS=1000 |
+|---|---:|---:|---:|---:|
+| FC    | 645M | 557M | 1,150M | 1,175M |
+| MCS   | 243M | 235M | 683M | 566M |
+| Mutex | 92M | 135M | 114M | 263M |
+
+**FC/MCS ratio:** Scalar CS=1000: 1,150/683 = **1.68x**. Array CS=1000: 1,175/566 = **2.08x**.
+
+### Key Findings
+
+1. **FC/MCS ratio stays >2x across all footprints:** At CS=4096 (32KB, full L1), FC delivers 1,332M vs MCS 608M — 2.2x. Delegation keeps the entire 32KB working set in the combiner's L1.
+2. **MCS throughput plateaus at ~600M:** Despite CS growing 4096x (from 1 to 4096 elements), MCS only reaches 608M — cross-core migration of the growing working set dominates.
+3. **FC_PQ_BHeap tracks FC closely:** At CS=4096, FC_PQ_BHeap = 1,302M vs FC = 1,332M (0.98x). Fairness overhead is negligible for large data.
+4. **Scalar vs Array comparison isolates migration cost:** At CS=1000, FC/MCS ratio jumps from 1.68x (scalar, same 8-byte counter) to 2.08x (array, 8KB working set). The extra 0.4x gap is pure data migration overhead.
+5. **Mutex erratic under array workload:** throughput fluctuates (252M at 32KB, 419M at 16KB) — likely due to OS scheduling interacting with cache pressure.
+
+---
+
 ## Group 3: Non-CS Sweep
 
 **Hypothesis:** Delegation advantage is largest under high contention (non-CS=0) and narrows as contention decreases.

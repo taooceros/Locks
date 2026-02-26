@@ -87,6 +87,19 @@ pub enum DLock2Experiment {
         #[arg(long = "sequencial-pq-type", default_value = "binary-heap")]
         sequencial_pq_type: SeqPQType,
     },
+    /// Counter benchmark with array data (each CS iteration touches a distinct u64)
+    CounterArray {
+        #[arg(long = "cs", default_values_t = [100u64], value_delimiter = ',')]
+        cs_loops: Vec<u64>,
+        #[arg(long = "non-cs", default_values_t = [0u64], value_delimiter = ',')]
+        non_cs_loops: Vec<u64>,
+        #[arg(long = "file-name")]
+        file_name: Option<String>,
+        #[arg(long = "include-lock-free", default_value_t = false)]
+        include_lock_free: bool,
+        #[arg(long = "stat-hold-time", default_value_t = true)]
+        stat_hold_time: bool,
+    },
 }
 
 #[derive(Default, Debug, Clone, ValueEnum)]
