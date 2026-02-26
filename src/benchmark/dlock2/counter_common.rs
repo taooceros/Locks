@@ -2,6 +2,7 @@ use std::{
     arch::x86_64::__rdtscp,
     fmt::Display,
     hint::black_box,
+    io::Write,
     iter::zip,
     path::Path,
     sync::{
@@ -18,6 +19,7 @@ use libdlock::dlock2::DLock2;
 
 use crate::benchmark::{
     bencher::Bencher,
+    helper::create_plain_writer,
     records::{write_results, Records},
 };
 
@@ -34,6 +36,65 @@ pub enum Data {
         is_combiner: bool,
         data: usize,
     },
+}
+
+/// Compute percentiles from a sorted slice of latencies.
+/// Returns (p50, p95, p99, p99.9, min, max, mean).
+fn compute_percentiles(sorted: &[u64]) -> (u64, u64, u64, u64, u64, u64, f64) {
+    let n = sorted.len();
+    if n == 0 {
+        return (0, 0, 0, 0, 0, 0, 0.0);
+    }
+    let p = |frac: f64| -> u64 {
+        let idx = ((n as f64) * frac).ceil() as usize;
+        sorted[idx.min(n - 1)]
+    };
+    let sum: u64 = sorted.iter().sum();
+    let mean = sum as f64 / n as f64;
+    (p(0.50), p(0.95), p(0.99), p(0.999), sorted[0], sorted[n - 1], mean)
+}
+
+/// Print percentile summary for a latency distribution.
+fn print_percentiles(label: &str, sorted: &[u64]) {
+    if sorted.is_empty() {
+        return;
+    }
+    let (p50, p95, p99, p999, min, max, mean) = compute_percentiles(sorted);
+    println!(
+        "  {label} (n={}): mean={:.0} p50={} p95={} p99={} p99.9={} min={} max={}",
+        sorted.len(),
+        mean,
+        p50,
+        p95,
+        p99,
+        p999,
+        min,
+        max,
+    );
+}
+
+/// Write CDF data as CSV: each row is (latency_cycles, cumulative_fraction).
+/// Downsamples to at most `max_points` rows to keep file sizes reasonable.
+fn write_cdf_csv(path: &Path, sorted: &[u64], max_points: usize) {
+    let n = sorted.len();
+    if n == 0 {
+        return;
+    }
+    let mut file = match create_plain_writer(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Warning: failed to create CDF file {}: {e}", path.display());
+            return;
+        }
+    };
+    let _ = writeln!(file, "latency_cycles,cumulative_fraction");
+    let step = if n > max_points { n / max_points } else { 1 };
+    for (i, &val) in sorted.iter().enumerate() {
+        if i % step == 0 || i == n - 1 {
+            let frac = (i + 1) as f64 / n as f64;
+            let _ = writeln!(file, "{},{:.6}", val, frac);
+        }
+    }
 }
 
 pub fn start_benchmark<L>(
@@ -228,6 +289,50 @@ pub fn finish_benchmark(
         println!("Fairness Metrics:");
         println!("  JFI: {:.4}", jfi);
         println!("  Per-thread normalized share: [{}]", shares_str.join(", "));
+    }
+
+    // Compute and print response time percentiles (aggregated across all threads).
+    let mut all_combiner: Vec<u64> = records
+        .iter()
+        .flat_map(|r| r.combiner_latency.iter().copied())
+        .collect();
+    let mut all_waiter: Vec<u64> = records
+        .iter()
+        .flat_map(|r| r.waiter_latency.iter().copied())
+        .collect();
+
+    if !all_combiner.is_empty() || !all_waiter.is_empty() {
+        all_combiner.sort_unstable();
+        all_waiter.sort_unstable();
+
+        let mut all_latencies: Vec<u64> = Vec::with_capacity(all_combiner.len() + all_waiter.len());
+        all_latencies.extend_from_slice(&all_combiner);
+        all_latencies.extend_from_slice(&all_waiter);
+        all_latencies.sort_unstable();
+
+        println!("Response Time (TSC cycles):");
+        print_percentiles("all", &all_latencies);
+        print_percentiles("combiner", &all_combiner);
+        print_percentiles("waiter", &all_waiter);
+
+        // Export CDF CSV files for plotting.
+        let cdf_dir = folder.join("cdf");
+        let max_cdf_points = 10_000;
+        write_cdf_csv(
+            &cdf_dir.join(format!("{file_name}_all.csv")),
+            &all_latencies,
+            max_cdf_points,
+        );
+        write_cdf_csv(
+            &cdf_dir.join(format!("{file_name}_combiner.csv")),
+            &all_combiner,
+            max_cdf_points,
+        );
+        write_cdf_csv(
+            &cdf_dir.join(format!("{file_name}_waiter.csv")),
+            &all_waiter,
+            max_cdf_points,
+        );
     }
 
     write_results(&folder, file_name, &records);
