@@ -13,8 +13,8 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, c_aqs::RawCAqs, cfl::RawCflLock, fc::FC, fc_ban::FCBan, mcs::RawMcsLock,
-        mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
+        self, c_aqs::RawCAqs, cfl::RawCflLock, clh::RawClhLock, fc::FC, fc_ban::FCBan,
+        mcs::RawMcsLock, mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
         ticket::RawTicketLock, uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
@@ -144,6 +144,8 @@ pub enum DLock2Target {
     CFL,
     /// Benchmark Ticket Lock (simple FIFO spin lock)
     Ticket,
+    /// Benchmark CLH queue spin lock
+    CLH,
 }
 
 impl DLock2Target {
@@ -166,7 +168,8 @@ impl DLock2Target {
             | DLock2Target::ShflLock
             | DLock2Target::ShflLockC
             | DLock2Target::CFL
-            | DLock2Target::Ticket => false,
+            | DLock2Target::Ticket
+            | DLock2Target::CLH => false,
         }
     }
 
@@ -199,6 +202,7 @@ impl DLock2Target {
             DLock2Target::ShflLockC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
             DLock2Target::CFL => DLock2Wrapper::<_, _, _, RawCflLock>::new(data, f).into(),
             DLock2Target::Ticket => DLock2Wrapper::<_, _, _, RawTicketLock>::new(data, f).into(),
+            DLock2Target::CLH => DLock2Wrapper::<_, _, _, RawClhLock>::new(data, f).into(),
         })
     }
 }

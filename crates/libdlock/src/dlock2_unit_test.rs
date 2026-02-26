@@ -12,6 +12,7 @@ use crate::{
         cc::CCSynch,
         cc_ban::CCBan,
         cfl::RawCflLock,
+        clh::RawClhLock,
         dsm::DSMSynch,
         fc::FC,
         fc_ban::FCBan,
@@ -251,4 +252,9 @@ dlock2_counter_tests!(
 dlock2_counter_tests!(
     ticket,
     DLock2Wrapper::<u64, u64, Delegate, RawTicketLock>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    clh,
+    DLock2Wrapper::<u64, u64, Delegate, RawClhLock>::new(0_u64, counter_delegate)
 );
