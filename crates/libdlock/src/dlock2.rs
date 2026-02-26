@@ -13,7 +13,8 @@ use strum::Display;
 use self::{
     c_aqs::RawCAqs, cc_ban::CCBan, cfl::RawCflLock, dsm::DSMSynch, fc_ban::FCBan,
     fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock, mutex::DLock2Mutex,
-    shfl_lock::RawShflLock, spinlock::DLock2Wrapper, uscl::DLock2USCL,
+    shfl_lock::RawShflLock, spinlock::DLock2Wrapper, ticket::RawTicketLock,
+    uscl::DLock2USCL,
 };
 
 pub mod cc;
@@ -31,6 +32,7 @@ pub mod mcs;
 pub mod mutex;
 pub mod shfl_lock;
 pub mod spinlock;
+pub mod ticket;
 pub mod uscl;
 
 pub trait DLock2Delegate<T, I>: Fn(&mut T, I) -> I + Send + Sync {}
@@ -70,4 +72,5 @@ where
     ShflLock(DLock2Wrapper<T, I, F, RawShflLock>),
     ShflLock_C(DLock2Wrapper<T, I, F, RawCAqs>),
     CFL(DLock2Wrapper<T, I, F, RawCflLock>),
+    Ticket(DLock2Wrapper<T, I, F, RawTicketLock>),
 }

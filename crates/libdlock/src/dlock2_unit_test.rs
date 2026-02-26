@@ -20,6 +20,7 @@ use crate::{
         mcs::RawMcsLock,
         shfl_lock::RawShflLock,
         spinlock::DLock2Wrapper,
+        ticket::RawTicketLock,
         DLock2,
     },
     spin_lock::RawSpinLock,
@@ -245,4 +246,9 @@ dlock2_counter_tests!(
 dlock2_counter_tests!(
     cfl,
     DLock2Wrapper::<u64, u64, Delegate, RawCflLock>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    ticket,
+    DLock2Wrapper::<u64, u64, Delegate, RawTicketLock>::new(0_u64, counter_delegate)
 );
