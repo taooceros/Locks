@@ -134,17 +134,19 @@ L1 regardless of serving order.
 
 ## Phase 4: Additional Baselines
 
-- [ ] **Add Ticket Lock to Rust benchmarks.**
-  Already exists in C (`c/ticket/ticket.c`). Port to DLock2 framework or wrap
-  via FFI. Simple FIFO lock, good baseline.
+- [x] **Add Ticket Lock to Rust benchmarks.**
+  *(Done: `df4b185` — RawTicketLock as RawMutex wrapped by DLock2Wrapper.
+  Simple fetch-and-add + spin on now_serving. FIFO-fair but O(N)
+  invalidations per handoff.)*
 
-- [ ] **Implement CLH lock in DLock2 framework.**
-  Similar to MCS but cache-friendlier on some architectures. Provides another
-  acquisition-fair baseline. Lower priority than MCS.
+- [x] **Implement CLH lock in DLock2 framework.**
+  *(Done: `87152f3` — RawClhLock as RawMutex wrapped by DLock2Wrapper.
+  Spins on predecessor's node, implicit node recycling. FIFO-fair with
+  O(1) remote memory references per handoff.)*
 
-- [ ] **Benchmark pthread_mutex with PTHREAD_MUTEX_ADAPTIVE_NP.**
-  Linux-specific adaptive mutex that spins briefly before blocking. Common
-  real-world baseline.
+- [x] **Benchmark pthread_mutex with PTHREAD_MUTEX_ADAPTIVE_NP.**
+  *(Done: `c35f434` — DLock2AdaptiveMutex wrapping raw pthread_mutex_t
+  with PTHREAD_MUTEX_ADAPTIVE_NP attribute. Added libc dependency.)*
 
 ---
 
