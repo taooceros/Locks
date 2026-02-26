@@ -104,11 +104,12 @@ This validates Contribution #3: delegation breaks the traditional
 fairness-performance tradeoff because shared data stays in the combiner's
 L1 regardless of serving order.
 
-- [ ] **Implement CFL baseline (required comparison).**
-  CFL (Manglik & Kim, PPoPP'24) is the closest related work for usage-fair
-  traditional locks. Implement CFL-MCS in the DLock2 framework (or as a
-  standalone wrapped baseline). This is NOT optional — CFL is the direct
-  comparison point for our fairness-is-free argument.
+- [x] **Implement CFL baseline (required comparison).**
+  *(Done: `ee262bf` — CFL-MCS implemented as `DLock2Wrapper<RawCflLock>`.
+  Per-thread vLHT tracking with O(N) queue reordering during unlock.
+  Smoke test: CFL JFI=0.992 at 4T but ~23% throughput loss vs MCS,
+  while FC-PQ JFI=0.891 with only ~1.3% loss vs FC — validates the
+  "delegation breaks the fairness-performance tradeoff" thesis.)*
 
 - [x] **Implement MCS lock in DLock2 framework.**
   *(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`,
@@ -356,7 +357,7 @@ Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 10.
 | Item | Blocks | Notes |
 |------|--------|-------|
 | ~~JFI implementation~~ | ~~Phase 1, Phase 9~~ | Done (`a3131ac`) |
-| CFL baseline implementation | Phase 3 | Critical for the central claim |
+| ~~CFL baseline implementation~~ | ~~Phase 3~~ | Done (`ee262bf`) |
 | ~~MCS baseline implementation~~ | ~~Phase 3~~ | Done (`4d57e13`) |
 | Response time CDF tooling | Phase 2, Phase 6 | Reusable across all experiments |
 | AMD machine access | Phase 7 | Cross-vendor validation |
