@@ -157,16 +157,15 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
   *(Done: `8403d71` — combiner tracks `total_usage / total_served`, newcomers
   with usage=0 initialized to running average in both FCPQ and FCSL.)*
 
-- [ ] **Starvation counter (from ShflLock).**
-  Add a counter to each FC-PQ node tracking how many combining passes it has
-  been in the queue without being served. After K passes, clamp usage to
-  current minimum. Guarantees bounded wait even under adversarial arrivals.
+- [x] **Starvation counter (from ShflLock).**
+  *(Done: `120d287` — per-node `pass_entered` counter in UsageNode, combined
+  with a per-lock `combine_pass` counter. After 8 passes without service,
+  usage clamped to queue minimum. <1% throughput impact.)*
 
-- [ ] **Prefetch next waiter's input (from TCLocks).**
-  In FC-PQ's combining loop, after popping the heap root, issue a prefetch
-  for the *next* root's data pointer before executing the current CS. Hides
-  memory latency for loading the next waiter's input. Measure latency
-  improvement with `perf stat`.
+- [x] **Prefetch next waiter's input (from TCLocks).**
+  *(Done: `ae442fc` — `_mm_prefetch` with `_MM_HINT_T0` for next PQ root's
+  data pointer before executing current delegate. Overlaps memory latency
+  with CS execution.)*
 
 - [ ] **(Optional) NUMA-aware tie-breaking (from CFL).**
   Among threads with similar usage (within epsilon), prefer the one on the
