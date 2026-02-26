@@ -26,10 +26,8 @@ const THRESHOLD: u32 = 0xffff;
 /// Shuffle quota PRNG modulus (must be power of 2).
 const UNLOCK_COUNT_THRESHOLD: u32 = 1024;
 
-/// Bit mask for the locked byte (bits 0..7) within `val`.
-const LOCKED_MASK: u32 = 0xFF;
-
 /// Value representing "locked" in the `val` word (bit 0).
+/// Used by the fast-path CAS on the full u32 word.
 const LOCKED_VAL: u32 = 1;
 
 /// Bit mask for the no_stealing flag (bit 8) within `val`.
@@ -156,6 +154,15 @@ unsafe impl Send for RawShflLock {}
 unsafe impl Sync for RawShflLock {}
 
 impl RawShflLock {
+    /// Byte-level view of the locked byte (offset 0 of `val` on little-endian).
+    /// Matches C union accessor `lock->locked`.
+    ///
+    /// SAFETY: Caller must ensure `self` is a valid reference.
+    #[inline]
+    fn locked_byte(&self) -> &std::sync::atomic::AtomicU8 {
+        unsafe { &*((&self.val as *const AtomicU32).cast::<std::sync::atomic::AtomicU8>()) }
+    }
+
     /// Clear the no_stealing flag.  Atomic RMW on u32, matching
     /// C: `atomic_andnot(_AQS_NOSTEAL_VAL, &lock->val)`.
     #[inline]
@@ -214,18 +221,15 @@ impl RawShflLock {
 
         // Probabilistic exit: occasionally stop shuffling to let
         // remote-socket threads through (starvation prevention).
-        // C: goto out (sleader = node->next, qend stays NULL).
+        // Matches C: sleader = READ_ONCE(node->next); goto out;
         if !keep_lock_local() {
             sleader = (*node).next.load(Ordering::Acquire);
-            if !sleader.is_null() {
-                Self::set_sleader(sleader, qend);
-            }
-            return;
-        }
+        } else {
 
         loop {
             let curr = (*prev).next.load(Ordering::Acquire);
-            std::sync::atomic::fence(Ordering::Acquire);
+            // Compiler barrier matching C: barrier() after READ_ONCE(prev->next).
+            std::sync::atomic::compiler_fence(Ordering::SeqCst);
 
             if curr.is_null() {
                 sleader = last;
@@ -256,11 +260,15 @@ impl RawShflLock {
                     }
 
                     (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
-                    (*prev).next.store(next, Ordering::Release);
+                    // Pointer surgery matching C plain writes:
+                    //   prev->next = next;
+                    //   curr->next = last->next;
+                    //   last->next = curr;
+                    (*prev).next.store(next, Ordering::Relaxed);
                     (*curr)
                         .next
-                        .store((*last).next.load(Ordering::Relaxed), Ordering::Release);
-                    (*last).next.store(curr, Ordering::Release);
+                        .store((*last).next.load(Ordering::Relaxed), Ordering::Relaxed);
+                    (*last).next.store(curr, Ordering::Relaxed);
                     last = curr;
                     one_shuffle = true;
                 }
@@ -269,19 +277,22 @@ impl RawShflLock {
             }
 
             // Early exit: lock became available or we were promoted.
-            let lock_ready = (self.val.load(Ordering::Acquire) & LOCKED_MASK) == 0;
+            // Matches C: lock_ready = !READ_ONCE(lock->locked);
+            //             !is_next_waiter && READ_ONCE(node->lstatus)
+            let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
             if one_shuffle
                 && ((is_next_waiter && lock_ready)
                     || (!is_next_waiter
-                        && (*node).lstatus.load(Ordering::Acquire) == STATUS_LOCKED))
+                        && (*node).lstatus.load(Ordering::Acquire) != 0))
             {
                 sleader = last;
                 qend = prev;
                 break;
             }
         }
+        } // end else (keep_lock_local)
 
-        // Pass shuffle leadership.
+        // out: pass shuffle leadership.  Matches C: if (sleader) set_sleader(sleader, qend);
         if !sleader.is_null() {
             Self::set_sleader(sleader, qend);
         }
@@ -356,8 +367,9 @@ unsafe impl RawMutex for RawShflLock {
         }
 
         // --- Head-of-queue: spin for the lock byte, shuffle while waiting ---
+        // Matches C: READ_ONCE(lock->locked) — byte-level read.
         loop {
-            if (self.val.load(Ordering::Acquire) & LOCKED_MASK) == 0 {
+            if self.locked_byte().load(Ordering::Acquire) == 0 {
                 break;
             }
             let wcount = node.wcount.load(Ordering::Relaxed);
@@ -369,20 +381,19 @@ unsafe impl RawMutex for RawShflLock {
         }
 
         // CAS to acquire (fast-path stealers may race).
-        // We must preserve the no_stealing bit, so load-then-CAS on val.
-        // Matches C: smp_cas(&lock->locked, 0, 1)
+        // Matches C: smp_cas(&lock->locked, 0, 1) — byte-level CAS.
         loop {
-            let cur = self.val.load(Ordering::Acquire);
-            if (cur & LOCKED_MASK) == 0 {
-                if self
-                    .val
-                    .compare_exchange_weak(cur, cur | LOCKED_VAL, Ordering::AcqRel, Ordering::Acquire)
-                    .is_ok()
-                {
-                    break;
-                }
+            if self
+                .locked_byte()
+                .compare_exchange_weak(0, 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break;
             }
-            core::hint::spin_loop();
+
+            while self.locked_byte().load(Ordering::Acquire) != 0 {
+                core::hint::spin_loop();
+            }
         }
 
         // Hand off to successor.
@@ -407,21 +418,15 @@ unsafe impl RawMutex for RawShflLock {
     }
 
     fn try_lock(&self) -> bool {
-        // Matches C: smp_cas(&lock->locked, 0, 1)
-        // Must handle the no_stealing bit: load current val, check locked
-        // byte is clear, CAS to set it.
-        let cur = self.val.load(Ordering::Relaxed);
-        if (cur & LOCKED_MASK) != 0 {
-            return false;
-        }
-        self.val
-            .compare_exchange(cur, cur | LOCKED_VAL, Ordering::AcqRel, Ordering::Relaxed)
+        // Matches C: smp_cas(&lock->locked, 0, 1) — byte-level CAS.
+        self.locked_byte()
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
     }
 
     unsafe fn unlock(&self) {
-        // Clear the locked byte via atomic RMW, preserving no_stealing.
-        // Matches C: WRITE_ONCE(lock->locked, 0)
-        self.val.fetch_and(!LOCKED_MASK, Ordering::Release);
+        // Store zero to the locked byte, matching C: WRITE_ONCE(lock->locked, 0).
+        // This is a plain byte store (not an RMW), preserving no_stealing in byte 1.
+        self.locked_byte().store(0, Ordering::Release);
     }
 }
