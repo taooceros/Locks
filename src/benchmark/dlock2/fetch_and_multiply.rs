@@ -22,6 +22,8 @@ use crate::{
     lock_target::DLock2Target,
 };
 
+use super::counter_common::report_response_times;
+
 pub struct AtomicF64 {
     storage: AtomicU64,
 }
@@ -328,11 +330,10 @@ fn finish_benchmark<'a>(
     records: Vec<Records>,
     lock_target: Arc<impl DLock2<Data> + 'static + Display>,
 ) {
-    write_results(output_path, file_name, &records);
+    let folder = output_path.to_path_buf();
+    report_response_times(&folder, file_name, &records);
 
-    // for record in records.clone() {
-    //     println!("{}", record.loop_count);
-    // }
+    write_results(output_path, file_name, &records);
 
     let total_loop_count: u64 = records.iter().map(|r| r.loop_count).sum();
 

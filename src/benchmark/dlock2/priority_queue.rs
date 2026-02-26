@@ -21,6 +21,8 @@ use crate::{
     lock_target::DLock2Target,
 };
 
+use super::counter_common::report_response_times;
+
 use self::extension::{
     ConcurrentPriorityQueue, DLock2PriorityQueue, PQData, SequentialPriorityQueue,
 };
@@ -192,6 +194,9 @@ fn finish_benchmark<'a>(
     }
 
     let records = records.as_ref();
+
+    report_response_times(&folder, file_name, records);
+
     write_results(&folder, file_name, records);
 
     for record in records.iter() {
