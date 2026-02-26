@@ -11,6 +11,7 @@ use crate::{
         c_aqs::RawCAqs,
         cc::CCSynch,
         cc_ban::CCBan,
+        cfl::RawCflLock,
         dsm::DSMSynch,
         fc::FC,
         fc_ban::FCBan,
@@ -239,4 +240,9 @@ dlock2_counter_tests!(
 dlock2_counter_tests!(
     shfl_lock_c,
     DLock2Wrapper::<u64, u64, Delegate, RawCAqs>::new(0_u64, counter_delegate)
+);
+
+dlock2_counter_tests!(
+    cfl,
+    DLock2Wrapper::<u64, u64, Delegate, RawCflLock>::new(0_u64, counter_delegate)
 );

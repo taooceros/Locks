@@ -11,9 +11,9 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    c_aqs::RawCAqs, cc_ban::CCBan, dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL,
-    mcs::RawMcsLock, mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
-    uscl::DLock2USCL,
+    c_aqs::RawCAqs, cc_ban::CCBan, cfl::RawCflLock, dsm::DSMSynch, fc_ban::FCBan,
+    fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock, mutex::DLock2Mutex,
+    shfl_lock::RawShflLock, spinlock::DLock2Wrapper, uscl::DLock2USCL,
 };
 
 pub mod cc;
@@ -25,6 +25,7 @@ pub mod fc_sl;
 pub mod rcl;
 
 pub mod c_aqs;
+pub mod cfl;
 pub mod fc_pq;
 pub mod mcs;
 pub mod mutex;
@@ -68,4 +69,5 @@ where
     C_CC(CCCSynch<T, F, I>),
     ShflLock(DLock2Wrapper<T, I, F, RawShflLock>),
     ShflLock_C(DLock2Wrapper<T, I, F, RawCAqs>),
+    CFL(DLock2Wrapper<T, I, F, RawCflLock>),
 }

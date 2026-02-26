@@ -13,9 +13,9 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, c_aqs::RawCAqs, fc::FC, fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex,
-        shfl_lock::RawShflLock, spinlock::DLock2Wrapper, uscl::DLock2USCL, DLock2Delegate,
-        DLock2Impl,
+        self, c_aqs::RawCAqs, cfl::RawCflLock, fc::FC, fc_ban::FCBan, mcs::RawMcsLock,
+        mutex::DLock2Mutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper, uscl::DLock2USCL,
+        DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
     spin_lock::{RawSpinLock, SpinLock},
@@ -140,6 +140,8 @@ pub enum DLock2Target {
     ShflLock,
     /// Benchmark ShflLock (C)
     ShflLockC,
+    /// Benchmark CFL-MCS (usage-fair traditional lock, Park & Eom PPoPP'24)
+    CFL,
 }
 
 impl DLock2Target {
@@ -160,7 +162,8 @@ impl DLock2Target {
             | DLock2Target::USCL
             | DLock2Target::MCS
             | DLock2Target::ShflLock
-            | DLock2Target::ShflLockC => false,
+            | DLock2Target::ShflLockC
+            | DLock2Target::CFL => false,
         }
     }
 
@@ -191,6 +194,7 @@ impl DLock2Target {
             DLock2Target::CcC => CCCSynch::new(data, f).into(),
             DLock2Target::ShflLock => DLock2Wrapper::<_, _, _, RawShflLock>::new(data, f).into(),
             DLock2Target::ShflLockC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
+            DLock2Target::CFL => DLock2Wrapper::<_, _, _, RawCflLock>::new(data, f).into(),
         })
     }
 }
