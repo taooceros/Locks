@@ -1,13 +1,24 @@
 { pkgs, lib, ... }:
 
 {
-  packages = [
-    pkgs.clang
-    pkgs.llvmPackages.libclang
-    pkgs.pkg-config
-    pkgs.mold-wrapped
-    pkgs.just
+  packages = with pkgs; [
+    clang
+    llvmPackages.libclang
+    pkg-config
+    mold-wrapped
+    just
+    uv
+    numactl
   ];
+
+  languages.python = {
+    enable = true;
+    venv.enable = true;
+    uv.enable = true;
+    venv.requirements = ''
+      pyarrow
+    '';
+  };
 
   env.LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 

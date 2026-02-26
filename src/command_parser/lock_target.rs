@@ -138,8 +138,8 @@ pub enum DLock2Target {
     MCS,
     /// Benchmark ShflLock (Rust)
     ShflLock,
-    /// Benchmark ShflLock AQS (C)
-    AqsC,
+    /// Benchmark ShflLock (C)
+    ShflLockC,
 }
 
 impl DLock2Target {
@@ -160,7 +160,7 @@ impl DLock2Target {
             | DLock2Target::USCL
             | DLock2Target::MCS
             | DLock2Target::ShflLock
-            | DLock2Target::AqsC => false,
+            | DLock2Target::ShflLockC => false,
         }
     }
 
@@ -190,7 +190,7 @@ impl DLock2Target {
             DLock2Target::FcC => CFlatCombining::new(data, f).into(),
             DLock2Target::CcC => CCCSynch::new(data, f).into(),
             DLock2Target::ShflLock => DLock2Wrapper::<_, _, _, RawShflLock>::new(data, f).into(),
-            DLock2Target::AqsC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
+            DLock2Target::ShflLockC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
         })
     }
 }

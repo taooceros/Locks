@@ -33,9 +33,75 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   *(Done: `dfc261e` — multi-threaded correctness tests added for all DLock2
   variants including DSM at 2/4/8 threads.)*
 
+- [x] **Run baseline benchmarks on saturn (128T Intel Xeon Gold 6438M).**
+  *(Done: 2026-02-26 — counter cs [1000,3000] noncs [0], all 16 lock variants,
+  4-128 threads. Results in `visualization/output/`. FC-PQ achieves 0.9996 JFI
+  at 128T with 0.74x FC throughput.)*
+
+- [x] **Write experiment plan spec.**
+  *(Done: 2026-02-26 — `docs/EXPERIMENT_PLAN.md`. 10 experiment groups covering
+  CS ratio sweep, CS length crossover, non-CS sweep, response time, asymmetric
+  contention, hash map, log buffer, queue/PQ, NUMA, perf profiling.)*
+
 ---
 
-## Phase 1: Fairness-Performance Tradeoff Validation (KEY EXPERIMENT)
+## Phase 1: Micro-Benchmark Experiment Suite
+
+Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md)
+
+These experiments use only the existing `counter-proportional` subcommand with
+different configurations. No code changes needed.
+
+- [ ] **Group 1: CS ratio sweep.** *(EXPERIMENT_PLAN.md §Group 1)*
+  CS ratios 1:1, 1:3, 1:10, 1:30, 1:100. All locks, 4-128 threads.
+  Validates that FC-PQ maintains JFI near 1.0 regardless of ratio.
+
+- [ ] **Group 2: CS length scalability crossover.** *(§Group 2)*
+  Uniform CS from 1 to 50000. FC, FC-PQ, FCBan, MCS, Mutex, SpinLock at 32T.
+  Shows delegation advantage grows with CS length (L1 locality story).
+
+- [ ] **Group 3: Non-CS sweep (contention levels).** *(§Group 3)*
+  Non-CS: 0, 10, 100, 1K, 10K, 100K. FC, FC-PQ, FCBan, MCS, Mutex, USCL.
+  Shows delegation advantage largest under high contention.
+
+- [ ] **Group 4: Response time distributions.** *(§Group 4)*
+  CS=1 and CS=1000,3000 with `--stat-response-time`. 8/16/32 threads.
+  Produces combiner vs waiter CDFs for the motivation figure.
+
+- [ ] **Group 5: Asymmetric contention.** *(§Group 5)*
+  Same CS, alternating non-CS (0 vs 10000). Shows FC-PQ rebalances hold-time
+  across hot/cold threads.
+
+- [ ] **Group 8: Queue & priority queue.** *(§Group 8)*
+  Enable existing queue/priority-queue benchmarks. LinkedList, VecDeque,
+  BinaryHeap, BTreeSet. Shows delegation advantage on data structures.
+
+---
+
+## Phase 2: Combiner Response-Time Study
+
+- [ ] **Characterize combiner time distribution across thread counts.**
+  Run FC, CC, FC-Ban, CC-Ban, FC-PQ at 4, 8, 16, 32, 64 threads. For each:
+  measure what fraction of wall-clock time each thread spends as combiner.
+  Produce box plots.
+
+- [ ] **Implement tail-as-combiner selection for FC.**
+  In `dlock2/fc/lock.rs`, modify combiner election so the tail of the thread
+  list (last node executed) becomes the next combiner. Measure impact on
+  combiner response-time variance.
+
+- [ ] **Measure combiner vs. waiter response time separately.**
+  For each lock variant, produce split CDFs. The key claim: unfair locks have
+  bimodal response-time distributions; fair locks have more uniform ones.
+
+- [ ] **Quantify combiner penalty scaling.**
+  Plot: combiner response time / average waiter response time vs. thread
+  count. Show this ratio grows with concurrency for unfair variants, stays
+  bounded for fair variants.
+
+---
+
+## Phase 3: Fairness-Performance Tradeoff Validation (KEY EXPERIMENT)
 
 This validates Contribution #3: delegation breaks the traditional
 fairness-performance tradeoff because shared data stays in the combiner's
@@ -68,30 +134,7 @@ L1 regardless of serving order.
 
 ---
 
-## Phase 2: Combiner Response-Time Study
-
-- [ ] **Characterize combiner time distribution across thread counts.**
-  Run FC, CC, FC-Ban, CC-Ban, FC-PQ at 4, 8, 16, 32, 64 threads. For each:
-  measure what fraction of wall-clock time each thread spends as combiner.
-  Produce box plots.
-
-- [ ] **Implement tail-as-combiner selection for FC.**
-  In `dlock2/fc/lock.rs`, modify combiner election so the tail of the thread
-  list (last node executed) becomes the next combiner. Measure impact on
-  combiner response-time variance.
-
-- [ ] **Measure combiner vs. waiter response time separately.**
-  For each lock variant, produce split CDFs. The key claim: unfair locks have
-  bimodal response-time distributions; fair locks have more uniform ones.
-
-- [ ] **Quantify combiner penalty scaling.**
-  Plot: combiner response time / average waiter response time vs. thread
-  count. Show this ratio grows with concurrency for unfair variants, stays
-  bounded for fair variants.
-
----
-
-## Phase 3: Additional Baselines
+## Phase 4: Additional Baselines
 
 - [ ] **Add Ticket Lock to Rust benchmarks.**
   Already exists in C (`c/ticket/ticket.c`). Port to DLock2 framework or wrap
@@ -107,7 +150,7 @@ L1 regardless of serving order.
 
 ---
 
-## Phase 4: Optimizations from Related Work
+## Phase 5: Optimizations from Related Work
 
 Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 (see RESEARCH_PLAN.md Section 4.6).
@@ -139,15 +182,20 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 ---
 
-## Phase 5: End-to-End Applications
+## Phase 6: End-to-End Applications
 
-### A. Concurrent Hash Map
+Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 6-7.
+
+### A. Concurrent Hash Map *(§Group 6)*
 
 - [ ] **Implement lock-protected hash map benchmark.**
-  - Separate-chaining hash map, single global lock (delegation-friendly)
-  - Operations: get (short CS), put (medium CS), scan/range-query (long CS)
-  - YCSB-like workload generator with configurable read/write/scan ratio
-  - Thread groups: "lookup threads" (get-heavy) vs "scan threads" (scan-heavy)
+  - `HashMap<u64, Vec<u8>>`, single global delegation lock
+  - Operations: get (short CS ~100ns), put (medium CS ~500ns),
+    scan (long CS ~5-50us iterating N entries)
+  - Thread mix: N-2 lookup threads + 2 scan threads
+  - Pre-populate 10K entries, Zipfian key distribution
+  - New subcommand: `DLock2Experiment::HashMap`
+  - New file: `src/benchmark/dlock2/hashmap.rs`
 
 - [ ] **Measure per-operation-type latency.**
   Track response time separately for get, put, and scan operations. The key
@@ -158,7 +206,16 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
   Show that delegation (even fair) can outperform fine-grained locking on
   throughput while maintaining fairness — the best of both worlds.
 
-### B. Concurrent Priority Queue / Task Scheduler
+### B. Producer-Consumer Log Buffer *(§Group 7)*
+
+- [ ] **Implement log buffer benchmark.**
+  - `VecDeque<LogEntry>`, single global delegation lock
+  - N-1 producer threads: append single entry (short CS ~100ns)
+  - 1 consumer thread: drain batch of K entries (long CS, K=100-500)
+  - New subcommand: `DLock2Experiment::LogBuffer`
+  - New file: `src/benchmark/dlock2/log_buffer.rs`
+
+### C. (Optional) Concurrent Priority Queue / Task Scheduler
 
 - [ ] **Implement mixed-operation priority queue benchmark.**
   - Operations: insert (variable batch size = variable CS), extract-min
@@ -167,32 +224,28 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
     (extract-min, short CS)
   - Measures: consumer starvation under unfair vs. fair locks
 
-- [ ] **Demonstrate natural scheduling property of FC-PQ/FC-SL.**
-  Show that priority-based combining naturally gives lower latency to threads
-  that have consumed less lock time — a property that banning cannot provide.
-
-### C. (Optional) Log / Write-Ahead Log
-
-- [ ] **Implement shared append-only log benchmark.**
-  - Small appends (short CS) vs. batch flushes (long CS)
-  - Relevant to database and storage systems
-  - Shows fairness under realistic mixed I/O pattern
-
 ---
 
-## Phase 6: Multi-Machine & NUMA Evaluation
+## Phase 7: Multi-Machine & NUMA Evaluation
 
-- [ ] **Obtain access to a NUMA machine.**
-  Cloudlab c6525-100g (AMD EPYC 7543, 32 cores, 2 NUMA nodes) or similar.
-  Alternatively, any dual-socket Intel/AMD system.
+Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 9.
 
-- [ ] **Run full micro-benchmark suite on NUMA machine.**
-  Repeat all experiments from Phase 0-1 on the second machine. Document
-  topology with `lscpu` and `numactl --hardware`.
+- [x] **Primary testbed: saturn (Intel Xeon Gold 6438M, 2-socket, 128T).**
+  *(Available. 2 NUMA nodes, Sapphire Rapids.)*
 
-- [ ] **Test NUMA-aware thread placement.**
-  Run with threads spread across NUMA nodes vs. packed on one node. Measure
-  whether banning/priority mechanisms interact with NUMA topology.
+- [ ] **Obtain access to an AMD machine.**
+  Need at least one AMD EPYC (Zen 3/4) for cross-vendor validation.
+  Different L3 topology (CCX/CCD) and Infinity Fabric interconnect may
+  change the delegation crossover point.
+
+- [ ] **Run NUMA stress test on saturn.**
+  Pin half threads to socket 0, half to socket 1 vs packed on one socket.
+  Compare throughput ratio and `perf stat` cache misses across lock types.
+  Delegation should show smaller NUMA penalty than MCS/Mutex.
+
+- [ ] **Run full micro-benchmark suite on AMD machine.**
+  Repeat Phase 1 experiments. Document topology with `lscpu`, `numactl
+  --hardware`, and `lstopo`.
 
 - [ ] **Consider H-Synch extension.**
   If NUMA effects are significant, implement NUMA-aware fair combining
@@ -201,7 +254,9 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 ---
 
-## Phase 7: Overhead Analysis
+## Phase 8: Overhead Analysis
+
+Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 10.
 
 - [ ] **Run perf stat profiles for all lock variants.**
   Extend `profile.nu` to cover all DLock2 variants. Collect:
@@ -228,7 +283,7 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 ---
 
-## Phase 8: Writing
+## Phase 9: Writing
 
 - [ ] **Draft Section 3 (Design).**
   - Formal usage-fairness definition
@@ -239,7 +294,7 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 - [ ] **Draft Section 4 (Evaluation).**
   - Experimental setup (machines, methodology)
-  - **Fairness-performance tradeoff figure** (the central result from Phase 1)
+  - **Fairness-performance tradeoff figure** (the central result from Phase 3)
   - Micro-benchmark throughput graphs
   - Fairness analysis (JFI tables, per-thread bar charts)
   - Response time CDFs (combiner vs. waiter)
@@ -271,7 +326,7 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 ---
 
-## Phase 9: Stretch Goals (if time permits)
+## Phase 10: Stretch Goals (if time permits)
 
 - [ ] **Async/coroutine combiner prototype.**
   Use Rust async/await to implement a combiner that can yield its
@@ -303,32 +358,34 @@ Concrete code tasks inspired by CFL, ShflLock, Syncord, TCLocks
 
 | Item | Blocks | Notes |
 |------|--------|-------|
-| ~~JFI implementation~~ | ~~Phase 1, Phase 8~~ | Done (`a3131ac`) |
-| CFL baseline implementation | Phase 1 | Critical for the central claim |
-| ~~MCS baseline implementation~~ | ~~Phase 1~~ | Done (`4d57e13`) |
-| Response time CDF tooling | Phase 2, Phase 5 | Reusable across all experiments |
-| NUMA machine access | Phase 6 | Apply for Cloudlab allocation early |
-| End-to-end app design | Phase 5, Phase 8 | Needs agreement on which apps are most compelling |
-| Combiner penalty data | Phase 8 (intro figures) | The motivating figure needs this data |
-| Scope the O(C_max) claim | Phase 8 | See note below |
+| ~~JFI implementation~~ | ~~Phase 1, Phase 9~~ | Done (`a3131ac`) |
+| CFL baseline implementation | Phase 3 | Critical for the central claim |
+| ~~MCS baseline implementation~~ | ~~Phase 3~~ | Done (`4d57e13`) |
+| Response time CDF tooling | Phase 2, Phase 6 | Reusable across all experiments |
+| AMD machine access | Phase 7 | Cross-vendor validation |
+| End-to-end app design | Phase 6, Phase 9 | Hash map + log buffer spec in EXPERIMENT_PLAN.md |
+| Combiner penalty data | Phase 9 (intro figures) | The motivating figure needs this data |
+| Scope the O(C_max) claim | Phase 9 | See note below |
 
 ---
 
-## Priority Order (what to do first)
+## Priority Order (what to do next)
 
-1. **Phase 0** — metrics and tooling (JFI, CDF, response time audit)
-2. **Phase 1** — fairness-performance tradeoff (requires CFL + MCS baselines)
+1. **Phase 1** — run micro-benchmark suite (zero code, high value)
+2. **Phase 0** — response time CDF tooling (needed for Phase 1 Group 4)
 3. **Phase 2** — combiner response-time study
-4. **Phase 4** — newcomer init + starvation counter (quick wins, strengthen fairness story)
-5. **Phase 5** — end-to-end applications (at least hash map)
-6. **Phase 3** — remaining baselines (ticket, CLH, adaptive mutex)
-7. **Phase 6** — NUMA machine experiments
-8. **Phase 7** — overhead analysis (perf stat)
-9. **Phase 8** — writing
+4. **Phase 3** — CFL baseline + tradeoff validation (central claim)
+5. **Phase 5** — newcomer init + starvation counter (quick wins)
+6. **Phase 6** — end-to-end applications (at least hash map)
+7. **Phase 4** — remaining baselines (ticket, CLH, adaptive mutex)
+8. **Phase 7** — multi-machine NUMA experiments
+9. **Phase 8** — overhead analysis (perf stat)
+10. **Phase 9** — writing
 
-Phase 1 is the most important because it validates the paper's strongest
-claim. If FC→FC-PQ throughput gap is small and MCS→CFL gap is large, the
-story writes itself. If not, we need to rethink the framing.
+Phase 1 is the immediate priority — it requires zero code changes and
+produces the data for multiple paper figures. Phase 3 (CFL baseline) is
+the most important *code* task because it validates the paper's strongest
+claim.
 
 **Framing note (2025-02-25):** The O(C_max) usage-fairness bound is real
 but must be scoped carefully. It bounds *cumulative lock-holding time* gap,
@@ -348,9 +405,9 @@ FC-PQ vs CFL directly. They solve fairness in different paradigms.
    for apples-to-apples comparison. Original code is more credible but
    harder to integrate.
 
-2. **Which end-to-end apps?** Hash map is the safest choice (well-understood,
-   easy to argue relevance). Priority queue is natural given FC-PQ. Choose at
-   least one, ideally two.
+2. **Which end-to-end apps?** Hash map + log buffer (spec in EXPERIMENT_PLAN.md).
+   Hash map is the safest choice (well-understood, easy to argue relevance).
+   Log buffer demonstrates write-dominated asymmetric workload.
 
 3. **PPoPP vs. EuroSys?** If the tradeoff experiment + one end-to-end app
    are solid by Aug 2026, target PPoPP. If more time is needed, fall back

@@ -67,5 +67,5 @@ where
     C_FC(CFlatCombining<T, F, I>),
     C_CC(CCCSynch<T, F, I>),
     ShflLock(DLock2Wrapper<T, I, F, RawShflLock>),
-    C_AQS(DLock2Wrapper<T, I, F, RawCAqs>),
+    ShflLock_C(DLock2Wrapper<T, I, F, RawCAqs>),
 }

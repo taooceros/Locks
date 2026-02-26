@@ -237,6 +237,6 @@ dlock2_counter_tests!(
 );
 
 dlock2_counter_tests!(
-    c_aqs,
+    shfl_lock_c,
     DLock2Wrapper::<u64, u64, Delegate, RawCAqs>::new(0_u64, counter_delegate)
 );
