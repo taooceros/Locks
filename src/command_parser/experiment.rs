@@ -99,6 +99,38 @@ pub enum DLock2Experiment {
         include_lock_free: bool,
         #[arg(long = "stat-hold-time", default_value_t = true)]
         stat_hold_time: bool,
+        /// Number of u64 elements in the protected array (default: 4096 = 32 KiB).
+        /// Use larger values to exceed L1 cache (>6144 = 48 KiB on Sapphire Rapids).
+        #[arg(long = "array-size", default_value_t = 4096)]
+        array_size: usize,
+        /// Use random access pattern instead of sequential.
+        /// Defeats hardware prefetching, making cache misses more expensive.
+        #[arg(long = "random-access", default_value_t = false)]
+        random_access: bool,
+    },
+    /// Concurrent HashMap benchmark with heterogeneous operations (get/put/scan)
+    HashMap {
+        /// Number of scanner threads (remaining threads are lookup)
+        #[arg(long = "scan-threads", default_value_t = 2)]
+        scan_threads: usize,
+        /// Scan sizes (number of entries iterated per scan operation)
+        #[arg(long = "scan-size", default_values_t = [100usize], value_delimiter = ',')]
+        scan_sizes: Vec<usize>,
+        /// Number of entries to pre-populate
+        #[arg(long = "num-entries", default_value_t = 10000)]
+        num_entries: usize,
+        /// Get ratio among lookup operations (1.0 = all gets, 0.0 = all puts)
+        #[arg(long = "get-ratio", default_value_t = 0.9)]
+        get_ratio: f64,
+        /// Zipfian skew parameter (0 = uniform, 0.99 = highly skewed)
+        #[arg(long = "zipf-theta", default_value_t = 0.99)]
+        zipf_theta: f64,
+        /// Custom file name for output
+        #[arg(long = "file-name")]
+        file_name: Option<String>,
+        /// Track per-CS hold time for fairness metrics
+        #[arg(long = "stat-hold-time", default_value_t = true)]
+        stat_hold_time: bool,
     },
 }
 

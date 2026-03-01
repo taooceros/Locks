@@ -19,6 +19,7 @@ use super::bencher::Bencher;
 mod counter_array;
 mod counter_common;
 mod fetch_and_multiply;
+mod hashmap;
 pub mod priority_queue;
 mod proportional_counter;
 pub mod queue;
@@ -101,6 +102,8 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                     file_name,
                     include_lock_free,
                     stat_hold_time,
+                    array_size,
+                    random_access,
                 } => counter_array(
                     bencher,
                     file_name.as_deref().unwrap_or_else(|| {
@@ -113,6 +116,27 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
                     cs_loops.iter().copied(),
                     non_cs_loops.iter().copied(),
                     *include_lock_free,
+                    *stat_hold_time,
+                    *array_size,
+                    *random_access,
+                ),
+                DLock2Experiment::HashMap {
+                    scan_threads,
+                    scan_sizes,
+                    num_entries,
+                    get_ratio,
+                    zipf_theta,
+                    file_name,
+                    stat_hold_time,
+                } => hashmap::benchmark_hashmap(
+                    bencher,
+                    file_name.as_deref().unwrap_or("hashmap"),
+                    targets.iter(),
+                    *scan_threads,
+                    scan_sizes,
+                    *num_entries,
+                    *get_ratio,
+                    *zipf_theta,
                     *stat_hold_time,
                 ),
             }

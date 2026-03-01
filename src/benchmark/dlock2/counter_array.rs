@@ -12,11 +12,6 @@ use crate::{
 
 use super::counter_common::{finish_benchmark, start_benchmark, Data};
 
-/// Array size for the protected data. 4096 u64s = 32 KiB, fits comfortably
-/// in L1 data cache (typically 32-48 KiB). Each CS invocation touches
-/// `cs_loop` consecutive elements, so the cache footprint scales with CS.
-const ARRAY_SIZE: usize = 4096;
-
 pub fn counter_array<'a>(
     bencher: &Bencher,
     file_name: &str,
@@ -25,13 +20,15 @@ pub fn counter_array<'a>(
     non_cs_loop: impl Iterator<Item = u64> + Clone,
     _include_lock_free: bool,
     stat_hold_time: bool,
+    array_size: usize,
+    random_access: bool,
 ) {
     for target in targets {
         let lock = target.to_locktype(
-            [0u64; ARRAY_SIZE],
+            vec![0u64; array_size],
             Data::default(),
             #[inline(never)]
-            move |data: &mut [u64; ARRAY_SIZE], input: Data| {
+            move |data: &mut Vec<u64>, input: Data| {
                 let input = input;
 
                 if let Data::Input {
@@ -47,15 +44,30 @@ pub fn counter_array<'a>(
                         }
                     };
 
-                    // Each iteration touches a distinct u64 in the array,
-                    // wrapping around. CS=100 means 100 different u64s
-                    // (800 bytes, ~13 cache lines) are accessed.
-                    let mut idx = 0usize;
-                    while loop_limit > 0 {
-                        data[idx % ARRAY_SIZE] =
-                            black_box(data[idx % ARRAY_SIZE]).wrapping_add(1);
-                        idx += 1;
-                        loop_limit -= 1;
+                    let len = data.len();
+
+                    if random_access {
+                        // Xorshift32 PRNG for random index generation.
+                        // Seeded from loop_limit to vary across CS sizes.
+                        let mut rng = (loop_limit as u32) | 1;
+                        while loop_limit > 0 {
+                            rng ^= rng << 13;
+                            rng ^= rng >> 17;
+                            rng ^= rng << 5;
+                            let idx = (rng as usize) % len;
+                            data[idx] =
+                                black_box(data[idx]).wrapping_add(1);
+                            loop_limit -= 1;
+                        }
+                    } else {
+                        // Sequential access (original behavior).
+                        let mut idx = 0usize;
+                        while loop_limit > 0 {
+                            data[idx % len] =
+                                black_box(data[idx % len]).wrapping_add(1);
+                            idx += 1;
+                            loop_limit -= 1;
+                        }
                     }
 
                     let hold_time = if stat_hold_time {
@@ -65,7 +77,6 @@ pub fn counter_array<'a>(
                         0
                     };
 
-                    // Sum first element as representative output value.
                     return Data::Output {
                         hold_time,
                         is_combiner: current().id() == thread_id,
