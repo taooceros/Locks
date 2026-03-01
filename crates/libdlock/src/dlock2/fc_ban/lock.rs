@@ -200,7 +200,7 @@ where
             if self.combiner_lock.try_lock() {
                 self.combine();
                 unsafe {
-                    if self.pass.load(Relaxed) % CLEAN_UP_AGE == 0 {
+                    if self.pass.load(Relaxed).is_multiple_of(CLEAN_UP_AGE) {
                         self.clean_unactive_node(&self.head, self.pass.load(Relaxed));
                     }
                     self.combiner_lock.unlock();

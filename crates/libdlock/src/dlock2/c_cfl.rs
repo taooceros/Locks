@@ -10,7 +10,7 @@ use std::mem::MaybeUninit;
 use lock_api::{GuardSend, RawMutex};
 use thread_local::ThreadLocal;
 
-use crate::{cfl_init, cfl_lock, cfl_mutex_t, cfl_node_t, cfl_unlock};
+use crate::{cfl_lock, cfl_mutex_t, cfl_node_t, cfl_unlock};
 
 /// Newtype around `cfl_node_t` to implement `Send` + `Sync`.
 ///

@@ -107,12 +107,14 @@ fn numa_nodes() -> u32 {
 
 // C: unsigned long runtime_checker_core[256];
 // Reads use load(Relaxed) = plain mov. Writes use load+add+store (no lock prefix).
+#[allow(clippy::declare_interior_mutable_const)]
 static RUNTIME_CHECKER_CORE: [AtomicU64; 256] = {
     const ZERO: AtomicU64 = AtomicU64::new(0);
     [ZERO; 256]
 };
 
 // C: unsigned long runtime_checker_node[16];
+#[allow(clippy::declare_interior_mutable_const)]
 static RUNTIME_CHECKER_NODE: [AtomicU64; 16] = {
     const ZERO: AtomicU64 = AtomicU64::new(0);
     [ZERO; 16]
@@ -218,7 +220,7 @@ fn keep_lock_local() -> bool {
 /// `rdtsc` is ~10 cycles cheaper than `rdtscp` since it's non-serializing.
 #[inline]
 fn cfl_rdtsc() -> u64 {
-    unsafe { core::arch::x86_64::_rdtsc() as u64 }
+    unsafe { core::arch::x86_64::_rdtsc() }
 }
 
 // ====================================================================
@@ -391,8 +393,9 @@ impl RawCflLock {
     // ================================================================
     // shuffle_waiters() — core CFL queue reordering
     // (C lines 187-306, from fairnumas.c, unmodified algorithm)
+    // Late-init variables and empty branches mirror the C source.
     // ================================================================
-
+    #[allow(clippy::needless_late_init, clippy::needless_ifs, unused_assignments)]
     unsafe fn shuffle_waiters(&self, node: *mut QNode, is_next_waiter: bool) {
         // C: cfl_node_t *curr, *prev, *next, *last, *sleader, *qend, *iter, *stand;
         let mut curr: *mut QNode;

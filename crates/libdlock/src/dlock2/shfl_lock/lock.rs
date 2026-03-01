@@ -197,6 +197,7 @@ impl RawShflLock {
     ///
     /// SAFETY: Called only by a single shuffle leader at a time while
     /// the node is live in the queue.
+    #[allow(unused_assignments)]
     unsafe fn shuffle_waiters(&self, node: *mut QNode, is_next_waiter: bool) {
         let nid = (*node).nid;
         let mut curr_locked_count = (*node).wcount.load(Ordering::Relaxed);

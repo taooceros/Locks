@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, ops::DerefMut};
+use std::cell::SyncUnsafeCell;
 
 use lock_api::RawMutex;
 
@@ -49,6 +49,6 @@ where
 
     #[cfg(feature = "combiner_stat")]
     fn get_combine_time(&self) -> Option<u64> {
-        return None;
+        None
     }
 }

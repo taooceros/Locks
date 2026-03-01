@@ -4,7 +4,7 @@ use std::{
     cell::{SyncUnsafeCell, UnsafeCell},
     hint::spin_loop,
     mem::MaybeUninit,
-    ptr::{self, null_mut},
+    ptr::null_mut,
     sync::atomic::{AtomicPtr, AtomicU8, Ordering::*},
 };
 
@@ -182,7 +182,7 @@ where
                 *thread_data.combiner_time_stat.get() += end - begin;
             }
 
-            return my_node.data.get().read().assume_init();
+            my_node.data.get().read().assume_init()
         }
     }
 

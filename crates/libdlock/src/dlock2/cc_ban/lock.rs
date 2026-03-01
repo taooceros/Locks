@@ -4,7 +4,7 @@ use std::{
     cell::SyncUnsafeCell,
     mem::MaybeUninit,
     ops::AddAssign,
-    ptr::{self, NonNull},
+    ptr::NonNull,
     sync::atomic::{AtomicPtr, AtomicU64, Ordering::*},
 };
 
@@ -120,7 +120,7 @@ where
 
         // wait for the current node to be waked
         while current_node.wait.load(Acquire) {
-            // spin
+            std::hint::spin_loop();
         }
 
         // check whether the current node is completed
@@ -191,7 +191,7 @@ where
             (*thread_data.combiner_time_stat.get()) += end - begin;
         }
 
-        return unsafe { current_node.data.get().read().assume_init() };
+        unsafe { current_node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]
@@ -199,7 +199,7 @@ where
         unsafe {
             self.local_node
                 .get()
-                .map(|local_node| (*local_node.combiner_time_stat.get()))
+                .map(|local_node| *local_node.combiner_time_stat.get())
         }
     }
 }

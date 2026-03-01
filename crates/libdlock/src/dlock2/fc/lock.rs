@@ -165,7 +165,7 @@ where
                 unsafe {
                     let pass = self.pass.load(Relaxed);
 
-                    if pass % CLEAN_UP_AGE == 0 {
+                    if pass.is_multiple_of(CLEAN_UP_AGE) {
                         self.clean_unactive_node(&self.head, pass);
                     }
 

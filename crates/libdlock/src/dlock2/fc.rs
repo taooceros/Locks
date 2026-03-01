@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use crate::spin_lock::RawSpinLock;
 
 mod lock;

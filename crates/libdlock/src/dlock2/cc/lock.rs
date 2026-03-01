@@ -4,7 +4,7 @@ use std::{
     cell::SyncUnsafeCell,
     hint::spin_loop,
     mem::MaybeUninit,
-    ptr::{self, NonNull},
+    ptr::NonNull,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -127,7 +127,7 @@ where
             *thread_data.combiner_time_stat.get() += end - begin;
         }
 
-        return unsafe { current_node.data.get().read().assume_init() };
+        unsafe { current_node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]
@@ -135,7 +135,7 @@ where
         unsafe {
             self.local_node
                 .get()
-                .map(|local_node| (*local_node.combiner_time_stat.get()).into())
+                .map(|local_node| *local_node.combiner_time_stat.get())
         }
     }
 }

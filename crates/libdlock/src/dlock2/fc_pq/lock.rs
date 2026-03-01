@@ -18,7 +18,6 @@ use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
     sequential_priority_queue::SequentialPriorityQueue,
-    spin_lock::RawSpinLock,
 };
 
 mod buffer;
@@ -26,8 +25,6 @@ mod buffer;
 use self::buffer::ConcurrentRingBuffer;
 
 use super::node::Node;
-
-const CLEAN_UP_AGE: u32 = 500;
 
 /// Maximum number of combining passes a node may wait before its usage is
 /// clamped to the current queue minimum.  Prevents unbounded starvation under

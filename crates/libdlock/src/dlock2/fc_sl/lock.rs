@@ -2,7 +2,6 @@ use std::{
     arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     mem::MaybeUninit,
-    ptr::{self},
     sync::atomic::{AtomicPtr, Ordering::*},
 };
 
@@ -18,8 +17,6 @@ use crate::{
 };
 
 use super::node::Node;
-
-const CLEAN_UP_AGE: u32 = 500;
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Eq, PartialOrd, Ord)]
