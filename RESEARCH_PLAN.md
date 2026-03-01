@@ -201,6 +201,20 @@ splitting. Their ~47ns context-switch overhead per waiter is the cost of
 transparency. Our delegation API avoids this overhead entirely but
 requires code modification.
 
+**TCLocks' evaluation methodology** (OSDI'23) provides a useful template
+for delegation lock papers: (1) micro-benchmarks stressing a single lock
+(FxMark MRDM/MWRM, will-it-scale lock1/mmap1, 30 seconds each, pinned
+threads); (2) a nano-benchmark (RCUHT hash table) for deep factor
+analysis isolating each optimization's contribution; (3) real applications
+(Psearchy, Metis) stressing kernel subsystems; (4) userspace validation
+(LevelDB). Their factor analysis (Fig 5g: Base → +NUMA → +Prefetch →
++WWJump) is particularly effective at decomposing throughput gains.
+Key differences from our evaluation: they measure **p99.99 latency**
+(lock+CS+unlock combined) but do NOT split combiner vs waiter roles,
+they do NOT measure fairness (no JFI, no per-thread hold-time), and
+they do NOT test heterogeneous CS workloads. These gaps are our
+unique contribution in evaluation methodology.
+
 #### vs. U-SCL: Delegation Preserves the Scheduling Point
 
 U-SCL (Patel et al., 2020) adds usage-fairness to traditional MCS locks
@@ -292,6 +306,30 @@ The remaining costs of fairness in delegation are:
 
 Both costs are small compared to the cross-core shared-data migration that
 traditional fair locks must pay on every handoff.
+
+**NUMA caveat (potential reviewer concern):** Fair reordering may cause the
+combiner to fetch waiter input data from remote NUMA nodes in non-linear
+order, reducing hardware prefetcher effectiveness. However, the cost is
+bounded: each waiter's input is typically 1-2 cache lines (function pointer
++ argument), while the shared data structure can be hundreds or thousands of
+cache lines (e.g., counter-array at 512 KiB = 8192 cache lines). Even
+worst-case remote-NUMA input fetches (1 miss × ~100ns NUMA penalty) are
+dwarfed by the shared-data migration cost traditional locks pay (8192 misses
+× ~50ns each). Our prefetch optimization (Phase 5, `_mm_prefetch` for next
+PQ root's data before executing current CS) further amortizes this cost.
+**Must validate empirically** with PMU counters in Group 10 (perf stat).
+
+**Prefetcher caveat (empirical finding, 2026-03-01):** Sequential access
+patterns allow the hardware prefetcher to mask cross-core data migration
+cost, making delegation appear to provide no throughput advantage over
+traditional locks (FC/ShflLock ≈ 1.0x with sequential access). **Random
+access patterns are essential** to expose the true migration penalty. With
+random access on a 512 KiB array (exceeds L1d = 48 KiB on Sapphire
+Rapids), delegation achieves ~2x throughput over ShflLock/MCS at 32
+threads. This is consistent with real-world access patterns: hash tables,
+B-trees, and log buffers exhibit pointer-chasing or key-hashed access,
+not sequential scans. The counter-array benchmark now supports
+`--random-access` and `--array-size` flags to control this.
 
 **Implication:** Delegation is not just *a place* to add fairness — it is
 *the right place*, because it uniquely decouples scheduling decisions from
@@ -419,21 +457,29 @@ inflates response time from own-CS to sum-of-all-CS.
 
 | Machine | Cores | Threads | Architecture | NUMA |
 |---------|-------|---------|-------------|------|
-| AMD EPYC 7302P | 16 | 32 | Zen 2 | 1 node |
-| Cloudlab c6525-100g (target) | 32 | 64 | AMD EPYC 7543 | 2 nodes |
-| Cloudlab c220g1 (fallback) | 16 | 32 | Intel Haswell | 2 nodes |
+| Intel Xeon Gold 6438M (saturn) | 64 | 128 | Sapphire Rapids | 2 nodes |
+| AMD EPYC (TBD) | TBD | TBD | Zen 3/4 | TBD |
+| Cloudlab c6525-100g (fallback) | 32 | 64 | AMD EPYC 7543 | 2 nodes |
 
-Running on at least two machines (one single-NUMA, one multi-NUMA) is
-necessary for a credible evaluation.
+Running on at least two machines (one Intel, one AMD) is necessary for
+a credible evaluation. TCLocks (OSDI'23) used an 8-socket, 224-core Intel
+machine; our 2-socket Saturn is competitive for the common 2-socket NUMA
+scenario. Need AMD for cross-vendor validation (different L3 topology,
+Infinity Fabric interconnect).
 
 ### 6.2 Lock Variants Under Test
 
-**Baselines:**
-- Mutex (pthread / Rust std)
+**Traditional (unfair):**
+- Mutex (Rust std — spins 100 iters then futex)
 - SpinLock (TTAS with backoff)
-- Ticket Lock
 - MCS Lock (queue-based, acquisition-fair)
-- U-SCL (scheduler-cooperative, lock-slice based)
+- ShflLock (MCS + NUMA-aware queue shuffling)
+- PthreadMutex (glibc NPTL, for reference)
+
+**Traditional (fair):**
+- CFL (MCS + off-path vLHT queue reordering)
+- Ticket Lock (FIFO, O(N) invalidations per handoff)
+- CLH Lock (FIFO, spins on predecessor)
 
 **Delegation (unfair):**
 - FC (Flat Combining)
@@ -443,17 +489,39 @@ necessary for a credible evaluation.
 **Delegation (our fair variants):**
 - FC-Ban, CC-Ban (banning)
 - FC-PQ (BinaryHeap), FC-PQ (BTree) (priority-based)
-- FC-SL (skip-list priority)
+
+**Scheduler-cooperative:**
+- U-SCL (lock-slice based, traditional MCS underneath)
 
 ### 6.3 Micro-Benchmarks
 
+**Methodology:** Each experiment runs 3 trials, 15s per trial for throughput
+(30s for final paper runs, following TCLocks' 30-second convention), 5s for
+latency experiments. Threads are pinned to cores. 2s warmup before measurement.
+
 #### Shared Counter (Proportional CS)
-- Two thread groups: CS₁ = 1000 iters, CS₂ = 3000 iters (3:1 ratio)
-- Non-CS: 0, 10, 100, 1K, 10K, 100K iterations
-- Thread counts: 2, 4, 8, 16, 32, 64
-- Duration: 15 seconds per configuration
+- CS ratio sweep: 1:1, 1:3, 1:10, 1:30, 1:100 (heterogeneous CS)
+- Non-CS sweep: 0, 10, 100, 1K, 10K, 100K (contention levels)
+- Thread counts: 4, 8, 16, 32, 64, 128
 - Metrics: total throughput, per-thread throughput, Jain's fairness index,
-  response time CDF (combiner vs. waiter)
+  response time CDF (combiner vs. waiter split), p50/p95/p99/p99.9
+
+#### Counter Array (Data Footprint)
+- Shared `Vec<u64>` with configurable size via `--array-size` (default 4096
+  elements = 32 KiB). Each CS touches `cs_loop` elements.
+- **Random access mode** (`--random-access`): xorshift PRNG index generation
+  defeats hardware prefetching, exposing the true cache migration cost.
+  Sequential access lets the prefetcher hide migration (FC/ShflLock ≈ 1.0x);
+  random access reveals the real gap (FC/ShflLock ≈ 2x at 512 KiB).
+- Array size sweep: 4096, 8192, 16384, 32768, 65536, 131072 elements
+  (32 KiB – 1 MiB). Key boundary: >6144 elements (48 KiB) exceeds L1d
+  on Sapphire Rapids.
+- Both sequential and random access for each size (sequential = null result
+  showing prefetcher masks migration; random = key result).
+- Isolates data migration cost from CS duration
+- Key result: delegation advantage grows with working set size and is
+  only visible with random access patterns (realistic for hash tables,
+  B-trees, log buffers)
 
 #### Fetch-and-Multiply
 - Ultra-short CS (single multiply)
@@ -461,30 +529,90 @@ necessary for a credible evaluation.
 - Compares against lock-free CAS baseline
 - Shows overhead floor of fairness mechanisms
 
-#### Single Addition with Latency
-- CS = 1 iteration (minimal)
-- Response time distribution focus
-- 8, 16 threads with --stat-response-time
+#### Factor Analysis (inspired by TCLocks OSDI'23)
+- Decompose FC-PQ's overhead relative to FC into additive components
+- Sequence: FC (base) → FC + PQ scheduling → FC-PQ (with all optimizations)
+- Also: FC-PQ without prefetch → FC-PQ with prefetch → FC-PQ with starvation bound
+- 32 threads, CS=1000,3000, 15s. Compare throughput and JFI at each step.
+- Analogous to TCLocks' Fig 5g (Base → +NUMA → +Prefetch → +WWJump)
+- Key result: most of FC→FC-PQ overhead is the PQ ops (O(log N)), not fairness enforcement
 
 ### 6.4 End-to-End Applications (TO BE IMPLEMENTED)
 
-#### A. Concurrent Hash Map
-- Lock-protected hash map (separate chaining, per-bucket locking or global)
-- YCSB-style workload: mixed get/put/scan operations
-- Threads doing scans (long CS) vs. threads doing point lookups (short CS)
+TCLocks' evaluation uses real kernel applications (Psearchy, Metis) and
+userspace workloads (LevelDB) beyond micro-benchmarks. We need at least
+one application benchmark to match this evaluation standard. Our applications
+are userspace (not kernel), but they demonstrate real-world patterns where
+fairness matters.
+
+**Important distinction from TCLocks:** TCLocks can transparently replace
+`spinlock_t` in the kernel — zero code changes. Our delegation API
+requires restructuring CS into delegate functions. This means we cannot
+simply drop into arbitrary applications. Our benchmarks must be designed
+as delegation-compatible workloads that represent real-world access
+patterns (heterogeneous CS, reader-writer asymmetry, scan vs point-lookup).
+Reviewers may call these "complex micro-benchmarks" rather than
+"real applications" — we should be honest about this and argue that the
+patterns (not the specific applications) are what matter.
+
+#### A. Concurrent Hash Map (Priority: Very High)
+- Lock-protected hash map, single global delegation lock
+- Operations: get (short CS ~100ns), put (medium ~500ns), scan (long ~5-50us)
+- Thread mix: N-2 lookup threads + 2 scan threads
+- Pre-populate 10K entries, Zipfian key distribution
 - **Hypothesis:** Fair delegation locks prevent scan threads from starving
-  lookup threads; tail latency for lookups stays bounded
+  lookup threads; lookup p99 stays bounded under FC-PQ
 
-#### B. Concurrent Priority Queue Server
-- Lock-protected priority queue serving mixed insert/extract-min
-- Variable-cost operations: bulk-insert (long CS) vs. single-extract (short CS)
-- **Hypothesis:** Priority-based combining (FC-PQ/FC-SL) provides natural
-  scheduling of operations by thread usage
+#### B. Producer-Consumer Log Buffer (Priority: High)
+- `VecDeque<LogEntry>`, single global delegation lock
+- N-1 producers (short CS: append one entry) + 1 consumer (long CS: drain batch)
+- Variable drain batch size: K=100, 250, 500
+- **Hypothesis:** FC-PQ throttles consumer's long CS, maintaining producer throughput
 
-#### C. Log-Structured Merge (Optional)
-- Shared write-ahead log protected by lock
-- Small writes vs. large batch writes
-- Demonstrates fairness under realistic I/O-adjacent workload
+#### C. (Optional) LevelDB Benchmark
+- Wrap LevelDB's global DB lock with delegation API, similar to TCLocks' Fig 6
+- `readrandom` workload with 1M KV pairs, mixed read/write
+- Would provide direct comparison point with TCLocks' evaluation
+- Requires C++ FFI integration — moderate effort but high credibility value
+
+### 6.4.1 Application Integration Paths (Research Notes)
+
+Three approaches exist for integrating delegation locks into real applications.
+Analysis based on TCLocks source code review (rs3lab/TCLocks on GitHub):
+
+**Approach 1: Explicit delegate API (current).** Our DLock2 trait requires
+restructuring CS into `lock(input) -> output` calls. Code change factor
+~8-10x vs std::sync::Mutex. Suitable for purpose-built benchmarks (hash map,
+log buffer) but not for retrofitting existing applications.
+
+**Approach 2: LD_PRELOAD transparent delegation (TCLocks-style).** TCLocks
+already has a working userspace port (`src/userspace/litl/`) that intercepts
+`pthread_mutex_*` via the LiTL framework. Core mechanism: lightweight
+coroutine-style stack switch via 14 instructions of x86-64 inline assembly
+(`komb_context_switch`). Each thread gets an 8KB thread-local shadow stack.
+The combiner swaps RSP to the waiter's saved stack, the waiter's code resumes
+normally through unlock, then control returns to the combiner. ~47ns overhead
+per waiter. Works in userspace because no kernel privileges needed for RSP
+manipulation. Key concern: signal safety (signals on wrong thread's stack).
+
+**Approach 3: QD Lock automatic transformation (Uppsala).** Klaftenegger,
+Sagonas & Winblad (Euro-Par 2014, IEEE TPDS 2017) built a tool that
+automatically transforms C `pthread_mutex_lock/unlock` pairs into QD Lock
+delegation calls. For Rust, a proc-macro could do the same for simple
+`Mutex::lock()` / `guard` / `drop` patterns.
+
+**For the paper:** Focus on Approach 1 (explicit API) for hash map and log
+buffer. Mention Approach 2 in Discussion as future work: "Our fairness
+mechanisms (priority-based combining) are orthogonal to the transparency
+mechanism (stack-switching). Combining TCLocks' transparent delegation with
+FC-PQ's priority scheduling would yield fair transparent delegation —
+benefiting unmodified applications."
+
+**Key insight from TCLocks source:** Their NUMA-aware `get_next_node()`
+reorders the waiter queue for locality without measuring or bounding
+fairness. This proves reordering is free in delegation (shared data stays
+in combiner's L1 regardless of order), directly supporting our thesis that
+FC-PQ's priority reordering for fairness is also essentially free.
 
 ### 6.5 Analysis & Metrics
 
@@ -507,14 +635,24 @@ JFI = 1.0 is perfectly fair; JFI = 1/n is maximally unfair. Useful for
 comparing across many configurations at a glance, but less informative
 than the per-thread breakdown.
 
-**Tail Latency:** p50, p99, p99.9 response times, both overall and split by
-combiner vs. waiter role.
+**Tail Latency:** p50, p95, p99, p99.9, p99.99 response times, both overall
+and split by combiner vs. waiter role. TCLocks reports p99.99 — we should
+match this. Our combiner/waiter split is a unique contribution they lack.
 
 **Overhead:** perf stat profiles (cache misses, L1/L2/LLC misses, dTLB
 misses, CPU migrations) for each lock variant.
 
 **Fairness-Throughput Tradeoff:** Scatter plot of (throughput, JFI) for each
-lock variant × thread count, showing Pareto frontier.
+lock variant × thread count, showing Pareto frontier. This is the paper's
+**central result figure**: FC-PQ should appear in the upper-right (high
+throughput + high JFI) while CFL appears upper-left (high JFI, low
+throughput) and FC appears lower-right (high throughput, low JFI).
+
+**Factor Analysis (new, inspired by TCLocks):** Decompose FC-PQ's
+throughput overhead vs FC into additive contributions from each mechanism.
+Plot stacked bar or waterfall chart showing: base FC throughput → cost of
+PQ scheduling → cost of starvation bound → net FC-PQ throughput.
+Analogous to TCLocks' Fig 5g factor decomposition.
 
 ---
 
@@ -539,18 +677,23 @@ lock variant × thread count, showing Pareto frontier.
    - Implementation in Rust (DLock2 framework)
 
 4. **Evaluation** (3.5 pages)
-   - Experimental setup
-   - Micro-benchmark throughput
-   - Fairness analysis (per-thread, Jain's index)
-   - Response time distributions
-   - Combiner penalty characterization
-   - End-to-end applications
-   - Overhead breakdown
+   - Experimental setup (machines, pinning, methodology)
+   - **Fairness-throughput Pareto scatter** (the central result)
+   - **Factor analysis** (FC → FC-PQ overhead decomposition)
+   - Micro-benchmark throughput (CS ratio sweep, thread scaling)
+   - Fairness analysis (per-thread hold-time, Jain's index)
+   - Response time distributions (combiner vs waiter split CDFs)
+   - Combiner penalty characterization (penalty ratio vs thread count)
+   - Delegation vs ShflLock head-to-head (fairness, L1 locality, tail latency)
+   - Data footprint scaling (array size sweep, sequential vs random access —
+     shows prefetcher masks migration cost; random access reveals 2x advantage)
+   - End-to-end applications (hash map, log buffer)
+   - Cache miss validation (perf stat: L1/LLC misses)
 
 5. **Discussion** (0.5 pages)
-   - Async/coroutine combiner vision (future work)
+   - Transparent fair delegation (TCLocks + FC-PQ combination — future work)
    - NUMA-aware fair combining (H-Synch extension)
-   - Transparent delegation integration (TCLocks compatibility)
+   - Async/coroutine combiner vision (future work)
 
 6. **Related Work** (1 page)
 
@@ -578,22 +721,58 @@ needs more time.
 1. **Is the throughput-fairness tradeoff significant enough?** If fair variants
    only lose 5% throughput while gaining near-perfect fairness, the story is
    compelling. If the cost is 30%+, we need to argue harder about when fairness
-   matters.
+   matters. The factor analysis (Group 12) directly measures this.
+   **Update (2026-03-01):** At large CS (array-size=65536, CS=4096), FC-PQ
+   is within 2% of FC throughput — fairness is essentially free. The cost
+   is only significant at ultra-short CS (single counter: FC-PQ = 0.74× FC).
 
 2. **Do real applications actually suffer from delegation unfairness?** The
    end-to-end benchmarks must demonstrate measurable impact — not just
-   theoretical concern.
+   theoretical concern. Reviewers may argue our hash map / log buffer are
+   "complex micro-benchmarks" rather than real applications. We should be
+   honest about this limitation and argue the access patterns are representative.
+   A LevelDB integration (Section 6.4C) would significantly strengthen credibility.
 
 3. **How does NUMA affect the fairness mechanisms?** Banning a remote-NUMA
-   thread has different cost implications than banning a local one.
+   thread has different cost implications than banning a local one. Fair
+   reordering may cause non-linear NUMA access to waiter inputs. Must validate
+   with PMU counters (Group 10) that input-fetch NUMA penalty is small relative
+   to shared-data migration savings.
 
 4. **Is the async/coroutine combiner idea implementable?** Even a prototype
-   would massively strengthen the paper, but it's high-risk.
+   would massively strengthen the paper, but it's high-risk. A combiner that
+   yields back to an async runtime during CS execution would elevate this
+   from "better lock" to "next-gen concurrency primitive." Defer to future work
+   unless core evaluation completes early.
 
 5. **Reviewer pushback on Rust-only implementation?** Systems conferences
-   sometimes prefer C/C++ for lock papers. The C implementations exist but
-   aren't as complete. May need to argue that Rust's zero-cost abstractions
-   make the comparison fair.
+   sometimes prefer C/C++ for lock papers. Mitigated by our C baseline
+   implementations (FC-C, CC-C, ShflLock-C) connected via FFI. These validate
+   that Rust implementations match C performance. Argue Rust's zero-cost
+   abstractions make the comparison fair.
+
+6. **Combiner pass time-bounding.** Should the combiner yield mid-pass if it
+   exceeds a time quota? TCLocks uses `WAITERS_TO_COMBINE = 1024` as a count
+   bound. A time-based bound would cap combiner latency but risks
+   work-conservation violations. This is the batch-size sensitivity analysis
+   (TCLocks Fig 5i). Consider as future optimization if combiner penalty
+   data (Phase 2) shows it's a problem in practice.
+
+7. **Hardware prefetching masks delegation's throughput advantage in
+   sequential benchmarks.** (Discovered 2026-03-01.) With sequential array
+   access, FC/ShflLock ≈ 1.0x regardless of data footprint — the prefetcher
+   compensates for cross-core migration. Random access is required to expose
+   the real gap (FC/ShflLock ≈ 2x at 512 KiB, 32 threads). This means:
+   - Counter-array experiments **must** use `--random-access` to show
+     delegation's locality advantage.
+   - The paper must present both sequential (null result) and random (key
+     result) to be honest about when delegation helps.
+   - Real-world workloads (hash tables, B-trees) naturally have random/
+     pointer-chasing access, so the random-access result is the
+     representative one. But reviewers may challenge this — be ready to
+     argue that sequential counter is the unrealistic case, not random.
+   - The hash map application benchmark (Phase 6) will exhibit random access
+     by construction (key-hashed lookups), providing a natural validation.
 
 ---
 
