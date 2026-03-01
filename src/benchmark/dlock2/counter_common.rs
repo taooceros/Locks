@@ -51,7 +51,15 @@ pub fn compute_percentiles(sorted: &[u64]) -> (u64, u64, u64, u64, u64, u64, f64
     };
     let sum: u64 = sorted.iter().sum();
     let mean = sum as f64 / n as f64;
-    (p(0.50), p(0.95), p(0.99), p(0.999), sorted[0], sorted[n - 1], mean)
+    (
+        p(0.50),
+        p(0.95),
+        p(0.99),
+        p(0.999),
+        sorted[0],
+        sorted[n - 1],
+        mean,
+    )
 }
 
 /// Print percentile summary for a latency distribution.

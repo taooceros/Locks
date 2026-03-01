@@ -1,14 +1,6 @@
-use std::{
-    arch::x86_64::__rdtscp,
-    hint::black_box,
-    sync::Arc,
-    thread::current,
-};
+use std::{arch::x86_64::__rdtscp, hint::black_box, sync::Arc, thread::current};
 
-use crate::{
-    benchmark::bencher::Bencher,
-    lock_target::DLock2Target,
-};
+use crate::{benchmark::bencher::Bencher, lock_target::DLock2Target};
 
 use super::counter_common::{finish_benchmark, start_benchmark, Data};
 
@@ -55,16 +47,14 @@ pub fn counter_array<'a>(
                             rng ^= rng >> 17;
                             rng ^= rng << 5;
                             let idx = (rng as usize) % len;
-                            data[idx] =
-                                black_box(data[idx]).wrapping_add(1);
+                            data[idx] = black_box(data[idx]).wrapping_add(1);
                             loop_limit -= 1;
                         }
                     } else {
                         // Sequential access (original behavior).
                         let mut idx = 0usize;
                         while loop_limit > 0 {
-                            data[idx % len] =
-                                black_box(data[idx % len]).wrapping_add(1);
+                            data[idx % len] = black_box(data[idx % len]).wrapping_add(1);
                             idx += 1;
                             loop_limit -= 1;
                         }

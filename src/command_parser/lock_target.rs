@@ -15,8 +15,8 @@ use libdlock::{
     dlock2::{
         self, c_aqs::RawCAqs, c_cfl::RawCCfl, cfl::RawCflLock, clh::RawClhLock, fc::FC,
         fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex,
-        shfl_lock::RawShflLock, spinlock::DLock2Wrapper, ticket::RawTicketLock,
-        uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
+        shfl_lock::RawShflLock, spinlock::DLock2Wrapper, ticket::RawTicketLock, uscl::DLock2USCL,
+        DLock2Delegate, DLock2Impl,
     },
     parker::Parker,
     spin_lock::{RawSpinLock, SpinLock},

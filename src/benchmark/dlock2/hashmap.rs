@@ -35,14 +35,35 @@ pub type Value = [u8; 64];
 #[derive(Debug, Clone)]
 pub enum HashMapOp {
     // Inputs (thread -> combiner)
-    Get { key: u64, thread_id: ThreadId },
-    Put { key: u64, value: Value, thread_id: ThreadId },
-    Scan { count: usize, thread_id: ThreadId },
+    Get {
+        key: u64,
+        thread_id: ThreadId,
+    },
+    Put {
+        key: u64,
+        value: Value,
+        thread_id: ThreadId,
+    },
+    Scan {
+        count: usize,
+        thread_id: ThreadId,
+    },
 
     // Outputs (combiner -> thread)
-    GetResult { found: bool, hold_time: u64, is_combiner: bool },
-    PutResult { hold_time: u64, is_combiner: bool },
-    ScanResult { entries_scanned: usize, hold_time: u64, is_combiner: bool },
+    GetResult {
+        found: bool,
+        hold_time: u64,
+        is_combiner: bool,
+    },
+    PutResult {
+        hold_time: u64,
+        is_combiner: bool,
+    },
+    ScanResult {
+        entries_scanned: usize,
+        hold_time: u64,
+        is_combiner: bool,
+    },
 
     Nothing,
 }
@@ -71,7 +92,13 @@ impl ZipfianSampler {
         let zeta2 = Self::zeta(2, theta);
         let alpha = 1.0 / (1.0 - theta);
         let eta = (1.0 - (2.0 / n as f64).powf(1.0 - theta)) / (1.0 - zeta2 / zetan);
-        Self { n, alpha, zetan, eta, theta }
+        Self {
+            n,
+            alpha,
+            zetan,
+            eta,
+            theta,
+        }
     }
 
     fn zeta(n: u64, theta: f64) -> f64 {
@@ -133,7 +160,11 @@ pub fn benchmark_hashmap<'a>(
                 match input {
                     HashMapOp::Get { key, thread_id } => {
                         let ts = unsafe {
-                            if stat_hold_time { __rdtscp(&mut 0) } else { 0 }
+                            if stat_hold_time {
+                                __rdtscp(&mut 0)
+                            } else {
+                                0
+                            }
                         };
 
                         let found = if let Some(v) = data.get(&key) {
@@ -156,9 +187,17 @@ pub fn benchmark_hashmap<'a>(
                             is_combiner: current().id() == thread_id,
                         }
                     }
-                    HashMapOp::Put { key, value, thread_id } => {
+                    HashMapOp::Put {
+                        key,
+                        value,
+                        thread_id,
+                    } => {
                         let ts = unsafe {
-                            if stat_hold_time { __rdtscp(&mut 0) } else { 0 }
+                            if stat_hold_time {
+                                __rdtscp(&mut 0)
+                            } else {
+                                0
+                            }
                         };
 
                         data.insert(key, value);
@@ -177,7 +216,11 @@ pub fn benchmark_hashmap<'a>(
                     }
                     HashMapOp::Scan { count, thread_id } => {
                         let ts = unsafe {
-                            if stat_hold_time { __rdtscp(&mut 0) } else { 0 }
+                            if stat_hold_time {
+                                __rdtscp(&mut 0)
+                            } else {
+                                0
+                            }
                         };
 
                         let mut scanned = 0usize;
@@ -330,15 +373,20 @@ where
                         let output = lock.lock(op);
 
                         let (ht, is_comb) = match &output {
-                            HashMapOp::GetResult { hold_time, is_combiner, .. } => {
-                                (*hold_time, *is_combiner)
-                            }
-                            HashMapOp::PutResult { hold_time, is_combiner } => {
-                                (*hold_time, *is_combiner)
-                            }
-                            HashMapOp::ScanResult { hold_time, is_combiner, .. } => {
-                                (*hold_time, *is_combiner)
-                            }
+                            HashMapOp::GetResult {
+                                hold_time,
+                                is_combiner,
+                                ..
+                            } => (*hold_time, *is_combiner),
+                            HashMapOp::PutResult {
+                                hold_time,
+                                is_combiner,
+                            } => (*hold_time, *is_combiner),
+                            HashMapOp::ScanResult {
+                                hold_time,
+                                is_combiner,
+                                ..
+                            } => (*hold_time, *is_combiner),
                             _ => panic!("Invalid hashmap output"),
                         };
 
@@ -404,9 +452,6 @@ where
         thread::sleep(Duration::from_secs(bencher.duration));
         stop_signal.store(true, Ordering::Release);
 
-        handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect()
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
     })
 }

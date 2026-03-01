@@ -38,16 +38,13 @@ pub fn benchmark_dlock2(bencher: &Bencher, option: &DLock2Option) {
 
             let mut default_targets = None;
 
-            let targets = option
-                .lock_targets
-                .as_ref()
-                .unwrap_or_else(|| {
-                    default_targets.insert(
-                        DLock2Target::iter()
-                            .filter(|t| !matches!(t, DLock2Target::FcSL))
-                            .collect_vec(),
-                    )
-                });
+            let targets = option.lock_targets.as_ref().unwrap_or_else(|| {
+                default_targets.insert(
+                    DLock2Target::iter()
+                        .filter(|t| !matches!(t, DLock2Target::FcSL))
+                        .collect_vec(),
+                )
+            });
 
             let mut name_maybe = None;
 
