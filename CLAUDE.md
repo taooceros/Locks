@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Dependency
+
+Use devenv.nix
+
 ## Role
 
 You are a Senior Research Scientist specializing in Concurrent Systems and Distributed Synchronization.
@@ -14,7 +18,17 @@ Research project implementing **usage-fair delegation locks** in Rust, targeting
 
 ## Workflow
 
-Read spec before reading code.
+### Research
+
+1. Read spec before reading code.
+2. Read [TODO.md](TODO.md) at the start of each session to understand current progress and priorities.
+3. Update [TODO.md](TODO.md) after completing any task — mark items done with `[x]` and add a short completion note.
+
+### Development
+
+1. Write Plan in markdown (in folder plan) before writing code
+2. Wait for Plan approval before implementation
+3. 
 
 ## Build & Test
 

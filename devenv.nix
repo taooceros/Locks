@@ -9,6 +9,7 @@
     just
     uv
     numactl
+    linuxPackages.perf
   ];
 
   languages.python = {
