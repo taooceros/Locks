@@ -18,7 +18,7 @@ pub struct ConcurrentRingBuffer<T, const N: usize> {
 }
 
 struct Entry<T> {
-    value: SyncUnsafeCell<T>,
+    value: SyncUnsafeCell<MaybeUninit<T>>,
     valid: CachePadded<AtomicUsize>,
 }
 
@@ -33,15 +33,16 @@ impl<T: 'static, const N: usize> Default for ConcurrentRingBuffer<T, N> {
 impl<T: 'static, const N: usize> ConcurrentRingBuffer<T, N> {
     pub fn new() -> Self {
         let mut buffer = Self {
-            buffer: unsafe { MaybeUninit::uninit().assume_init() },
+            buffer: SyncUnsafeCell::new([const { MaybeUninit::uninit() }; N]),
             head: AtomicUsize::new(0).into(),
             tail: AtomicUsize::new(0).into(),
         };
 
+        // Initialize each entry's `valid` flag to 0 (value stays uninitialized).
         unsafe {
             for entry in buffer.buffer.get_mut().iter_mut() {
                 entry.write(Entry {
-                    value: MaybeUninit::uninit().assume_init(),
+                    value: SyncUnsafeCell::new(MaybeUninit::uninit()),
                     valid: AtomicUsize::new(0).into(),
                 });
             }
@@ -55,38 +56,33 @@ impl<T: 'static, const N: usize> ConcurrentRingBuffer<T, N> {
         let tail = self.tail.fetch_add(1, Ordering::AcqRel);
         let mut head = self.head.load_acquire();
 
-        loop {
-            // check if the buffer is full
-            // if the buffer is full, spin until the buffer is not full
-            if tail.wrapping_sub(head) >= N {
-                loop {
-                    head = self.head.load_acquire();
-                    if tail.wrapping_sub(head) < N {
-                        break;
-                    }
-
-                    spin_loop();
-                }
-            }
-
-            // invariant: the current position is owned by the current thread
-            // invariant: any previous value in this location should be already consumed
-
-            unsafe {
-                let entry = (*self.buffer.get())[tail % N].assume_init_mut();
-
-                let backoff = Backoff::new();
-
-                // 1 if the entry is used by the other thread
-                while entry.valid.load_acquire() != 0 {
-                    backoff.snooze();
+        // Spin until the buffer has space
+        if tail.wrapping_sub(head) >= N {
+            loop {
+                head = self.head.load_acquire();
+                if tail.wrapping_sub(head) < N {
+                    break;
                 }
 
-                entry.value.get().write(value);
-                entry.valid.store_release(1);
+                spin_loop();
+            }
+        }
+
+        // invariant: the current position is owned by the current thread
+        // invariant: any previous value in this location should be already consumed
+
+        unsafe {
+            let entry = (*self.buffer.get())[tail % N].assume_init_mut();
+
+            let backoff = Backoff::new();
+
+            // 1 if the entry is used by the other thread
+            while entry.valid.load_acquire() != 0 {
+                backoff.snooze();
             }
 
-            return;
+            (*entry.value.get()).write(value);
+            entry.valid.store_release(1);
         }
     }
 
@@ -140,7 +136,7 @@ impl<'a, T, const N: usize> Iterator for BufferIterator<'a, T, N> {
         }
 
         // take ownership of the item in the buffer
-        let value = unsafe { entry.value.get().read() };
+        let value = unsafe { (*entry.value.get()).assume_init_read() };
 
         self.head += 1;
 
