@@ -392,54 +392,17 @@ impl RawCflLock {
 
     // ================================================================
     // shuffle_waiters() — core CFL queue reordering
-    // (C lines 187-306, from fairnumas.c, unmodified algorithm)
-    // Late-init variables and empty branches mirror the C source.
+    // (C lines 187-306, from fairnumas.c)
     // ================================================================
-    #[allow(clippy::needless_late_init, clippy::needless_ifs, unused_assignments)]
     unsafe fn shuffle_waiters(&self, node: *mut QNode, is_next_waiter: bool) {
-        // C: cfl_node_t *curr, *prev, *next, *last, *sleader, *qend, *iter, *stand;
-        let mut curr: *mut QNode;
-        let mut prev: *mut QNode;
-        let mut next: *mut QNode;
-        let mut last: *mut QNode;
-        let mut sleader: *mut QNode;
-        let mut qend: *mut QNode;
-        let mut iter: *mut QNode;
-        let stand: *mut QNode;
-        // C: int nid = node->nid;
-        let mut nid: i32 = (*node).nid;
-        // C: int curr_locked_count = node->wcount;
         let mut curr_locked_count: u16 = (*node).wcount.load(Ordering::Relaxed);
-        // C: int one_shuffle = 0;
         let mut one_shuffle = false;
 
-        // C: unsigned long standard;
-        let standard: u64;
-
-        // C: prev = READ_ONCE(node->last_visited);
-        prev = (*node).last_visited.load(Ordering::Acquire);
-        // C: if (!prev) prev = node;
-        if prev.is_null() {
-            prev = node;
-        }
-        // C: sleader = NULL;
-        sleader = null_mut();
-        // C: prev = node;
-        prev = node;
-        // C: last = node;
-        last = node;
-        // C: curr = NULL;
-        curr = null_mut();
-        // C: next = NULL;
-        next = null_mut();
-        // C: qend = NULL;
-        qend = null_mut();
-        // C: stand = prev;
-        stand = prev;
-
-        // C: standard = 0;  (will be set below)
-        // C: iter = NULL;
-        iter = null_mut();
+        // C: prev, last, stand all start at node.
+        // (C loads last_visited into prev first, but unconditionally overwrites it.)
+        let mut prev: *mut QNode = node;
+        let mut last: *mut QNode = node;
+        let stand: *mut QNode = node;
 
         // C: if (curr_locked_count == 0) set_waitcount(node, ++curr_locked_count);
         if curr_locked_count == 0 {
@@ -447,69 +410,58 @@ impl RawCflLock {
             Self::set_waitcount(node, curr_locked_count);
         }
 
-        // C: clear_sleader(node);   →   node->sleader = 0;
+        // C: clear_sleader(node);
         (*node).sleader.store(false, Ordering::Relaxed);
 
         // C: if (!keep_lock_local()) { }
-        // Empty branch preserved from fairnumas.c — PRNG side effect only.
-        if !keep_lock_local() {}
+        // PRNG side-effect only (starvation prevention); result unused.
+        let _ = keep_lock_local();
 
         // C: nid = need_switch();
-        nid = Self::need_switch();
+        let mut nid: i32 = Self::need_switch();
         // C: if (nid == 100) nid = node->nid;
         if nid == 100 {
             nid = (*node).nid;
         }
 
         // C: standard = READ_ONCE(runtime_checker_node[nid]) / 16;
-        standard = rt_node(nid as usize).load(Ordering::Relaxed) / 16;
+        let standard = rt_node(nid as usize).load(Ordering::Relaxed) / 16;
 
         // C: for (;;) { ... }
-        'main_loop: loop {
+        // Loop returns (sleader, qend) via break to avoid dead-store warnings.
+        let (sleader, qend) = 'main_loop: loop {
             // C: curr = READ_ONCE(prev->next);
-            curr = (*prev).next.load(Ordering::Acquire);
+            let curr = (*prev).next.load(Ordering::Acquire);
 
             // C: barrier();
             std::sync::atomic::compiler_fence(Ordering::SeqCst);
 
             // C: if (!curr) { sleader = last; qend = prev; break; }
             if curr.is_null() {
-                sleader = last;
-                qend = prev;
-                break 'main_loop;
+                break 'main_loop (last, prev);
             }
 
-            // C: if (curr == READ_ONCE(lock->tail)) { sleader = last; qend = prev; break; }
+            // C: if (curr == READ_ONCE(lock->tail)) { ... break; }
             if curr == self.tail.load(Ordering::Acquire) {
-                sleader = last;
-                qend = prev;
-                break 'main_loop;
+                break 'main_loop (last, prev);
             }
 
-            // C: /* got the current for sure */
-            // C: /* Check if curr->nid is same as nid */
             // Labeled block for goto check → break 'numa
             'numa: {
                 // C: if (curr->nid == nid)
                 if (*curr).nid == nid {
                     // C: if (prev == node && prev->nid == nid)
                     if prev == node && (*prev).nid == nid {
-                        // C: set_waitcount(curr, curr_locked_count);
                         Self::set_waitcount(curr, curr_locked_count);
-                        // C: last = curr;
                         last = curr;
-                        // C: prev = curr;
                         prev = curr;
-                        // C: one_shuffle = 1;
                         one_shuffle = true;
                     } else {
                         // C: next = READ_ONCE(curr->next);
-                        next = (*curr).next.load(Ordering::Acquire);
-                        // C: if (!next) { sleader = last; qend = prev; goto out; }
+                        let next = (*curr).next.load(Ordering::Acquire);
+                        // C: if (!next) { ... goto out; }
                         if next.is_null() {
-                            sleader = last;
-                            qend = prev;
-                            break 'main_loop; // goto out
+                            break 'main_loop (last, prev);
                         }
 
                         // C: if (runtime_checker_core[curr->cid] >= standard)
@@ -520,13 +472,9 @@ impl RawCflLock {
                         }
 
                         // C: iter = stand;
-                        iter = stand;
+                        let mut iter = stand;
 
-                        // C: while (iter->next && iter->next->nid == curr->nid &&
-                        //           (runtime_checker_core[curr->cid] >
-                        //            runtime_checker_core[iter->next->cid]) &&
-                        //           iter != last)
-                        //    { iter = iter->next; barrier(); }
+                        // C: while (iter->next && ...) { iter = iter->next; barrier(); }
                         loop {
                             let iter_next = (*iter).next.load(Ordering::Relaxed);
                             if iter_next.is_null() {
@@ -543,18 +491,12 @@ impl RawCflLock {
                             if iter == last {
                                 break;
                             }
-                            // C: iter = iter->next;
                             iter = iter_next;
-                            // C: barrier();
                             std::sync::atomic::compiler_fence(Ordering::SeqCst);
                         }
 
-                        // C: set_waitcount(curr, curr_locked_count);
                         Self::set_waitcount(curr, curr_locked_count);
 
-                        // C: if (iter != prev) { prev->next = next;
-                        //        curr->next = iter->next; iter->next = curr; }
-                        //    else prev = curr;
                         if iter != prev {
                             (*prev).next.store(next, Ordering::Relaxed);
                             (*curr)
@@ -565,37 +507,27 @@ impl RawCflLock {
                             prev = curr;
                         }
 
-                        // C: if (iter == last) { last = curr; }
                         if iter == last {
                             last = curr;
                         }
-                        // C: one_shuffle = 1;
                         one_shuffle = true;
                     }
                 } else {
-                    // C: else prev = curr;
                     prev = curr;
                 }
             } // end 'numa block
 
             // check:
-            // C: lock_ready = !READ_ONCE(lock->locked);
             let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
-            // C: if (one_shuffle &&
-            //        ((is_next_waiter && lock_ready) ||
-            //         (!is_next_waiter && READ_ONCE(node->lstatus))))
             if one_shuffle
                 && ((is_next_waiter && lock_ready)
                     || (!is_next_waiter && (*node).lstatus.load(Ordering::Acquire) != 0))
             {
-                sleader = last;
-                qend = prev;
-                break 'main_loop;
+                break 'main_loop (last, prev);
             }
-        } // end 'main_loop
+        }; // end 'main_loop
 
         // out:
-        // C: if (sleader) { set_sleader(sleader, qend); }
         if !sleader.is_null() {
             Self::set_sleader(sleader, qend);
         }

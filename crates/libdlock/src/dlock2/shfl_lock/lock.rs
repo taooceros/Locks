@@ -197,7 +197,6 @@ impl RawShflLock {
     ///
     /// SAFETY: Called only by a single shuffle leader at a time while
     /// the node is live in the queue.
-    #[allow(unused_assignments)]
     unsafe fn shuffle_waiters(&self, node: *mut QNode, is_next_waiter: bool) {
         let nid = (*node).nid;
         let mut curr_locked_count = (*node).wcount.load(Ordering::Relaxed);
@@ -207,9 +206,7 @@ impl RawShflLock {
             prev = node;
         }
 
-        let mut sleader: *mut QNode = null_mut();
         let mut last: *mut QNode = node;
-        let mut qend: *mut QNode = null_mut();
         let mut one_shuffle = false;
 
         if curr_locked_count == 0 {
@@ -223,8 +220,8 @@ impl RawShflLock {
         // Probabilistic exit: occasionally stop shuffling to let
         // remote-socket threads through (starvation prevention).
         // Matches C: sleader = READ_ONCE(node->next); goto out;
-        if !keep_lock_local() {
-            sleader = (*node).next.load(Ordering::Acquire);
+        let (sleader, qend) = if !keep_lock_local() {
+            ((*node).next.load(Ordering::Acquire), null_mut())
         } else {
             loop {
                 let curr = (*prev).next.load(Ordering::Acquire);
@@ -232,15 +229,11 @@ impl RawShflLock {
                 std::sync::atomic::compiler_fence(Ordering::SeqCst);
 
                 if curr.is_null() {
-                    sleader = last;
-                    qend = prev;
-                    break;
+                    break (last, prev);
                 }
 
                 if curr == self.tail.load(Ordering::Acquire) {
-                    sleader = last;
-                    qend = prev;
-                    break;
+                    break (last, prev);
                 }
 
                 if (*curr).nid == nid {
@@ -254,9 +247,7 @@ impl RawShflLock {
                         // Need to move curr after last same-socket node.
                         let next = (*curr).next.load(Ordering::Acquire);
                         if next.is_null() {
-                            sleader = last;
-                            qend = prev;
-                            break;
+                            break (last, prev);
                         }
 
                         (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
@@ -277,21 +268,17 @@ impl RawShflLock {
                 }
 
                 // Early exit: lock became available or we were promoted.
-                // Matches C: lock_ready = !READ_ONCE(lock->locked);
-                //             !is_next_waiter && READ_ONCE(node->lstatus)
                 let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
                 if one_shuffle
                     && ((is_next_waiter && lock_ready)
                         || (!is_next_waiter && (*node).lstatus.load(Ordering::Acquire) != 0))
                 {
-                    sleader = last;
-                    qend = prev;
-                    break;
+                    break (last, prev);
                 }
             }
-        } // end else (keep_lock_local)
+        };
 
-        // out: pass shuffle leadership.  Matches C: if (sleader) set_sleader(sleader, qend);
+        // out: pass shuffle leadership.
         if !sleader.is_null() {
             Self::set_sleader(sleader, qend);
         }
