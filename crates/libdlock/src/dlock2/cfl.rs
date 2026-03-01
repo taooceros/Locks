@@ -27,7 +27,9 @@
 use std::{
     cell::UnsafeCell,
     ptr::null_mut,
-    sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering},
+    sync::atomic::{
+        AtomicBool, AtomicI32, AtomicPtr, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering,
+    },
 };
 
 use lock_api::{GuardSend, RawMutex};
@@ -509,9 +511,7 @@ impl RawCflLock {
 
                         // C: if (runtime_checker_core[curr->cid] >= standard)
                         //        { prev = curr; goto check; }
-                        if rt_core((*curr).cid as usize).load(Ordering::Relaxed)
-                            >= standard
-                        {
+                        if rt_core((*curr).cid as usize).load(Ordering::Relaxed) >= standard {
                             prev = curr;
                             break 'numa; // goto check
                         }
@@ -533,8 +533,7 @@ impl RawCflLock {
                                 break;
                             }
                             if rt_core((*curr).cid as usize).load(Ordering::Relaxed)
-                                <= rt_core((*iter_next).cid as usize)
-                                    .load(Ordering::Relaxed)
+                                <= rt_core((*iter_next).cid as usize).load(Ordering::Relaxed)
                             {
                                 break;
                             }

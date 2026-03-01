@@ -11,10 +11,10 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    c_aqs::RawCAqs, c_cfl::RawCCfl, cc_ban::CCBan, cfl::RawCflLock, clh::RawClhLock,
-    dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock,
-    mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex, shfl_lock::RawShflLock,
-    spinlock::DLock2Wrapper, ticket::RawTicketLock, uscl::DLock2USCL,
+    c_aqs::RawCAqs, c_cfl::RawCCfl, cc_ban::CCBan, cfl::RawCflLock, clh::RawClhLock, dsm::DSMSynch,
+    fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock, mutex::DLock2Mutex,
+    pthread_mutex::DLock2PthreadMutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
+    ticket::RawTicketLock, uscl::DLock2USCL,
 };
 
 pub mod cc;

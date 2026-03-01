@@ -149,12 +149,9 @@ unsafe impl RawMutex for RawClhLock {
 
         // Lock is held — undo our enqueue by restoring tail.  This is only
         // safe if no successor has enqueued after us.
-        let restored = self.tail.compare_exchange(
-            my_node,
-            prev,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        );
+        let restored =
+            self.tail
+                .compare_exchange(my_node, prev, Ordering::AcqRel, Ordering::Relaxed);
         if restored.is_ok() {
             // Successfully restored; we never entered the queue.
             unsafe { (*my_node).locked.store(false, Ordering::Relaxed) };

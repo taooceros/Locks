@@ -264,4 +264,3 @@ dlock2_counter_tests!(
     pthread_mutex,
     DLock2PthreadMutex::<u64, u64, Delegate>::new(0_u64, counter_delegate)
 );
-

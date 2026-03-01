@@ -225,71 +225,69 @@ impl RawShflLock {
         if !keep_lock_local() {
             sleader = (*node).next.load(Ordering::Acquire);
         } else {
+            loop {
+                let curr = (*prev).next.load(Ordering::Acquire);
+                // Compiler barrier matching C: barrier() after READ_ONCE(prev->next).
+                std::sync::atomic::compiler_fence(Ordering::SeqCst);
 
-        loop {
-            let curr = (*prev).next.load(Ordering::Acquire);
-            // Compiler barrier matching C: barrier() after READ_ONCE(prev->next).
-            std::sync::atomic::compiler_fence(Ordering::SeqCst);
-
-            if curr.is_null() {
-                sleader = last;
-                qend = prev;
-                break;
-            }
-
-            if curr == self.tail.load(Ordering::Acquire) {
-                sleader = last;
-                qend = prev;
-                break;
-            }
-
-            if (*curr).nid == nid {
-                if (*prev).nid == nid {
-                    // Already adjacent — just mark batch.
-                    (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
-                    last = curr;
-                    prev = curr;
-                    one_shuffle = true;
-                } else {
-                    // Need to move curr after last same-socket node.
-                    let next = (*curr).next.load(Ordering::Acquire);
-                    if next.is_null() {
-                        sleader = last;
-                        qend = prev;
-                        break;
-                    }
-
-                    (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
-                    // Pointer surgery matching C plain writes:
-                    //   prev->next = next;
-                    //   curr->next = last->next;
-                    //   last->next = curr;
-                    (*prev).next.store(next, Ordering::Relaxed);
-                    (*curr)
-                        .next
-                        .store((*last).next.load(Ordering::Relaxed), Ordering::Relaxed);
-                    (*last).next.store(curr, Ordering::Relaxed);
-                    last = curr;
-                    one_shuffle = true;
+                if curr.is_null() {
+                    sleader = last;
+                    qend = prev;
+                    break;
                 }
-            } else {
-                prev = curr;
-            }
 
-            // Early exit: lock became available or we were promoted.
-            // Matches C: lock_ready = !READ_ONCE(lock->locked);
-            //             !is_next_waiter && READ_ONCE(node->lstatus)
-            let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
-            if one_shuffle
-                && ((is_next_waiter && lock_ready)
-                    || (!is_next_waiter
-                        && (*node).lstatus.load(Ordering::Acquire) != 0))
-            {
-                sleader = last;
-                qend = prev;
-                break;
+                if curr == self.tail.load(Ordering::Acquire) {
+                    sleader = last;
+                    qend = prev;
+                    break;
+                }
+
+                if (*curr).nid == nid {
+                    if (*prev).nid == nid {
+                        // Already adjacent — just mark batch.
+                        (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
+                        last = curr;
+                        prev = curr;
+                        one_shuffle = true;
+                    } else {
+                        // Need to move curr after last same-socket node.
+                        let next = (*curr).next.load(Ordering::Acquire);
+                        if next.is_null() {
+                            sleader = last;
+                            qend = prev;
+                            break;
+                        }
+
+                        (*curr).wcount.store(curr_locked_count, Ordering::Relaxed);
+                        // Pointer surgery matching C plain writes:
+                        //   prev->next = next;
+                        //   curr->next = last->next;
+                        //   last->next = curr;
+                        (*prev).next.store(next, Ordering::Relaxed);
+                        (*curr)
+                            .next
+                            .store((*last).next.load(Ordering::Relaxed), Ordering::Relaxed);
+                        (*last).next.store(curr, Ordering::Relaxed);
+                        last = curr;
+                        one_shuffle = true;
+                    }
+                } else {
+                    prev = curr;
+                }
+
+                // Early exit: lock became available or we were promoted.
+                // Matches C: lock_ready = !READ_ONCE(lock->locked);
+                //             !is_next_waiter && READ_ONCE(node->lstatus)
+                let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
+                if one_shuffle
+                    && ((is_next_waiter && lock_ready)
+                        || (!is_next_waiter && (*node).lstatus.load(Ordering::Acquire) != 0))
+                {
+                    sleader = last;
+                    qend = prev;
+                    break;
+                }
             }
-        }
         } // end else (keep_lock_local)
 
         // out: pass shuffle leadership.  Matches C: if (sleader) set_sleader(sleader, qend);
