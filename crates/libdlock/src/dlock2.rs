@@ -11,10 +11,10 @@ use enum_dispatch::enum_dispatch;
 use strum::Display;
 
 use self::{
-    c_aqs::RawCAqs, cc_ban::CCBan, cfl::RawCflLock, clh::RawClhLock, dsm::DSMSynch,
-    fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock, mutex::DLock2Mutex,
-    pthread_mutex::DLock2PthreadMutex, shfl_lock::RawShflLock, spinlock::DLock2Wrapper,
-    ticket::RawTicketLock, uscl::DLock2USCL,
+    c_aqs::RawCAqs, c_cfl::RawCCfl, cc_ban::CCBan, cfl::RawCflLock, clh::RawClhLock,
+    dsm::DSMSynch, fc_ban::FCBan, fc_pq::UsageNode, fc_sl::FCSL, mcs::RawMcsLock,
+    mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex, shfl_lock::RawShflLock,
+    spinlock::DLock2Wrapper, ticket::RawTicketLock, uscl::DLock2USCL,
 };
 
 pub mod cc;
@@ -26,6 +26,7 @@ pub mod fc_sl;
 pub mod rcl;
 
 pub mod c_aqs;
+pub mod c_cfl;
 pub mod cfl;
 pub mod clh;
 pub mod fc_pq;
@@ -74,6 +75,7 @@ where
     ShflLock(DLock2Wrapper<T, I, F, RawShflLock>),
     ShflLock_C(DLock2Wrapper<T, I, F, RawCAqs>),
     CFL(DLock2Wrapper<T, I, F, RawCflLock>),
+    CFL_C(DLock2Wrapper<T, I, F, RawCCfl>),
     Ticket(DLock2Wrapper<T, I, F, RawTicketLock>),
     CLH(DLock2Wrapper<T, I, F, RawClhLock>),
     PthreadMutex(DLock2PthreadMutex<T, I, F>),

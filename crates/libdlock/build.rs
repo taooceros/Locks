@@ -23,9 +23,11 @@ fn main() {
             "../../c/FlatCombining/original/flatcombining.c",
             "../../c/u-scl/fairlock.c",
             "../../c/shfllock/aqs.c",
+            "../../c/cfl/cfl.c",
         ])
         .include("../../c/shared")
         .include("../../c/shfllock")
+        .include("../../c/cfl")
         .opt_level(2)
         .warnings(false)
         .compile("dlock");

@@ -13,8 +13,8 @@ use libdlock::{
         DLockType,
     },
     dlock2::{
-        self, c_aqs::RawCAqs, cfl::RawCflLock, clh::RawClhLock, fc::FC, fc_ban::FCBan,
-        mcs::RawMcsLock, mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex,
+        self, c_aqs::RawCAqs, c_cfl::RawCCfl, cfl::RawCflLock, clh::RawClhLock, fc::FC,
+        fc_ban::FCBan, mcs::RawMcsLock, mutex::DLock2Mutex, pthread_mutex::DLock2PthreadMutex,
         shfl_lock::RawShflLock, spinlock::DLock2Wrapper, ticket::RawTicketLock,
         uscl::DLock2USCL, DLock2Delegate, DLock2Impl,
     },
@@ -141,8 +141,10 @@ pub enum DLock2Target {
     ShflLock,
     /// Benchmark ShflLock (C)
     ShflLockC,
-    /// Benchmark CFL-MCS (usage-fair traditional lock, Park & Eom PPoPP'24)
+    /// Benchmark CFL-MCS (usage-fair traditional lock, Rust reimplementation)
     CFL,
+    /// Benchmark CFL (C, original fairnumas from PPoPP'24)
+    CFLC,
     /// Benchmark Ticket Lock (simple FIFO spin lock)
     Ticket,
     /// Benchmark CLH queue spin lock
@@ -171,6 +173,7 @@ impl DLock2Target {
             | DLock2Target::ShflLock
             | DLock2Target::ShflLockC
             | DLock2Target::CFL
+            | DLock2Target::CFLC
             | DLock2Target::Ticket
             | DLock2Target::CLH
             | DLock2Target::PthreadMutex => false,
@@ -205,6 +208,7 @@ impl DLock2Target {
             DLock2Target::ShflLock => DLock2Wrapper::<_, _, _, RawShflLock>::new(data, f).into(),
             DLock2Target::ShflLockC => DLock2Wrapper::<_, _, _, RawCAqs>::new(data, f).into(),
             DLock2Target::CFL => DLock2Wrapper::<_, _, _, RawCflLock>::new(data, f).into(),
+            DLock2Target::CFLC => DLock2Wrapper::<_, _, _, RawCCfl>::new(data, f).into(),
             DLock2Target::Ticket => DLock2Wrapper::<_, _, _, RawTicketLock>::new(data, f).into(),
             DLock2Target::CLH => DLock2Wrapper::<_, _, _, RawClhLock>::new(data, f).into(),
             DLock2Target::PthreadMutex => DLock2PthreadMutex::new(data, f).into(),
