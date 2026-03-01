@@ -4,3 +4,5 @@ repos:
     hooks:
       - id: fmt
         args: ["--manifest-path=Cargo.toml", "--"]
+      - id: clippy
+        args: ["--manifest-path=Cargo.toml", "--all-targets", "--", "-W", "clippy::all"]
