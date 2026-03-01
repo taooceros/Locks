@@ -298,12 +298,14 @@ where
                 }
             } else {
                 let backoff = Backoff::new();
+                let mut count: u32 = 8;
                 loop {
                     if node.complete.load(Acquire) {
                         break 'outer;
                     }
-                    backoff.snooze();
-                    if backoff.is_completed() {
+                    backoff.spin();
+                    count = count.wrapping_sub(1);
+                    if count == 0 {
                         continue 'outer;
                     }
                 }
