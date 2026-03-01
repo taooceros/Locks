@@ -48,6 +48,10 @@ let locks = [
     "cc-c",
     "shfl-lock",
     "shfl-lock-c",
+    "cfl",
+    "ticket",
+    "clh",
+    "pthread-mutex",
 ]
 
 mkdir profiles

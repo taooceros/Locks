@@ -12,6 +12,7 @@ LOCKS = [
     "Mutex", "SpinLock", "USCL",
     "C_FC", "C_CC", "MCS",
     "ShflLock", "ShflLock_C",
+    "CFL", "Ticket", "CLH", "PthreadMutex",
 ]
 RATIOS = [
     ("ratio-1-1", "1:1"),
