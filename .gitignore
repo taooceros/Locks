@@ -21,10 +21,9 @@ build.ninja
 /.ninja_log
 /usclexample
 tests/
-rust/output/
-rust/target/
-FlatCombining_rc/target
 output/
+target/
+FlatCombining_rc/target
 visualization/data/
 visualization/data-old/
 *.zst
@@ -33,8 +32,9 @@ visualization/data-old/
 .devenv/
 .devenv.flake.nix
 
-# Cargo lock (library crate)
-**/Cargo.lock
+# Cargo lock (library crate only — root lock is tracked)
+crates/*/Cargo.lock
+!/Cargo.lock
 
 # Claude
 .claude/

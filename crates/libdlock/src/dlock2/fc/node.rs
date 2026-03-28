@@ -1,0 +1,34 @@
+use std::{
+    cell::SyncUnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicPtr},
+};
+
+use crossbeam::utils::CachePadded;
+
+pub struct Node<T> {
+    pub age: SyncUnsafeCell<u32>,
+    pub active: CachePadded<AtomicBool>,
+    pub data: SyncUnsafeCell<MaybeUninit<T>>,
+    pub complete: AtomicBool,
+    pub next: AtomicPtr<Node<T>>,
+    #[cfg(feature = "combiner_stat")]
+    pub combiner_time_stat: u64,
+}
+
+impl<T> Node<T> {
+    pub(crate) fn new() -> Node<T>
+    where
+        T: Send,
+    {
+        Node {
+            age: 0.into(),
+            active: AtomicBool::new(false).into(),
+            complete: AtomicBool::new(false),
+            data: SyncUnsafeCell::new(MaybeUninit::uninit()),
+            next: AtomicPtr::default(),
+            #[cfg(feature = "combiner_stat")]
+            combiner_time_stat: 0,
+        }
+    }
+}

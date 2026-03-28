@@ -1,7 +1,7 @@
 add_rules("plugin.compile_commands.autoupdate", { outputdir = ".vscode" })
 add_rules("mode.debug", "mode.release")
 
-add_requires("cargo::dlock", {configs = {cargo_toml = path.join(os.projectdir(), "rust/Cargo.toml"), version="*"}})
+add_requires("cargo::dlock", {configs = {cargo_toml = path.join(os.projectdir(), "Cargo.toml"), version="*"}})
 
 set_toolset("cc", "gcc")
 -- set_toolset("rcld", "mold")
@@ -67,7 +67,7 @@ target("dlock")
     set_kind("binary")
     set_arch("x86_64-unknown-linux-gnu")
     add_deps("cdlocks")
-    add_files("rust/src/main.rs")
+    add_files("src/main.rs")
     add_packages("cargo::dlock")
     set_rundir("$(projectdir)")
 target_end()
