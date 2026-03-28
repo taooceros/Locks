@@ -1,5 +1,3 @@
-# CLAUDE.md
-
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Dependency
@@ -15,20 +13,24 @@ You are a Senior Research Scientist specializing in Concurrent Systems and Distr
 Research project implementing **usage-fair delegation locks** in Rust, targeting PPoPP 2027 (Aug 2026) / EuroSys 2027 (Oct 2026). The key contribution is FC-PQ (Flat Combining with Priority Queue), which achieves an O(C_max) fairness bound while maintaining throughput close to unfair delegation — breaking the traditional fairness-performance tradeoff.
 
 **Core thesis:** Delegation locks decouple fairness from data locality. Shared data stays in the combiner's L1 regardless of serving order, so reordering for fairness is essentially free — unlike traditional locks (CFL, MCS) where fair handoff forces cross-core cache migration.
-
+ 
 ## Workflow
 
 ### Research
 
 1. Read spec before reading code.
-2. Read [TODO.md](TODO.md) at the start of each session to understand current progress and priorities.
-3. Update [TODO.md](TODO.md) after completing any task — mark items done with `[x]` and add a short completion note.
+2. Read [plan/index.md](plan/index.md) and [TODO.md](TODO.md) at the start of each session to understand current priorities and progress.
+3. For any substantial implementation, design, or research-direction change, write a plan in a dated folder: `plan/YYYY-MM-DD/<plan-name>.md`.
+4. Add every new active plan to [plan/index.md](plan/index.md), and place the highest-priority active plans in the `Current Priorities` section.
+5. Wait for plan approval before implementation when the task changes code, evaluation strategy, or research direction.
+6. Update [TODO.md](TODO.md) after completing any task — mark items done with `[x]` and add a short completion note.
 
 ### Development
 
-1. Write Plan in markdown (in folder plan) before writing code
-2. Wait for Plan approval before implementation
-3. 
+1. Start from an approved plan when making non-trivial code or experiment changes.
+2. Keep each plan scoped to one coherent task, with clear goals, proposed changes, risks, and evaluation notes.
+3. Prefer updating the existing dated plan for the current task instead of creating duplicate plan files for small follow-up work.
+4. When priorities change, update [plan/index.md](plan/index.md) so it remains the entry point for active work.
 
 ## Build & Test
 
