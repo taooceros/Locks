@@ -3,12 +3,14 @@
 # Collects cache, TLB, and migration events.
 #
 # Usage: nu profile.nu
-# Output: profiles/dlock2-{lock}.txt (stdout) and profiles/dlock2-{lock}.stats (perf)
+# Output: .worktree/profiles/dlock2-{lock}.txt (stdout) and
+#         .worktree/profiles/dlock2-{lock}.stats (perf)
 
 let dlock2 = "target/release/dlock"
 let simple_cs = "1000,3000"
 let duration = 5
 let thread_num = 32
+let profiles_dir = ".worktree/profiles"
 
 let perf_events = [
     cache-references,
@@ -54,11 +56,11 @@ let locks = [
     "pthread-mutex",
 ]
 
-mkdir profiles
+mkdir $profiles_dir
 
 for lock in $locks {
     print $"Profiling ($lock)..."
-    perf stat -e $perf_arg $dlock2 d-lock2 -t $thread_num --lock-targets $lock counter-proportional --cs $simple_cs --non-cs 0 -d $duration out> $"profiles/dlock2-($lock).txt" err> $"profiles/dlock2-($lock).stats"
+    perf stat -e $perf_arg $dlock2 d-lock2 -t $thread_num --lock-targets $lock counter-proportional --cs $simple_cs --non-cs 0 -d $duration out> $"($profiles_dir)/dlock2-($lock).txt" err> $"($profiles_dir)/dlock2-($lock).stats"
 }
 
-print "Profiling complete. Results in profiles/"
+print $"Profiling complete. Results in ($profiles_dir)/"
