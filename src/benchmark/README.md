@@ -45,4 +45,7 @@ Per-thread output record fields:
 
 ## Output Format
 
-Arrow IPC `.arrow` files in `<output_path>/<lock_name>/`. Writers are kept open across batches via thread-local `WriterMap` and `finish()`ed on drop.
+Arrow IPC `.arrow` files in `<output_path>/<lock_name>/`. New runs default to
+`.worktree/output/<lock_name>/` so each git worktree keeps its own local
+artifact set. Writers are kept open across batches via thread-local `WriterMap`
+and `finish()`ed on drop.

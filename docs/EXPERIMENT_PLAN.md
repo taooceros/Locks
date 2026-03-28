@@ -15,7 +15,7 @@ exact configuration, metrics, and mapping to paper figures.
 | Duration | 15s | `--duration 15` for throughput experiments |
 | Duration (final) | 30s | For paper-ready runs (matches TCLocks' 30s convention) |
 | Duration (latency) | 5s | `--duration 5` for `--stat-response-time` (memory) |
-| Output | `visualization/output` | Default |
+| Output | `.worktree/output` | Default and current local layout; scripts can still read `visualization/output` from older unmigrated checkouts |
 
 **Note on duration:** TCLocks (OSDI'23) uses 30-second runs for all
 micro-benchmarks. Our development runs use 15s for faster iteration; bump

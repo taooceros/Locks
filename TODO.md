@@ -26,14 +26,22 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   smoke test, consistent parameters matching EXPERIMENT_PLAN.md. profile.nu
   updated to cover all 14 lock variants.)*
 
+- [x] **Reorganize local artifacts for git worktree use.**
+  *(Done: 2026-03-28 — New benchmark runs now default to `.worktree/output`,
+  perf profiling writes to `.worktree/profiles`, and analysis scripts resolve
+  output paths dynamically. The existing local `visualization/output/` and
+  `profiles/` trees were migrated into `.worktree/` in this checkout, while
+  fallback support remains for older unmigrated checkouts.)*
+
 - [x] **Stabilize DSMSynch implementation.**
   *(Done: `dfc261e` — multi-threaded correctness tests added for all DLock2
   variants including DSM at 2/4/8 threads.)*
 
 - [x] **Run baseline benchmarks on saturn (128T Intel Xeon Gold 6438M).**
   *(Done: 2026-02-26 — counter cs [1000,3000] noncs [0], all 16 lock variants,
-  4-128 threads. Results in `visualization/output/`. FC-PQ achieves 0.9996 JFI
-  at 128T with 0.74x FC throughput.)*
+  4-128 threads. Results now live under `.worktree/output/` in this checkout
+  after migration from the legacy layout. FC-PQ achieves 0.9996 JFI at 128T
+  with 0.74x FC throughput.)*
 
 - [x] **Write experiment plan spec.**
   *(Done: 2026-02-26 — `docs/EXPERIMENT_PLAN.md`. 10 experiment groups covering

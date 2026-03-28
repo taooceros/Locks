@@ -8,6 +8,9 @@ Cargo workspace at repo root with two members:
 - `.` — binary crate `dlock` (CLI, benchmarks)
 - `crates/libdlock` — library crate `libdlock` (lock implementations, traits, tests)
 
+Local benchmark and profiling artifacts should live under `.worktree/` in each
+checkout. The benchmark CLI now defaults to `.worktree/output`.
+
 ## Commands
 
 ```bash

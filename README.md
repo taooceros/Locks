@@ -33,7 +33,7 @@ EXPERIMENTS:
 GLOBAL OPTIONS:
     -t, --threads <N,...>      Thread counts to test [default: CPU count]
     -c, --cpus <N,...>         CPU counts to test [default: CPU count]
-    -o, --output-path <path>   [default: visualization/output]
+    -o, --output-path <path>   [default: .worktree/output]
     -d, --duration <secs>      Measurement duration [default: 5]
     --warmup <secs>            Warmup period (no stats) [default: 2]
     --trials <N>               Independent trials [default: 1]
@@ -84,7 +84,12 @@ visualization/                  # Jupyter notebooks & plots
 
 ## Output
 
-Arrow IPC `.arrow` files written to `<output_path>/<lock_name>/`. Each file contains per-thread records: loop counts, latencies, hold times, JFI, combiner stats.
+Arrow IPC `.arrow` files are written to `<output_path>/<lock_name>/`.
+New runs default to `.worktree/output/`, an ignored per-worktree artifact area.
+This checkout's existing local corpus has also been migrated there.
+Analysis scripts still support `visualization/output/` when reading an external
+or older checkout that has not been migrated yet. Each file contains per-thread
+records: loop counts, latencies, hold times, JFI, combiner stats.
 
 ## Justfile Shortcuts
 
