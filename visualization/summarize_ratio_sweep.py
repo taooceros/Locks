@@ -4,15 +4,30 @@
 import os
 import pyarrow.ipc as ipc
 
-BASE_DIR = "/home/hongtao/Locks/visualization/output"
+from workspace_paths import resolve_output_dir
+
+BASE_DIR = resolve_output_dir()
 
 LOCKS = [
-    "FC", "FCBan", "CC", "CCBan", "DSM",
-    "FC_PQ_BTree", "FC_PQ_BHeap",
-    "Mutex", "SpinLock", "USCL",
-    "C_FC", "C_CC", "MCS",
-    "ShflLock", "ShflLock_C",
-    "CFL", "Ticket", "CLH", "PthreadMutex",
+    "FC",
+    "FCBan",
+    "CC",
+    "CCBan",
+    "DSM",
+    "FC_PQ_BTree",
+    "FC_PQ_BHeap",
+    "Mutex",
+    "SpinLock",
+    "USCL",
+    "C_FC",
+    "C_CC",
+    "MCS",
+    "ShflLock",
+    "ShflLock_C",
+    "CFL",
+    "Ticket",
+    "CLH",
+    "PthreadMutex",
 ]
 RATIOS = [
     ("ratio-1-1", "1:1"),
@@ -25,7 +40,7 @@ THREAD_COUNTS = [4, 16, 64]
 
 
 def load(lock, filename):
-    path = os.path.join(BASE_DIR, lock, f"{filename}.arrow")
+    path = os.path.join(str(BASE_DIR), lock, f"{filename}.arrow")
     if not os.path.exists(path):
         return {}
     with open(path, "rb") as f:

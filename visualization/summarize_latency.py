@@ -5,13 +5,25 @@ import os
 import math
 import pyarrow.ipc as ipc
 
-BASE = "/home/hongtao/Locks/visualization/output"
+from workspace_paths import resolve_output_dir
+
+BASE = resolve_output_dir()
 LOCKS = [
-    "FC", "FCBan", "CC", "CCBan", "DSM",
-    "FC_PQ_BTree", "FC_PQ_BHeap",
-    "Mutex", "SpinLock", "USCL",
-    "C_FC", "C_CC", "MCS",
-    "ShflLock", "ShflLock_C",
+    "FC",
+    "FCBan",
+    "CC",
+    "CCBan",
+    "DSM",
+    "FC_PQ_BTree",
+    "FC_PQ_BHeap",
+    "Mutex",
+    "SpinLock",
+    "USCL",
+    "C_FC",
+    "C_CC",
+    "MCS",
+    "ShflLock",
+    "ShflLock_C",
 ]
 FILE = "latency-cs1000-3000.arrow"
 
@@ -37,7 +49,7 @@ for tc in [8, 32]:
     print("|------|------|----:|----:|----:|------:|")
 
     for lock in LOCKS:
-        path = os.path.join(BASE, lock, FILE)
+        path = os.path.join(str(BASE), lock, FILE)
         if not os.path.exists(path):
             continue
         table = ipc.open_file(path).read_all()

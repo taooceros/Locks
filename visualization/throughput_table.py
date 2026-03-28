@@ -4,7 +4,7 @@ Read Arrow IPC files for specified locks and produce:
   1. A markdown table of total loop_count (in millions) per lock x thread_count.
   2. A markdown table of throughput ratio relative to FC (FC = 1.0x).
 
-Each file: visualization/output/{LOCK}/counter cs [1000, 3000] noncs [0].arrow
+Each file: <resolved output dir>/{LOCK}/counter cs [1000, 3000] noncs [0].arrow
 
 For each lock and thread_num, total loop_count = sum across all threads and
 both cs_lengths in that thread_num group.
@@ -13,13 +13,26 @@ both cs_lengths in that thread_num group.
 import os
 import pyarrow.ipc as ipc
 
-BASE_DIR = "/home/hongtao/Locks/visualization/output"
+from workspace_paths import resolve_output_dir
+
+BASE_DIR = resolve_output_dir()
 FILE_NAME = "counter cs [1000, 3000] noncs [0].arrow"
 
 LOCKS = [
-    "FC", "CC", "DSM", "FC_PQ_BHeap", "FCBan", "CCBan",
-    "MCS", "Mutex", "SpinLock", "USCL",
-    "C_FC", "C_CC", "ShflLock", "ShflLock_C",
+    "FC",
+    "CC",
+    "DSM",
+    "FC_PQ_BHeap",
+    "FCBan",
+    "CCBan",
+    "MCS",
+    "Mutex",
+    "SpinLock",
+    "USCL",
+    "C_FC",
+    "C_CC",
+    "ShflLock",
+    "ShflLock_C",
 ]
 
 THREAD_COUNTS = [4, 8, 16, 32, 64, 128]
@@ -27,7 +40,7 @@ THREAD_COUNTS = [4, 8, 16, 32, 64, 128]
 
 def load_totals(lock_name):
     """Return dict: thread_num -> total loop_count."""
-    path = os.path.join(BASE_DIR, lock_name, FILE_NAME)
+    path = os.path.join(str(BASE_DIR), lock_name, FILE_NAME)
     if not os.path.exists(path):
         print(f"WARNING: file not found for {lock_name}: {path}")
         return {}
@@ -46,7 +59,7 @@ def load_totals(lock_name):
 
 def load_jfi(lock_name):
     """Return dict: thread_num -> average JFI across rows for that thread_num."""
-    path = os.path.join(BASE_DIR, lock_name, FILE_NAME)
+    path = os.path.join(str(BASE_DIR), lock_name, FILE_NAME)
     if not os.path.exists(path):
         return {}
     with open(path, "rb") as f:
@@ -92,8 +105,9 @@ def main():
     name_w = max(len(l) for l in sorted_locks)
     col_w = {}
     for tn in THREAD_COUNTS:
-        vals = [fmt_millions(data[l][tn]) if tn in data[l] else "N/A"
-                for l in sorted_locks]
+        vals = [
+            fmt_millions(data[l][tn]) if tn in data[l] else "N/A" for l in sorted_locks
+        ]
         col_w[tn] = max(len(f"{tn}T"), max(len(v) for v in vals))
 
     def make_row(name_cell, value_cells):
@@ -158,7 +172,6 @@ def main():
                 ratio = lk_val / fc_val
                 vals.append(f"{ratio:.2f}x")
         print(make_row2(lock, vals))
-
 
     # ── Table 3: JFI (Jain's Fairness Index) ──
     print()
