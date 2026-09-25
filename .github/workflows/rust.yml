@@ -50,3 +50,13 @@ jobs:
         
       - name: Run tests
         run: cargo test --release --verbose
+      - name: Test synchronous experiment bridge
+        run: |
+          cargo test -p upscaledb-bridge --release -- --test-threads=1
+          cargo test -p upscaledb-bridge --release --features profile,test-hooks -- --test-threads=1
+      - name: Test experiment build and analysis contracts
+        run: python3 -m unittest discover -s integration/upscaledb/tests -p 'test_*.py' -v
+      - name: Build standalone redb experiment
+        run: |
+          cargo build --manifest-path integration/redb/Cargo.toml --release --locked
+          cargo build --manifest-path integration/redb/Cargo.toml --release --locked --features redb_profile

@@ -1,0 +1,17 @@
+[package]
+name = "redb_transactions"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[features]
+redb_profile = []
+
+[dependencies]
+redb = "=3.1.0"
+libdlock = { path = "../../crates/libdlock", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+core_affinity = "0.8"

@@ -4,6 +4,31 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ---
 
+## Experiment setup integration
+
+- [x] **Integrate database experiments without changing application logic.**
+  [Guide](integration/README.md) and
+  [verification record](plan/2026-09-25/experiment-setup-integration.md).
+  Corrected the assistant's overbroad removal: restored single-operation UpScaleDB
+  integration and Native/mutex controls, without batch8 or application restructuring.
+  Verified 22 fresh binaries, 69 DB gates, 22 exact-content fixed-work smokes,
+  21 Python tests, 8+11 bridge tests and the workspace build.
+  Kept redb, shared lock fixes, original worktrees and historical evidence.
+
+- [x] **Group integration tools and clarify the runner workflow.**
+  Removed the live dashboard; separated core, runner, specialized experiments,
+  reports and tests with folder READMEs; colocated redb's controller and workload.
+  Updated module imports, source/compiler paths, CI and the build/check/run/analyze guide.
+  Path-cutover checks: 21 Python tests, 18 CLI entrypoints, five companion include
+  checks, a fresh FC-PQ build/run/analysis and 20 redb smoke cells passed.
+  No formal matrices or documentation-only verification reruns.
+
+- [x] **Extract repeated runner mechanics and improve filenames.**
+  Four controllers share captured/logged process execution without a runner framework;
+  study/report names describe their purpose. Preserved timeout policies and artifacts.
+  Verified 28 Python tests, 14 renamed CLI entrypoints, shared capture of a real DB
+  error gate, and shared logged execution through a real trial and renamed analyzer.
+
 ## Phase 0: Foundation & Cleanup
 
 - [x] **Implement Jain's Fairness Index computation.**

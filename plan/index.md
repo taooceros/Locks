@@ -5,6 +5,13 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## Current Priorities
 
+### Experiment setup integration
+
+- [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
+  - Status: grouped tools, shared execution helpers and purpose-based names verified for PR #46.
+  - Scope: synchronization adapters without application-logic changes, redb setup,
+    and shared lock fixes; preserve original worktrees and exclude result artifacts.
+
 ### Priority 1: Algorithm Direction
 
 - [Algorithm Improvement Plan](./2026-03-23/algorithm-improvement-plan.md)
@@ -16,6 +23,10 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     research story, so it should guide later experiment and writing plans
 
 ## By Date
+
+### 2026-09-25
+
+- [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
 
 ### 2026-03-23
 

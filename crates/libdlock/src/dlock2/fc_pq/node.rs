@@ -22,7 +22,8 @@ pub struct Node<T> {
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: u64,
+    // Written/read only by this node's ThreadLocal owner; the queue holds &Node.
+    pub combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
 impl<T> Node<T> {
@@ -36,7 +37,7 @@ impl<T> Node<T> {
             complete: AtomicBool::new(false),
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             #[cfg(feature = "combiner_stat")]
-            combiner_time_stat: 0,
+            combiner_time_stat: SyncUnsafeCell::new(0),
         }
     }
 }
