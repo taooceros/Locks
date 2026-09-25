@@ -6,23 +6,20 @@ All new data roots refuse reuse; analysis regenerations get new directories.
 """
 import argparse
 import csv
-import datetime as dt
 import json
 import math
 import os
 from pathlib import Path
 import random
-import signal
 import statistics as stats
-import subprocess
 import sys
 import tempfile
 
 from integration.upscaledb._paths import REPORTS, ROOT, RUNNER, UPSCALEDB
-from integration.upscaledb.reports import analyze
+from integration.upscaledb.reports import analyze_trials
 from integration.upscaledb.runner import run_trials as runner
+from integration.upscaledb.runner.process_execution import run_logged, utc_now
 
-HERE = Path(__file__).resolve().parent
 PRIMARY = ('fc', 'fc_pq', 'uscl')
 PROFILES = tuple(v + '_profile' for v in PRIMARY)
 VARIANTS = PRIMARY + PROFILES
@@ -60,10 +57,6 @@ NOTES = [
 ]
 
 
-def now():
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
 def load(path):
     return json.loads(path.read_text(), parse_constant=runner.reject_nonfinite)
 
@@ -73,9 +66,12 @@ def save(path, value):
 
 
 def source_paths():
-    return {p.name: p for p in
-            (Path(__file__), UPSCALEDB / '_paths.py', RUNNER / 'run_trials.py',
-             REPORTS / 'analyze.py')}
+    controller = Path(__file__)
+    # Preserve the analyzer's historical copied artifact name.
+    return {controller.name: controller, '_paths.py': UPSCALEDB / '_paths.py',
+            'run_trials.py': RUNNER / 'run_trials.py',
+            'process_execution.py': RUNNER / 'process_execution.py',
+            'analyze.py': REPORTS / 'analyze_trials.py'}
 
 
 def sources():
@@ -127,31 +123,10 @@ def command(args, role, output, seed, smoke=False):
     return cmd
 
 
-def execute(cmd, log, timeout):
-    event = {'command': cmd, 'started_utc': now(), 'timeout_seconds': timeout}
-    # The runner owns a separate child session: let its SIGTERM handler clean up.
-    with log.open('xb') as stream:
-        child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT,
-                                 start_new_session=True, cwd=ROOT)
-        try:
-            event['returncode'] = child.wait(timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            os.killpg(child.pid, signal.SIGTERM)
-            try:
-                child.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait()
-            event.update(returncode=child.returncode, interrupted_or_timeout=True)
-        event['finished_utc'] = now()
-    save(log.with_suffix('.event.json'), event)
-    if event['returncode'] != 0 or event.get('interrupted_or_timeout'):
-        raise RuntimeError(f'command failed; preserved log: {log}')
-
-
 def analyze_cell(raw, output):
-    execute([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(raw),
-             '--output-dir', str(output), '--no-plots'], output.parent / (output.name + '.log'), 120)
+    run_logged([sys.executable, '-m', 'integration.upscaledb.reports.analyze_trials',
+                '--input-dir', str(raw), '--output-dir', str(output), '--no-plots'],
+               output.parent / (output.name + '.log'), 120, cwd=ROOT, terminate_grace=20)
     summary = load(output / 'summary.json')
     if summary['failure_count']:
         raise ValueError(f'{raw}: {summary["failure_count"]} invalid/missing trials; see {output}')
@@ -175,7 +150,7 @@ def prepare(args):
                           'command': command(args, role, args.output_root / 'trials' / name,
                                              rng.randrange(2**31))})
     plan = {'schema': 1, 'hypothesis': 'H1_role_cost_service_allocation',
-            'created_utc': now(), 'co_run_label': args.co_run_label,
+            'created_utc': utc_now(), 'co_run_label': args.co_run_label,
             'build_root': str(args.build_root), 'output_root': str(args.output_root),
             'smoke_root': str(smoke), 'controller_command': sys.argv,
             'source_sha256': sources(), 'artifacts': built, 'topology': topology,
@@ -188,14 +163,14 @@ def prepare(args):
     # Keep an exact controller/helper copy even if the working tree later changes.
     for filename, path in source_paths().items():
         (args.output_root / filename).write_bytes(path.read_bytes())
-    execute(command(args, '4+4', smoke / 'raw', args.order_seed, smoke=True),
-            smoke / 'runner.log', 780)
+    run_logged(command(args, '4+4', smoke / 'raw', args.order_seed, smoke=True),
+               smoke / 'runner.log', 780, cwd=ROOT, terminate_grace=20)
     smoke_summary = analyze_cell(smoke / 'raw', smoke / 'analysis')
     for v in VARIANTS:
         if len(smoke_summary['trials'][v]) != 1:
             raise ValueError(f'smoke missing variant {v}')
         extract(smoke_summary['trials'][v][0], '4+4', 0, smoke=True)
-    save(args.output_root / 'prepared.json', {'schema': 1, 'finished_utc': now(),
+    save(args.output_root / 'prepared.json', {'schema': 1, 'finished_utc': utc_now(),
                                             'plan_sha256': runner.digest(args.output_root / 'plan.json'),
                                             'smoke_root': str(smoke)})
     print(f'Prepared {plan["planned_trials"]} timed trials; smoke is separate:', smoke)
@@ -216,12 +191,13 @@ def run(args):
             if current[v][key] != plan['artifacts'][v][key]:
                 raise ValueError(f'{v}: frozen provenance changed since preparation: {key}')
     fresh(args.output_root / 'trials')
-    save(args.output_root / 'run-start.json', {'started_utc': now(), 'command': sys.argv,
+    save(args.output_root / 'run-start.json', {'started_utc': utc_now(), 'command': sys.argv,
          'co_run_label': plan['co_run_label'], 'source_sha256': sources(), 'cpus': CPUS})
     for cell in plan['cells']:
-        execute(cell['command'], args.output_root / 'trials' / (cell['name'] + '.log'), 780)
+        run_logged(cell['command'], args.output_root / 'trials' / (cell['name'] + '.log'),
+                   780, cwd=ROOT, terminate_grace=20)
     save(args.output_root / 'run-finished.json',
-         {'finished_utc': now(), 'planned_trials': plan['planned_trials']})
+         {'finished_utc': utc_now(), 'planned_trials': plan['planned_trials']})
     print(f'Collected {plan["planned_trials"]} trials serially inside H1; analyze separately.')
 
 
@@ -249,12 +225,12 @@ def extract(trial, role, rep, smoke=False):
     if total <= 0:
         raise ValueError('no measured requester service in response window')
     metrics = row['metrics']
-    metrics.update(service_total_ns=total, service_jfi=analyze.jain(amounts),
+    metrics.update(service_total_ns=total, service_jfi=analyze_trials.jain(amounts),
                    finder_share=sum(amounts[:f]) / total,
                    inserter_share=sum(amounts[f:]) / total,
                    finder_reference=f / 8, inserter_reference=ins / 8,
-                   finder_service_jfi=analyze.jain(amounts[:f]),
-                   inserter_service_jfi=analyze.jain(amounts[f:]))
+                   finder_service_jfi=analyze_trials.jain(amounts[:f]),
+                   inserter_service_jfi=analyze_trials.jain(amounts[f:]))
     metrics['role_share_error'] = abs(metrics['finder_share'] - f / 8)
     for idx, op in enumerate(('find', 'insert')):
         count = trial['on_time'][idx]
@@ -392,7 +368,7 @@ def analyze_all(args):
             failures.append({'cell': cell['name'], 'reason': str(exc)})
     if len(rows) != plan['planned_trials']:
         failures.append({'reason': f'expected {plan["planned_trials"]} valid trials, obtained {len(rows)}'})
-    result = {'schema': 1, 'hypothesis': 'H1', 'created_utc': now(), 'command': sys.argv,
+    result = {'schema': 1, 'hypothesis': 'H1', 'created_utc': utc_now(), 'command': sys.argv,
               'plan_sha256': runner.digest(args.output_root / 'plan.json'),
               'collection_source_sha256': plan['source_sha256'], 'analysis_source_sha256': sources(),
               'co_run_label': plan['co_run_label'], 'planned_trials': plan['planned_trials'],
@@ -431,7 +407,7 @@ def analyze_all(args):
     try:
         plots(rows, output)
     except Exception as exc:
-        save(output / 'plot-failure.json', {'error': str(exc), 'created_utc': now()})
+        save(output / 'plot-failure.json', {'error': str(exc), 'created_utc': utc_now()})
         raise
     print('H1 report:', output / 'report.md')
 

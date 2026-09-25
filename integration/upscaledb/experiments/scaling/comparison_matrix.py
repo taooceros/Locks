@@ -67,7 +67,7 @@ def main():
         print('Starting case:', entry['name'], flush=True)
         subprocess.run(entry['command'], cwd=ROOT, check=True)
         case = out / entry['name']
-        subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(case)],
+        subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze_trials', '--input-dir', str(case)],
                        cwd=ROOT, check=True)
         result = json.loads((case / 'analysis' / 'summary.json').read_text())
         if result['failure_count']:

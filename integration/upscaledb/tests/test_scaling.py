@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from integration.upscaledb.runner.run_trials import (
     check_memory_selection, cpu_list, discover_topology, parse_cpu_ranges, roles, trial_command)
-from integration.upscaledb.experiments.scaling.scaling import (
+from integration.upscaledb.experiments.scaling.run_scaling import (
     artifact_identities, finalize_case, finished_case, select_cpus)
 
 

@@ -2,7 +2,7 @@
 """Render the completed joined UpScaleDB study by dimension; never run trials.
 
 From the repository root:
-  devenv shell -- python3 -m integration.upscaledb.reports.dimension_report \
+  devenv shell -- python3 -m integration.upscaledb.reports.dimensions \
     --input-root .worktree/upscaledb-joined-scaling \
     --output-dir docs/reports/upscaledb-joined-dimensions
 """
@@ -540,7 +540,7 @@ def render(sections, files, output, provenance):
     md.extend(['## 可复现来源', '',
        f'overview/scaling.json SHA256：`{provenance["overview_sha256"]}`；study.json SHA256：`{provenance["study_sha256"]}`。', '',
        f'汇总源数：{len(provenance["sources"])}；源路径和逐文件 SHA256 均见 [provenance.json](provenance.json)。', '',
-       f'生成器 SHA256：`{provenance["generator_sha256"]}`；上游 scaling_report.py SHA256：`{provenance["analysis_script_sha256"]}`。', '',
+       f'生成器 SHA256：`{provenance["generator_sha256"]}`；上游汇总脚本 SHA256：`{provenance["analysis_script_sha256"]}`。', '',
        '在仓库根目录执行（只生成报告，不重跑测量）：', '', '```sh', provenance['reproduce_command'], '```', ''])
     doc.extend(['</main><footer><h2>可复现来源</h2><p>overview/scaling.json SHA256：<code>',
                 provenance['overview_sha256'], '</code>；study.json SHA256：<code>',
@@ -571,7 +571,7 @@ def main():
     figure_dir.mkdir(parents=True, exist_ok=True)
     files = draw_all(rows, contrasts, figure_dir)
     require(len(files) == 12, 'Expected all 12 non-heatmap figures')
-    command = ('devenv shell -- python3 -m integration.upscaledb.reports.dimension_report '
+    command = ('devenv shell -- python3 -m integration.upscaledb.reports.dimensions '
                '--input-root .worktree/upscaledb-joined-scaling '
                '--output-dir docs/reports/upscaledb-joined-dimensions')
     provenance = {'schema': 1, 'input_root': str(root),

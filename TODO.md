@@ -23,6 +23,12 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   checks, a fresh FC-PQ build/run/analysis and 20 redb smoke cells passed.
   No formal matrices or documentation-only verification reruns.
 
+- [x] **Extract repeated runner mechanics and improve filenames.**
+  Four controllers share captured/logged process execution without a runner framework;
+  study/report names describe their purpose. Preserved timeout policies and artifacts.
+  Verified 28 Python tests, 14 renamed CLI entrypoints, shared capture of a real DB
+  error gate, and shared logged execution through a real trial and renamed analyzer.
+
 ## Phase 0: Foundation & Cleanup
 
 - [x] **Implement Jain's Fairness Index computation.**

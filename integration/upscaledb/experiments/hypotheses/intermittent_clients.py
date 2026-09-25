@@ -241,7 +241,7 @@ def prepare(args):
     receipt = machine()
     check_machine(receipt)
     files = {}
-    for source in (HERE / 'hypothesis_bursts.py', HERE / 'hypothesis_bursts.cc',
+    for source in (HERE / 'intermittent_clients.py', HERE / 'intermittent_clients.cc',
                    ORIGINAL_HARNESS, CORE / 'bridge.h', CORE / 'private_ops.h',
                    UPSCALEDB / '_paths.py'):
         frozen_add(files, source)
@@ -273,7 +273,7 @@ def prepare(args):
         require(command.count(source) == 1 and command.count('-o') == 1, 'unexpected archived compile command')
         binary = root / 'bin' / ('hypothesis-bursts-' + backend)
         require(command[command.index('-o') + 1] == manifest['binary'], 'unexpected archived output')
-        command[command.index(source)] = str(HERE / 'hypothesis_bursts.cc')
+        command[command.index(source)] = str(HERE / 'intermittent_clients.cc')
         command[command.index('-o') + 1] = str(binary)
         builds[backend] = {'archived_manifest': manifest, 'manifest_path': str(path),
                            'adapted_command': command, 'cwd': str(ROOT), 'binary': str(binary)}

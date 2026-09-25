@@ -1,6 +1,6 @@
 # Integrate the experiment setup for a main-targeted PR
 
-Status: grouped by responsibility with folder READMEs; executable-path checks passed for PR #46.
+Status: shared process execution and purpose-based filenames implemented and locally verified for PR #46.
 The earlier complete removal was the assistant's overbroad interpretation.
 
 ## Scope
@@ -177,3 +177,42 @@ intended scope; its verification is retained only as a historical record.
 - No formal performance matrices, full 22-variant rebuild or unchanged Rust tests
   rerun for this organization. Documentation/comment-only edits received no extra
   verification. Existing upstream/compiler warnings remain visible.
+
+## Runner simplification and naming plan
+
+- Extract captured-command and logged-controller execution into
+  `runner/process_execution.py`, using functions rather than a runner class hierarchy.
+  Migrate the duplicated cost/reservation and role/database controllers. Preserve
+  raw evidence, event schemas, timeout values and 20s/30s graceful shutdown policies.
+- Keep the standard runner's signal/provenance handling and redb's resource-limited
+  execution separate: unifying those policies would require extra configuration
+  and obscure meaningful differences.
+- Rename study/report files by purpose, removing redundant hypothesis/boundary/report
+  prefixes. Update every import, invocation, captured source path and current guide;
+  retain saved artifact names and historical evidence rather than relabeling them.
+- Verify shared process behavior with real subprocesses, focused database smoke and
+  relocated entrypoints. Do not rerun formal matrices or unchanged native builds.
+
+### Runner simplification completion
+
+- Four controllers now directly use `capture_command`, `run_logged` and `utc_now`
+  from `runner/process_execution.py`. Their duplicate process loops and local clock
+  helpers were removed: 100 fewer controller lines, replaced by a 63-line shared
+  module (37 fewer production lines across this extraction).
+- Purpose-based filenames replace repeated category prefixes: `role_balance`,
+  `reservation_delay`, `intermittent_clients`, `placement`, `operation_cost`,
+  `arrival_rate`, `database_load`, `run_scaling`, `comparison_matrix`,
+  `analyze_trials`, `campaign_overview`, `scaling`, `dimensions`, `hypotheses`.
+  Updated commands, imports, source inventories and guides; no old-path wrappers.
+- Preserved existing event fields, timeout values, output artifacts and validators.
+  The main runner, file-backed specialized controllers and redb retain their
+  different process policies rather than gaining a configurable framework.
+- All 28 Python tests passed, including seven real-subprocess regressions for
+  launch/nonzero failures, captured output, timeout cleanup and exclusive logs.
+  All 14 renamed CLI entrypoints and affected controller source inventories passed.
+- Shared capture ran the real FC-PQ error gate successfully. Shared logged execution
+  ran a standard fixed-work trial and the renamed analyzer: 128 finds + 128 inserts,
+  exactly 192 final records, clean shutdown and zero excluded trials.
+  Evidence: `.worktree/runner-refactor-verification/` and
+  `.worktree/runner-refactor-smoke/`. Temporary smoke script removed.
+- No native rebuild, formal matrix, unchanged redb run or cosmetic-only recheck.

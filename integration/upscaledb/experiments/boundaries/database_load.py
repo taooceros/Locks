@@ -8,19 +8,17 @@ and never launches benchmark binaries.
 """
 import argparse
 import csv
-import datetime as dt
 import json
 import math
 import os
 from pathlib import Path
 import random
-import signal
 import statistics
-import subprocess
 import sys
 
 from integration.upscaledb._paths import CORE, REPORTS, ROOT, RUNNER, UPSCALEDB
 from integration.upscaledb.runner import run_trials as runner
+from integration.upscaledb.runner.process_execution import run_logged, utc_now
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_BINARY_ROOT = runner.ROOT / '.worktree/upscaledb'
@@ -69,10 +67,6 @@ NOTES = [
 ]
 
 
-def now():
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
 def load(path):
     return json.loads(path.read_text(), parse_constant=runner.reject_nonfinite)
 
@@ -82,9 +76,12 @@ def save(path, value):
 
 
 def source_paths():
-    return {path.name: path for path in
-            (Path(__file__), UPSCALEDB / '_paths.py', RUNNER / 'run_trials.py',
-             REPORTS / 'analyze.py', CORE / 'build.py')}
+    controller = Path(__file__)
+    # Preserve the analyzer's historical copied artifact name.
+    return {controller.name: controller, '_paths.py': UPSCALEDB / '_paths.py',
+            'run_trials.py': RUNNER / 'run_trials.py',
+            'process_execution.py': RUNNER / 'process_execution.py',
+            'analyze.py': REPORTS / 'analyze_trials.py', 'build.py': CORE / 'build.py'}
 
 
 def sources():
@@ -134,33 +131,11 @@ def command(root, cell, output, seed, smoke=False):
     return cmd
 
 
-def execute(cmd, log, timeout):
-    event = {'command': cmd, 'cwd': str(ROOT), 'started_utc': now(),
-             'timeout_seconds': timeout, 'affinity': sorted(os.sched_getaffinity(0))}
-    with log.open('xb') as stream:
-        child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT,
-                                 start_new_session=True, cwd=ROOT)
-        try:
-            event['returncode'] = child.wait(timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            # Runner handles SIGTERM and owns cleanup of its separate binary session.
-            os.killpg(child.pid, signal.SIGTERM)
-            try:
-                child.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait()
-            event.update(returncode=child.returncode, interrupted_or_timeout=True)
-        event['finished_utc'] = now()
-    save(log.with_suffix('.event.json'), event)
-    if event['returncode'] != 0 or event.get('interrupted_or_timeout'):
-        raise RuntimeError(f'command failed; log preserved: {log}')
-
-
 def analyze_cell(raw, output):
-    execute([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(raw),
-             '--output-dir', str(output), '--no-plots'],
-            output.parent / (output.name + '.log'), 180)
+    run_logged([sys.executable, '-m', 'integration.upscaledb.reports.analyze_trials',
+                '--input-dir', str(raw), '--output-dir', str(output), '--no-plots'],
+               output.parent / (output.name + '.log'), 180, cwd=ROOT, terminate_grace=30,
+               metadata={'cwd': str(ROOT), 'affinity': sorted(os.sched_getaffinity(0))})
     return load(output / 'summary.json')
 
 
@@ -184,7 +159,7 @@ def prepare(args):
                               'order_seed': seed, 'backend_order': order,
                               'command': command(args.binary_root, case,
                                                  args.output_root / 'trials' / name, seed)})
-        plan = {'schema': 1, 'experiment': 'database_boundary', 'created_utc': now(),
+        plan = {'schema': 1, 'experiment': 'database_boundary', 'created_utc': utc_now(),
                 'controller_command': sys.argv, 'output_root': str(args.output_root),
                 'binary_root': str(args.binary_root), 'source_sha256': sources(),
                 'artifacts': built, 'topology': topology, 'controller_cpus': CPUS,
@@ -202,8 +177,9 @@ def prepare(args):
         for case in CASES[:2]:
             output = smoke / case['case']
             try:
-                execute(command(args.binary_root, case, output, args.order_seed, smoke=True),
-                        smoke / (case['case'] + '.log'), 1020)
+                run_logged(command(args.binary_root, case, output, args.order_seed, smoke=True),
+                           smoke / (case['case'] + '.log'), 1020, cwd=ROOT, terminate_grace=30,
+                           metadata={'cwd': str(ROOT), 'affinity': sorted(os.sched_getaffinity(0))})
                 summary = analyze_cell(output, smoke / (case['case'] + '-analysis'))
                 if summary['failure_count'] or any(
                         len(summary['trials'][v]) != 1 for v in VARIANTS):
@@ -212,11 +188,11 @@ def prepare(args):
                 failures.append({'case': case['case'], 'reason': str(exc)})
         if failures:
             raise ValueError('representative 1/8-worker smoke failed: ' + json.dumps(failures))
-        save(args.output_root / 'prepared.json', {'finished_utc': now(),
+        save(args.output_root / 'prepared.json', {'finished_utc': utc_now(),
              'plan_sha256': runner.digest(args.output_root / 'plan.json'),
              'smoke_trials': 10, 'expected_primary_trials': 60})
     except Exception as exc:
-        save(args.output_root / 'prepare-failure.json', {'created_utc': now(), 'reason': str(exc)})
+        save(args.output_root / 'prepare-failure.json', {'created_utc': utc_now(), 'reason': str(exc)})
         raise
     print('Prepared 60 primary trials; 10 separate small-preload smoke trials passed.')
 
@@ -244,17 +220,19 @@ def run(args):
                 raise ValueError(f'{variant}: frozen provenance changed: {key}')
     trials = args.output_root / 'trials'
     trials.mkdir(exist_ok=False)
-    save(args.output_root / 'run-start.json', {'started_utc': now(), 'command': sys.argv,
+    save(args.output_root / 'run-start.json', {'started_utc': utc_now(), 'command': sys.argv,
          'affinity': sorted(os.sched_getaffinity(0)), 'expected_primary_trials': 60})
     try:
         for cell in plan['cells']:
-            execute(cell['command'], trials / (cell['name'] + '.log'), 1020)
+            run_logged(cell['command'], trials / (cell['name'] + '.log'), 1020,
+                       cwd=ROOT, terminate_grace=30,
+                       metadata={'cwd': str(ROOT), 'affinity': sorted(os.sched_getaffinity(0))})
     except Exception as exc:
-        save(args.output_root / 'run-failure.json', {'created_utc': now(), 'reason': str(exc)})
+        save(args.output_root / 'run-failure.json', {'created_utc': utc_now(), 'reason': str(exc)})
         raise
     inventory = {str(p.relative_to(args.output_root)): runner.digest(p)
                  for p in sorted(trials.rglob('*')) if p.is_file()}
-    save(args.output_root / 'run-finished.json', {'finished_utc': now(),
+    save(args.output_root / 'run-finished.json', {'finished_utc': utc_now(),
          'expected_primary_trials': 60, 'raw_sha256': inventory})
     print('Finished 60 primary attempts; run --analyze-only for correctness/failure counts.')
 
@@ -430,7 +408,7 @@ def analyze_all(args):
     successful = sum(r['status'] == 'ok' for r in rows)
     result = {'schema': 1, 'experiment': 'database_boundary',
               'scope': 'closed_loop_real_in_memory_db_preload_1k_1m_workers_1_8',
-              'created_utc': now(), 'command': sys.argv, 'expected_trials': 60,
+              'created_utc': utc_now(), 'command': sys.argv, 'expected_trials': 60,
               'successful_trials': successful, 'failed_trials': 60 - successful,
               'plan_sha256': runner.digest(args.output_root / 'plan.json'),
               'collection_source_sha256': plan['source_sha256'], 'analysis_source_sha256': sources(),
@@ -464,7 +442,7 @@ def analyze_all(args):
     try:
         plots(rows, output)
     except Exception as exc:
-        save(output / 'plot-failure.json', {'created_utc': now(), 'reason': str(exc)})
+        save(output / 'plot-failure.json', {'created_utc': utc_now(), 'reason': str(exc)})
         raise
     print('Analysis:', output / 'summary.json')
     if failures:

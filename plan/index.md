@@ -8,7 +8,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 ### Experiment setup integration
 
 - [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
-  - Status: grouped by responsibility with folder READMEs; executable-path checks passed for PR #46.
+  - Status: grouped tools, shared execution helpers and purpose-based names verified for PR #46.
   - Scope: synchronization adapters without application-logic changes, redb setup,
     and shared lock fixes; preserve original worktrees and exclude result artifacts.
 

@@ -2,7 +2,6 @@
 """H2: synthetic reserved-slice diagnostic, never DB throughput. No lock changes."""
 import argparse
 import csv
-import datetime as dt
 import hashlib
 import json
 import os
@@ -13,11 +12,11 @@ import signal
 import statistics as stats
 import subprocess
 import sys
-import time
 
 from integration.upscaledb._paths import CORE, ROOT, RUNNER, UPSCALEDB
 from integration.upscaledb.core.build import rust_sources_digest
 from integration.upscaledb.runner.run_trials import discover_topology
+from integration.upscaledb.runner.process_execution import capture_command, utc_now
 
 HERE = Path(__file__).resolve().parent
 BACKENDS = ('bridge_mutex', 'fc', 'fc_pq', 'uscl', 'uscl_local_observed')
@@ -34,10 +33,6 @@ def sha(path):
     return h.hexdigest()
 
 
-def now():
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
 def save(path, value):
     with Path(path).open('x') as f:
         json.dump(value, f, indent=2, allow_nan=False)
@@ -51,34 +46,6 @@ def load(path):
 def require(condition, message):
     if not condition:
         raise ValueError(message)
-
-
-def execute(command, timeout, env=None):
-    """Hard external process-group watchdog, including compiler/lock hangs."""
-    record = {'command': list(map(str, command)), 'start_utc': now(),
-              'start_monotonic_ns': time.monotonic_ns(), 'timeout_s': timeout,
-              'parent_affinity': sorted(os.sched_getaffinity(0))}
-    child = None
-    try:
-        child = subprocess.Popen(record['command'], cwd=ROOT, env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, start_new_session=True)
-        try:
-            stdout, stderr = child.communicate(timeout=timeout)
-            record['timeout'] = False
-        except subprocess.TimeoutExpired:
-            record['timeout'] = True
-            os.killpg(child.pid, signal.SIGKILL)
-            stdout, stderr = child.communicate(timeout=5)
-        record.update(returncode=child.returncode, stdout=stdout, stderr=stderr)
-    except OSError as exc:
-        record.update(returncode=None, timeout=False, stdout='', stderr=str(exc))
-    finally:
-        if child is not None and child.poll() is None:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.communicate(timeout=5)
-        record.update(end_utc=now(), end_monotonic_ns=time.monotonic_ns())
-    return record
 
 
 def parsed_trial(record, backend, samples):
@@ -123,9 +90,10 @@ def prepare(args):
             (chosen[1]['socket'], chosen[1]['core']), 'actors must occupy distinct physical cores')
     os.sched_setaffinity(0, {16, 17})
     files = {}
-    for path in (Path(__file__), HERE / 'hypothesis_reservation.cc', UPSCALEDB / '_paths.py',
+    for path in (Path(__file__), HERE / 'reservation_delay.cc', UPSCALEDB / '_paths.py',
                  CORE / 'bridge.h', CORE / 'build.py', RUNNER / 'run_trials.py',
-                 ROOT / 'c/u-scl/fairlock.h', ROOT / 'c/u-scl/common.h', ROOT / 'c/u-scl/rdtsc.h'):
+                 RUNNER / 'process_execution.py', ROOT / 'c/u-scl/fairlock.h',
+                 ROOT / 'c/u-scl/common.h', ROOT / 'c/u-scl/rdtsc.h'):
         files[str(path.resolve())] = sha(path)
         shutil.copy2(path, root / 'src' / path.name)
     manifests = {}
@@ -159,7 +127,7 @@ def prepare(args):
     files[str(cohort_path)] = sha(cohort_path)
     shutil.copy2(cohort_path, root / 'cohort.json')
 
-    source = root / 'src/hypothesis_reservation.cc'
+    source = root / 'src/reservation_delay.cc'
     bridge_binary, direct_binary = root / 'reservation-bridge', root / 'reservation-uscl-local'
     # Preserve the ACTUAL compiler, compile flags and complete link arguments.
     # Only source and -o target change. This is a synthetic callback driver;
@@ -183,7 +151,8 @@ def prepare(args):
     env.pop('NIX_CFLAGS_COMPILE', None)
     env.pop('NIX_LDFLAGS', None)
     for i, cmd in enumerate(commands):
-        result = execute(cmd, 120, env)
+        result = capture_command(cmd, 120, cwd=ROOT, env=env,
+                                 metadata={'parent_affinity': sorted(os.sched_getaffinity(0))})
         save(root / f'compile-{i}.json', result)
         require(result['returncode'] == 0 and not result['timeout'], f'compile-{i} failed; log retained')
     for path in (bridge_binary, direct_binary, object_file, *(root / 'src').iterdir()):
@@ -191,7 +160,8 @@ def prepare(args):
     smoke_results = []
     for backend in BACKENDS:
         binary = direct_binary if backend == 'uscl_local_observed' else bridge_binary
-        smoke = execute([binary, backend, '50', '2'], TIMEOUT_S)
+        smoke = capture_command([binary, backend, '50', '2'], TIMEOUT_S, cwd=ROOT,
+                                metadata={'parent_affinity': sorted(os.sched_getaffinity(0))})
         _, error = parsed_trial(smoke, backend, 2)
         smoke['validation_error'] = error
         path = root / f'smoke-{backend}.json'
@@ -199,7 +169,7 @@ def prepare(args):
         smoke_results.append({'backend': backend, 'file': path.name, 'sha256': sha(path), 'error': error})
     require(all(x['error'] is None for x in smoke_results), 'correctness smoke failed; all evidence retained')
     manifest = {'schema': 1, 'hypothesis': 'H2 synthetic reservation, NOT database throughput',
-                'created_utc': now(), 'cohort_label': args.cohort_label,
+                'created_utc': utc_now(), 'cohort_label': args.cohort_label,
                 'cohort_sha256': sha(cohort_path), 'topology': topology,
                 'actor_cpus': [16, 17], 'setup_cpu': 16, 'memory_policy': 'bind node0',
                 'backends': BACKENDS, 'pauses_us': PAUSES, 'samples': args.samples,
@@ -242,19 +212,21 @@ def run(args):
         schedule += [{'repetition': repetition, 'backend': backend, 'pause_us': pause}
                      for backend, pause in cells]
     save(root / 'schedule.json', schedule)
-    run_record = {'start_utc': now(), 'cohort_label': manifest['cohort_label'],
+    run_record = {'start_utc': utc_now(), 'cohort_label': manifest['cohort_label'],
                   'prepare_sha256': sha(root / 'prepare.json'),
                   'schedule_sha256': sha(root / 'schedule.json'), 'trials': []}
     for index, cell in enumerate(schedule):
         binary = manifest['direct_binary' if cell['backend'] == 'uscl_local_observed' else 'bridge_binary']
-        trial = execute([binary, cell['backend'], str(cell['pause_us']), str(manifest['samples'])], TIMEOUT_S)
+        trial = capture_command([binary, cell['backend'], str(cell['pause_us']),
+                                 str(manifest['samples'])], TIMEOUT_S, cwd=ROOT,
+                                metadata={'parent_affinity': sorted(os.sched_getaffinity(0))})
         _, error = parsed_trial(trial, cell['backend'], manifest['samples'])
         trial.update(cell, validation_error=error)
         path = raw / f'{index:03d}.json'
         save(path, trial)
         run_record['trials'].append({**cell, 'file': str(path.relative_to(root)),
                                      'sha256': sha(path), 'validation_error': error})
-    run_record['end_utc'] = now()
+    run_record['end_utc'] = utc_now()
     save(root / 'run.json', run_record)
     assert_inputs(manifest)
     failures = sum(x['validation_error'] is not None for x in run_record['trials'])

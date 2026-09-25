@@ -8,7 +8,6 @@ Rust rebuild, concurrent measurement, resume/overwrite, or favorable-case select
 """
 import argparse
 import csv
-import datetime as dt
 import hashlib
 import json
 import math
@@ -20,11 +19,11 @@ import signal
 import statistics as stats
 import subprocess
 import sys
-import time
 
 from integration.upscaledb._paths import CORE, ROOT, RUNNER, UPSCALEDB
 from integration.upscaledb.core.build import rust_sources_digest
 from integration.upscaledb.runner.run_trials import discover_topology
+from integration.upscaledb.runner.process_execution import capture_command, utc_now
 
 HERE = Path(__file__).resolve().parent
 FROZEN = ROOT / '.worktree/upscaledb'
@@ -61,10 +60,6 @@ NOTES = [
 ]
 
 
-def now():
-    return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
 def sha(path):
     digest = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -94,39 +89,12 @@ def affinity():
     return actual
 
 
-def execute(command, timeout, env=None):
-    record = {'command': list(map(str, command)), 'cwd': str(ROOT), 'start_utc': now(),
-              'start_monotonic_ns': time.monotonic_ns(), 'timeout_s': timeout,
-              'parent_affinity': sorted(os.sched_getaffinity(0))}
-    child = None
-    try:
-        child = subprocess.Popen(record['command'], cwd=ROOT, env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, start_new_session=True)
-        try:
-            stdout, stderr = child.communicate(timeout=timeout)
-            record['timeout'] = False
-        except subprocess.TimeoutExpired:
-            record['timeout'] = True
-            os.killpg(child.pid, signal.SIGKILL)
-            stdout, stderr = child.communicate(timeout=5)
-        record.update(returncode=child.returncode, stdout=stdout, stderr=stderr)
-    except OSError as exc:
-        record.update(returncode=None, timeout=False, stdout='', stderr=str(exc))
-    finally:
-        if child is not None and child.poll() is None:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.communicate(timeout=5)
-        record.update(end_utc=now(), end_monotonic_ns=time.monotonic_ns())
-    return record
-
-
 def sources_to_archive():
     # Exact source set of the existing build.rust_sources_digest convention,
     # plus the controller/harness/helpers. Archive bytes, not only a git label.
     files = [ROOT / 'Cargo.toml', ROOT / 'Cargo.lock', UPSCALEDB / '_paths.py',
-             CORE / 'bridge.h', HERE / 'boundary_cost.cc', Path(__file__).resolve(),
-             CORE / 'build.py', RUNNER / 'run_trials.py']
+             CORE / 'bridge.h', HERE / 'operation_cost.cc', Path(__file__).resolve(),
+             CORE / 'build.py', RUNNER / 'run_trials.py', RUNNER / 'process_execution.py']
     files.extend((ROOT / '.cargo').glob('*.toml'))
     for suffix in ('*.c', '*.h'):
         files.extend((ROOT / 'c').rglob(suffix))
@@ -254,7 +222,7 @@ def prepare(args):
                 slot['reserved_siblings'] == '84-91', 'resource registry allocation mismatch')
         shutil.copy2(resources, root / 'allocations.json')
         files[str(root / 'allocations.json')] = sha(root / 'allocations.json')
-    source = root / 'src/integration/upscaledb/experiments/boundaries/boundary_cost.cc'
+    source = root / 'src/integration/upscaledb/experiments/boundaries/operation_cost.cc'
     rust_hash = rust_sources_digest()
     variants = list(BACKENDS) + [b + '_profile' for b in PROFILE_BACKENDS]
     binaries, build_commands, frozen_manifests = {}, {}, {}
@@ -262,10 +230,10 @@ def prepare(args):
     env = os.environ.copy()
     env.pop('NIX_CFLAGS_COMPILE', None)
     env.pop('NIX_LDFLAGS', None)
-    save(root / 'prepare-start.json', {'created_utc': now(), 'command': sys.argv,
+    save(root / 'prepare-start.json', {'created_utc': utc_now(), 'command': sys.argv,
          'cwd': str(ROOT), 'topology': topology, 'expected_primary_trials': 48,
          'expected_diagnostic_trials': 18, 'notes': NOTES})
-    save(root / 'host.json', {'created_utc': now(), 'uname': list(os.uname()),
+    save(root / 'host.json', {'created_utc': utc_now(), 'uname': list(os.uname()),
          'python': sys.version, 'cpuinfo': Path('/proc/cpuinfo').read_text(),
          'numa_balancing': Path('/proc/sys/kernel/numa_balancing').read_text().strip(),
          'scheduler_policy': os.sched_getscheduler(0), 'nice': os.getpriority(os.PRIO_PROCESS, 0),
@@ -298,13 +266,15 @@ def prepare(args):
         command[command.index(old[0])] = str(source)
         command[command.index('-o') + 1] = str(binary)
         build_commands[variant] = command
-        result = execute(command, 180, env)
+        result = capture_command(command, 180, cwd=ROOT, env=env,
+                                 metadata={'cwd': str(ROOT),
+                                           'parent_affinity': sorted(os.sched_getaffinity(0))})
         result['environment_removed'] = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS']
         save(root / f'compile-{variant}.json', result)
         require(result['returncode'] == 0 and not result['timeout'], f'{variant} compile failed; logs retained')
         files[str(binary)] = sha(binary)
     cells = schedule(args.seed)
-    manifest = {'schema': 1, 'experiment': EXPERIMENT, 'created_utc': now(),
+    manifest = {'schema': 1, 'experiment': EXPERIMENT, 'created_utc': utc_now(),
                 'source_git_head': subprocess.check_output(
                     ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'scope': 'synthetic cost asymmetry; not DB throughput',
@@ -327,7 +297,9 @@ def prepare(args):
         if identity in seen:
             continue
         seen.add(identity)
-        result = execute(command_for(manifest, cell, smoke=True), TIMEOUT)
+        result = capture_command(command_for(manifest, cell, smoke=True), TIMEOUT, cwd=ROOT,
+                                 metadata={'cwd': str(ROOT),
+                                           'parent_affinity': sorted(os.sched_getaffinity(0))})
         parsed, error = parse_record(result, cell, smoke=True)
         result.update(validation_error=error, cell=cell, parsed=parsed)
         path = root / f'smoke-{cell["variant"]}-{cell["case"]}.json'
@@ -349,21 +321,23 @@ def run(args):
         require(smoke['error'] is None and sha(root / smoke['file']) == smoke['sha256'], 'smoke changed')
     raw = root / 'trials'
     raw.mkdir(exist_ok=False)
-    save(root / 'run-start.json', {'started_utc': now(), 'command': sys.argv, 'cwd': str(ROOT),
+    save(root / 'run-start.json', {'started_utc': utc_now(), 'command': sys.argv, 'cwd': str(ROOT),
          'prepare_sha256': sha(root / 'prepare.json'), 'parent_affinity': affinity(),
          'topology': discover_topology(), 'schedule': manifest['schedule'],
          'cpu_stat_before': Path('/proc/stat').read_text(),
          'pressure_cpu_before': Path('/proc/pressure/cpu').read_text()})
     records = []
     for cell in manifest['schedule']:
-        record = execute(command_for(manifest, cell), manifest['timeout_s'])
+        record = capture_command(command_for(manifest, cell), manifest['timeout_s'], cwd=ROOT,
+                                 metadata={'cwd': str(ROOT),
+                                           'parent_affinity': sorted(os.sched_getaffinity(0))})
         _, error = parse_record(record, cell)
         record.update(cell=cell, validation_error=error,
                       prepare_sha256=sha(root / 'prepare.json'))
         path = raw / f'{cell["index"]:03d}.json'
         save(path, record)
         records.append({**cell, 'file': str(path.relative_to(root)), 'sha256': sha(path), 'error': error})
-    run_record = {'finished_utc': now(), 'trials': records,
+    run_record = {'finished_utc': utc_now(), 'trials': records,
                   'prepare_sha256': sha(root / 'prepare.json'),
                   'cpu_stat_after': Path('/proc/stat').read_text(),
                   'pressure_cpu_after': Path('/proc/pressure/cpu').read_text()}
@@ -639,7 +613,7 @@ def analyze(args):
         valid = sum(r['kind'] == kind and r['error'] is None for r in rows)
         counts[kind] = {'expected': expected, 'successful': valid, 'failed': expected - valid}
     successful = sum(c['successful'] for c in counts.values())
-    summary = {'schema': 1, 'experiment': EXPERIMENT, 'scope': manifest['scope'], 'created_utc': now(),
+    summary = {'schema': 1, 'experiment': EXPERIMENT, 'scope': manifest['scope'], 'created_utc': utc_now(),
                'expected_trials': 66, 'successful_trials': successful, 'failed_trials': 66 - successful,
                'counts': counts, 'integrity_errors': integrity_errors,
                'prepare_sha256': preparation_hash, 'seed': manifest['seed'], 'groups': groups,

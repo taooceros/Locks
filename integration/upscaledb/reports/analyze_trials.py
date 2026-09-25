@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Analyze run_trials.py manifest + raw records without silently dropping failures.
 
-  python3 -m integration.upscaledb.reports.analyze --input-dir .worktree/upscaledb/output
-  python3 -m integration.upscaledb.reports.analyze --input-dir .worktree/upscaledb/output --output-dir /tmp/ups-analysis
+  python3 -m integration.upscaledb.reports.analyze_trials --input-dir .worktree/upscaledb/output
+  python3 -m integration.upscaledb.reports.analyze_trials --input-dir .worktree/upscaledb/output --output-dir /tmp/ups-analysis
 
 Plots require matplotlib >= 3.8 (install with `python3 -m pip install 'matplotlib>=3.8'`
 in the analysis Python environment; no matplotlib dependency for the runner). The exact

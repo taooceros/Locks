@@ -257,7 +257,7 @@ def schedule_file(path, seed, mix, rate, window_ns=WINDOW_NS):
 
 def build_companions(args, files):
     builds = {}
-    archive_sources = {HERE / 'boundary_arrival.py', HERE / 'boundary_arrival.cc',
+    archive_sources = {HERE / 'arrival_rate.py', HERE / 'arrival_rate.cc',
                        ORIGINAL_HARNESS, CORE / 'bridge.h', CORE / 'private_ops.h',
                        UPSCALEDB / '_paths.py'}
     for source in archive_sources:
@@ -289,7 +289,7 @@ def build_companions(args, files):
         freeze(files, original_source, digest(ORIGINAL_HARNESS))
         require(cmd[cmd.index('-o') + 1] == build['binary'], 'unexpected frozen output')
         binary = args.output_root / 'bin' / f'boundary-arrival-{backend}'
-        cmd[candidates[0]] = str(HERE / 'boundary_arrival.cc')
+        cmd[candidates[0]] = str(HERE / 'arrival_rate.cc')
         cmd[cmd.index('-o') + 1] = str(binary)
         # The frozen harness command includes the core/ include path for
         # native_harness.cc, bridge.h and private_ops.h.

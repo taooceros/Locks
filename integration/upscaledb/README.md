@@ -7,7 +7,7 @@ For a normal comparison, use four tools in order:
 | Build | `integration.upscaledb.core.build` | Build pinned upstream/control/lock variants |
 | Check | `integration.upscaledb.core.correctness` | Check real DB results, lifecycle and error behavior |
 | Run | `integration.upscaledb.runner.run_trials` | Execute fresh processes and retain every result/failure |
-| Analyze | `integration.upscaledb.reports.analyze` | Validate and summarize saved results; no experiments launched |
+| Analyze | `integration.upscaledb.reports.analyze_trials` | Validate and summarize saved results; no experiments launched |
 
 This uses the existing runner, not a new wrapper or framework. Optional specialized
 studies live under [experiments/](experiments/README.md). See [reports/](reports/README.md)
@@ -58,7 +58,7 @@ flock --exclusive "$MEASUREMENT_LOCK" taskset -c "$CPUS" \
   --warmup 0 --smoke --output-dir "$RUN"
 
 flock --shared "$MEASUREMENT_LOCK" \
-  python3 -m integration.upscaledb.reports.analyze --input-dir "$RUN"
+  python3 -m integration.upscaledb.reports.analyze_trials --input-dir "$RUN"
 ```
 
 `--layout packed` labels the chosen CPU placement; it does not select CPUs for you.
@@ -85,7 +85,7 @@ repetition provides no performance evidence.
 |---|---|
 | [core/](core/README.md) | Yes: builder, adapter/patches, native harness and DB correctness gate |
 | [runner/](runner/README.md) | Yes: standard execution and source/result capture |
-| [reports/](reports/README.md) | `analyze` for one cohort; other reports are optional |
+| [reports/](reports/README.md) | `analyze_trials` for one cohort; other reports are optional |
 | [experiments/](experiments/README.md) | Optional: predefined scaling, hypothesis and boundary studies |
 | [tests/](tests/README.md) | Development checks for provenance, placement and runner behavior |
 

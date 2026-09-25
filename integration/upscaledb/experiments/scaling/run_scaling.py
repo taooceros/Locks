@@ -244,7 +244,7 @@ def main():
                        f'fixed_{args.reads}_reads_{args.inserts}_inserts_or_duration_'
                        f'{args.seconds}_seconds_before_deadline'},
             'cases': cases, 'runner_commands': commands, 'binary_artifacts': identities,
-            'runner_sha256': digest(RUNNER / 'run_trials.py'), 'analyzer_sha256': digest(REPORTS / 'analyze.py'),
+            'runner_sha256': digest(RUNNER / 'run_trials.py'), 'analyzer_sha256': digest(REPORTS / 'analyze_trials.py'),
             'scaling_sha256': digest(Path(__file__))}
     if args.plan_only:
         print(json.dumps(plan, indent=2, sort_keys=True))
@@ -288,7 +288,7 @@ def main():
         directory = args.output_root / case['name']
         summary_path = directory / 'analysis' / 'summary.json'
         if not summary_path.is_file():
-            analyzed = subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--no-plots',
+            analyzed = subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze_trials', '--no-plots',
                                        '--input-dir', str(directory)], cwd=ROOT, check=False)
             if analyzed.returncode:
                 raise RuntimeError(f'analysis for {case["name"]} failed ({analyzed.returncode}); retained: {directory}')

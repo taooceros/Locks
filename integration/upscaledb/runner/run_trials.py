@@ -57,8 +57,8 @@ def capture_sources(outdir, variants):
     """Archive the exact integration inputs, including Rust bridge and lock source."""
     paths = [CORE / name for name in ('bridge.h', 'private_ops.h', 'native-lock-timing.patch',
                                       'bridge-ops.patch', 'native_harness.cc', 'build.py')]
-    paths.extend((HERE / 'run_trials.py', REPORTS / 'analyze.py', UPSCALEDB / '_paths.py',
-                  EXPERIMENTS / 'scaling/scaling.py', TESTS / 'test_scaling.py'))
+    paths.extend((HERE / 'run_trials.py', REPORTS / 'analyze_trials.py', UPSCALEDB / '_paths.py',
+                  EXPERIMENTS / 'scaling/run_scaling.py', TESTS / 'test_scaling.py'))
     rust = ROOT / 'crates' / 'upscaledb-bridge'
     if any(v not in ('native', 'refactored', 'profile') for v in variants):
         if not (rust / 'src/lib.rs').is_file():
