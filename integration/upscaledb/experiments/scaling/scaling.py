@@ -11,7 +11,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from run_trials import HERE, ROOT, atomic_new, digest, discover_topology, read_text
+from integration.upscaledb._paths import ROOT, RUNNER, REPORTS
+from integration.upscaledb.runner.run_trials import atomic_new, digest, discover_topology, read_text
 
 VARIANTS = ('native', 'fc', 'fc_pq', 'uscl', 'cfl_local')
 DEFAULT_BINARIES = ROOT / '.worktree' / 'upscaledb-scaling-build'
@@ -124,7 +125,7 @@ def make_cases(topology):
 
 
 def runner_command(case, args):
-    command = [sys.executable, str(HERE / 'run_trials.py'), '--variants', ','.join(args.variants),
+    command = [sys.executable, '-m', 'integration.upscaledb.runner.run_trials', '--variants', ','.join(args.variants),
                '--mode', case['phase'], '--roles', case['roles'],
                '--cpus', ','.join(map(str, case['cpus'])),
                '--layout', 'packed' if case['placement'] == 'compact' else 'split',
@@ -243,7 +244,7 @@ def main():
                        f'fixed_{args.reads}_reads_{args.inserts}_inserts_or_duration_'
                        f'{args.seconds}_seconds_before_deadline'},
             'cases': cases, 'runner_commands': commands, 'binary_artifacts': identities,
-            'runner_sha256': digest(HERE / 'run_trials.py'), 'analyzer_sha256': digest(HERE / 'analyze.py'),
+            'runner_sha256': digest(RUNNER / 'run_trials.py'), 'analyzer_sha256': digest(REPORTS / 'analyze.py'),
             'scaling_sha256': digest(Path(__file__))}
     if args.plan_only:
         print(json.dumps(plan, indent=2, sort_keys=True))
@@ -275,7 +276,7 @@ def main():
             print('Retaining completed immutable case:', name, flush=True)
             continue
         print('Starting serial case:', name, flush=True)
-        result = subprocess.run(command, check=False)
+        result = subprocess.run(command, cwd=ROOT, check=False)
         if result.returncode:
             raise RuntimeError(f'case {name} failed ({result.returncode}); retained: {directory}')
         if artifact_identities(args.binary_root, args.variants) != identities:
@@ -287,8 +288,8 @@ def main():
         directory = args.output_root / case['name']
         summary_path = directory / 'analysis' / 'summary.json'
         if not summary_path.is_file():
-            analyzed = subprocess.run([sys.executable, str(HERE / 'analyze.py'), '--no-plots',
-                                       '--input-dir', str(directory)], check=False)
+            analyzed = subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--no-plots',
+                                       '--input-dir', str(directory)], cwd=ROOT, check=False)
             if analyzed.returncode:
                 raise RuntimeError(f'analysis for {case["name"]} failed ({analyzed.returncode}); retained: {directory}')
         summary = json.loads(summary_path.read_text())

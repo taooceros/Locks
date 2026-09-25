@@ -15,6 +15,14 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   21 Python tests, 8+11 bridge tests and the workspace build.
   Kept redb, shared lock fixes, original worktrees and historical evidence.
 
+- [x] **Group integration tools and clarify the runner workflow.**
+  Removed the live dashboard; separated core, runner, specialized experiments,
+  reports and tests with folder READMEs; colocated redb's controller and workload.
+  Updated module imports, source/compiler paths, CI and the build/check/run/analyze guide.
+  Path-cutover checks: 21 Python tests, 18 CLI entrypoints, five companion include
+  checks, a fresh FC-PQ build/run/analysis and 20 redb smoke cells passed.
+  No formal matrices or documentation-only verification reruns.
+
 ## Phase 0: Foundation & Cleanup
 
 - [x] **Implement Jain's Fairness Index computation.**

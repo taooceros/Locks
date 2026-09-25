@@ -2,7 +2,7 @@
 """Fixed-computation cost boundary: 48 primary trials + 18 separate diagnostics.
 
 Launch prepare/analyze under the assigned shared-global/exclusive-slot wrapper;
-launch --run under the exclusive-global/exclusive-slot wrapper, dashboard stopped.
+launch --run under the exclusive-global/exclusive-slot wrapper.
 All children inherit the controller's CPU mask and externally held locks. No DB or
 Rust rebuild, concurrent measurement, resume/overwrite, or favorable-case selection.
 """
@@ -22,10 +22,10 @@ import subprocess
 import sys
 import time
 
-from build import rust_sources_digest
-from run_trials import discover_topology
+from integration.upscaledb._paths import CORE, ROOT, RUNNER, UPSCALEDB
+from integration.upscaledb.core.build import rust_sources_digest
+from integration.upscaledb.runner.run_trials import discover_topology
 
-ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 FROZEN = ROOT / '.worktree/upscaledb'
 EXPERIMENT = 'cost_asymmetry_boundary'
@@ -124,9 +124,9 @@ def execute(command, timeout, env=None):
 def sources_to_archive():
     # Exact source set of the existing build.rust_sources_digest convention,
     # plus the controller/harness/helpers. Archive bytes, not only a git label.
-    files = [ROOT / 'Cargo.toml', ROOT / 'Cargo.lock', HERE / 'bridge.h',
-             HERE / 'boundary_cost.cc', Path(__file__).resolve(),
-             HERE / 'build.py', HERE / 'run_trials.py']
+    files = [ROOT / 'Cargo.toml', ROOT / 'Cargo.lock', UPSCALEDB / '_paths.py',
+             CORE / 'bridge.h', HERE / 'boundary_cost.cc', Path(__file__).resolve(),
+             CORE / 'build.py', RUNNER / 'run_trials.py']
     files.extend((ROOT / '.cargo').glob('*.toml'))
     for suffix in ('*.c', '*.h'):
         files.extend((ROOT / 'c').rglob(suffix))
@@ -254,7 +254,7 @@ def prepare(args):
                 slot['reserved_siblings'] == '84-91', 'resource registry allocation mismatch')
         shutil.copy2(resources, root / 'allocations.json')
         files[str(root / 'allocations.json')] = sha(root / 'allocations.json')
-    source = root / 'src/integration/upscaledb/boundary_cost.cc'
+    source = root / 'src/integration/upscaledb/experiments/boundaries/boundary_cost.cc'
     rust_hash = rust_sources_digest()
     variants = list(BACKENDS) + [b + '_profile' for b in PROFILE_BACKENDS]
     binaries, build_commands, frozen_manifests = {}, {}, {}
@@ -280,7 +280,7 @@ def prepare(args):
         files[str(path)] = files[str(root / path.name)] = sha(path)
         library = entry['rust_staticlib']
         require(library['rust_sources_sha256'] == rust_hash and
-                sha(HERE / 'bridge.h') == library['bridge_h_sha256'], 'frozen Rust source/ABI mismatch')
+                sha(CORE / 'bridge.h') == library['bridge_h_sha256'], 'frozen Rust source/ABI mismatch')
         expected_profile = variant.endswith('_profile')
         require(('profile' in library['features']) == expected_profile, 'primary/profile archive mismatch')
         dependencies = [(library['archive'], library['archive_sha256']),

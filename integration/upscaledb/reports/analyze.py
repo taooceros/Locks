@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Analyze run_trials.py manifest + raw records without silently dropping failures.
 
-  python3 integration/upscaledb/analyze.py --input-dir .worktree/upscaledb/output
-  python3 integration/upscaledb/analyze.py --input-dir .worktree/upscaledb/output --output-dir /tmp/ups-analysis
+  python3 -m integration.upscaledb.reports.analyze --input-dir .worktree/upscaledb/output
+  python3 -m integration.upscaledb.reports.analyze --input-dir .worktree/upscaledb/output --output-dir /tmp/ups-analysis
 
 Plots require matplotlib >= 3.8 (install with `python3 -m pip install 'matplotlib>=3.8'`
 in the analysis Python environment; no matplotlib dependency for the runner). The exact
@@ -24,7 +24,7 @@ import random
 import statistics
 import sys
 
-from run_trials import DEFAULT_OUTPUT, VARIANTS, digest, reject_nonfinite
+from integration.upscaledb.runner.run_trials import DEFAULT_OUTPUT, VARIANTS, digest, reject_nonfinite
 
 PRIMARY = ('native', 'refactored', 'bridge_mutex', 'fc', 'fc_pq', 'uscl', 'cfl_local',
            'spinlock', 'mcs', 'ticket', 'clh')
@@ -746,9 +746,9 @@ def main():
             manifest['trial_files'] == planned, 'trial orders/files mismatch')
     archive = manifest['artifacts']['integration_sources']
     require(digest(input_dir / archive['file']) == archive['sha256'] and
-            archive['files'].get('integration/upscaledb/bridge.h') ==
+            archive['files'].get('integration/upscaledb/core/bridge.h') ==
             manifest['artifacts']['bridge_header_sha256'] and
-            archive['files'].get('integration/upscaledb/native-lock-timing.patch') ==
+            archive['files'].get('integration/upscaledb/core/native-lock-timing.patch') ==
             manifest['artifacts']['native_profile_patch_sha256'],
             'missing, corrupted, or inconsistent archived integration sources')
     for variant in cfg['variants']:

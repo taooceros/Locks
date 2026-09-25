@@ -2,7 +2,7 @@
 """Render the completed joined UpScaleDB study by dimension; never run trials.
 
 From the repository root:
-  devenv shell -- python3 integration/upscaledb/dimension_report.py \
+  devenv shell -- python3 -m integration.upscaledb.reports.dimension_report \
     --input-root .worktree/upscaledb-joined-scaling \
     --output-dir docs/reports/upscaledb-joined-dimensions
 """
@@ -571,7 +571,7 @@ def main():
     figure_dir.mkdir(parents=True, exist_ok=True)
     files = draw_all(rows, contrasts, figure_dir)
     require(len(files) == 12, 'Expected all 12 non-heatmap figures')
-    command = ('devenv shell -- python3 integration/upscaledb/dimension_report.py '
+    command = ('devenv shell -- python3 -m integration.upscaledb.reports.dimension_report '
                '--input-root .worktree/upscaledb-joined-scaling '
                '--output-dir docs/reports/upscaledb-joined-dimensions')
     provenance = {'schema': 1, 'input_root': str(root),

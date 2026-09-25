@@ -16,7 +16,8 @@ import re
 import subprocess
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[2]
+from integration.upscaledb._paths import ROOT
+
 HERE = Path(__file__).resolve().parent
 OUT = ROOT / '.worktree' / 'upscaledb'
 SHA = 'cb124e1f91601872a7b3bd4da10e5fa97a8da86b'

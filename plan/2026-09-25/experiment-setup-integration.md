@@ -1,6 +1,6 @@
 # Integrate the experiment setup for a main-targeted PR
 
-Status: single-operation UpScaleDB integration restored and locally verified for PR #46.
+Status: grouped by responsibility with folder READMEs; executable-path checks passed for PR #46.
 The earlier complete removal was the assistant's overbroad interpretation.
 
 ## Scope
@@ -22,6 +22,16 @@ The earlier complete removal was the assistant's overbroad interpretation.
 - Include analysis/report generators, not generated reports, raw measurements,
   databases, native checkouts, binaries, caches or new algorithm experiments.
 - Add a concise setup/verification entry point and record known baseline limitations.
+- Remove the live dashboard server/page at user request; retain CLI experiment
+  runners and offline analysis/report generators.
+- Group UpScaleDB into `core/`, `runner/`, `experiments/{scaling,hypotheses,boundaries}/`,
+  `reports/` and `tests/`, each with a README. Keep redb's runner beside its workload.
+- Use repository-root `python3 -m integration...` commands and update every import,
+  subprocess, source-archive and compiler path; no old-path compatibility wrappers.
+- Provide one canonical build/check/run/analyze workflow. Do not add a new runner
+  abstraction or change workloads, timing policy, randomization or failure retention.
+- Per user instruction, do not verify comment/doc-only changes. Check the meaningful
+  module/file-path cutover once; do not rerun full experiment matrices.
 
 ## Ownership
 
@@ -142,3 +152,28 @@ intended scope; its verification is retained only as a historical record.
   `.worktree/upscaledb-tables-verified` and `.worktree/upscaledb-contention-smoke`.
   Upstream Autotools/C++ warnings are retained, not suppressed. No new publication
   measurements or regenerated research conclusions are included.
+
+## Folder organization and dashboard removal
+
+- Removed the dashboard server/page. Grouped UpScaleDB into core, runner,
+  scaling/hypothesis/boundary experiments, reports and tests, with folder READMEs.
+  Moved redb's controller beside its Cargo workload. Updated imports, compiler
+  inputs, source/archive identities, subprocess commands and CI test discovery.
+- Documented the existing build/check/run/analyze workflow rather than adding a
+  runner wrapper. No database-operation, workload, timing or failure-policy changes.
+- The moved executable paths warranted focused verification: 21 relocated Python
+  tests and 18 module `--help` entrypoints passed. Three controller source inventories
+  resolved; five companion C++ translation units passed syntax/include checks.
+- Built a fresh FC-PQ variant through `integration.upscaledb.core.build` into
+  `.worktree/upscaledb-grouped`, without bypassing provenance or modifying old builds.
+  The relocated runner completed 128 finds and 128 inserts from 64 preloaded records,
+  ending with exactly 192 records and clean shutdown. The relocated analyzer validated
+  its new source archive and excluded zero trials. Evidence:
+  `.worktree/upscaledb-grouped-smoke/`.
+- Prepared `.worktree/redb-grouped` through `integration.redb.run`; all 20 smoke
+  cells exited successfully, verified 1,040 live records and exact close/reopen contents.
+  Additional entrypoint/compiler/source-inventory evidence:
+  `.worktree/grouped-layout-verification/`. Temporary verification scripts removed.
+- No formal performance matrices, full 22-variant rebuild or unchanged Rust tests
+  rerun for this organization. Documentation/comment-only edits received no extra
+  verification. Existing upstream/compiler warnings remain visible.

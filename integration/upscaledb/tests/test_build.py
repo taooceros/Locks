@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import build
+from integration.upscaledb.core import build
 
 
 class LibraryProvenance(unittest.TestCase):

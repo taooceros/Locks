@@ -12,8 +12,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
+from integration.upscaledb._paths import ROOT
+
 PRIMARY = 'native,refactored,bridge_mutex,fc,fc_pq'
 PROFILE = 'profile,bridge_mutex_profile,fc_profile,fc_pq_profile'
 LAYOUTS = {'packed': '0,1,2,3', 'split': '0,1,32,33'}
@@ -49,7 +49,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     schedule = []
     for name, mode, layout, cpus, roles, variants in matrix:
-        command = [sys.executable, str(HERE / 'run_trials.py'), '--variants', variants,
+        command = [sys.executable, '-m', 'integration.upscaledb.runner.run_trials', '--variants', variants,
                    '--mode', mode, '--roles', roles, '--cpus', cpus, '--layout', layout,
                    '--repetitions', '10', '--seconds', '120', '--warmup', '5',
                    '--seed', '1', '--order-seed', '20260923', '--reads', '400000',
@@ -67,7 +67,7 @@ def main():
         print('Starting case:', entry['name'], flush=True)
         subprocess.run(entry['command'], cwd=ROOT, check=True)
         case = out / entry['name']
-        subprocess.run([sys.executable, str(HERE / 'analyze.py'), '--input-dir', str(case)],
+        subprocess.run([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(case)],
                        cwd=ROOT, check=True)
         result = json.loads((case / 'analysis' / 'summary.json').read_text())
         if result['failure_count']:

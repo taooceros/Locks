@@ -2,9 +2,9 @@
 """Closed-loop real-DB boundary study; frozen binaries, never builds.
 
 Run prepare under the shared measurement lock and database slot lock; run
-collection under the EXCLUSIVE measurement lock and the same slot lock, with
-the dashboard stopped. Every phase inherits taskset -c 48-55. Analysis only
-reads saved observations and never launches benchmark binaries.
+collection under the EXCLUSIVE measurement lock and the same slot lock.
+Every phase inherits taskset -c 48-55. Analysis only reads saved observations
+and never launches benchmark binaries.
 """
 import argparse
 import csv
@@ -19,7 +19,8 @@ import statistics
 import subprocess
 import sys
 
-import run_trials as runner
+from integration.upscaledb._paths import CORE, REPORTS, ROOT, RUNNER, UPSCALEDB
+from integration.upscaledb.runner import run_trials as runner
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_BINARY_ROOT = runner.ROOT / '.worktree/upscaledb'
@@ -80,9 +81,14 @@ def save(path, value):
     runner.atomic_new(path, value)
 
 
+def source_paths():
+    return {path.name: path for path in
+            (Path(__file__), UPSCALEDB / '_paths.py', RUNNER / 'run_trials.py',
+             REPORTS / 'analyze.py', CORE / 'build.py')}
+
+
 def sources():
-    return {name: runner.digest(HERE / name) for name in
-            (Path(__file__).name, 'run_trials.py', 'analyze.py', 'build.py')}
+    return {name: runner.digest(path) for name, path in source_paths().items()}
 
 
 def pin():
@@ -111,7 +117,7 @@ def artifacts(root):
 
 
 def command(root, cell, output, seed, smoke=False):
-    cmd = [sys.executable, str(HERE / 'run_trials.py'), '--variants', ','.join(VARIANTS),
+    cmd = [sys.executable, '-m', 'integration.upscaledb.runner.run_trials', '--variants', ','.join(VARIANTS),
            '--mode', 'duration', '--roles', cell['roles'], '--cpus',
            ','.join(map(str, cell['cpus'])), '--layout', 'packed', '--exclusive-cpus',
            '--init-cpu', '48', '--init-node', '1', '--memory-policy', 'bind',
@@ -129,11 +135,11 @@ def command(root, cell, output, seed, smoke=False):
 
 
 def execute(cmd, log, timeout):
-    event = {'command': cmd, 'cwd': str(runner.ROOT), 'started_utc': now(),
+    event = {'command': cmd, 'cwd': str(ROOT), 'started_utc': now(),
              'timeout_seconds': timeout, 'affinity': sorted(os.sched_getaffinity(0))}
     with log.open('xb') as stream:
         child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT,
-                                 start_new_session=True, cwd=runner.ROOT)
+                                 start_new_session=True, cwd=ROOT)
         try:
             event['returncode'] = child.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -152,7 +158,7 @@ def execute(cmd, log, timeout):
 
 
 def analyze_cell(raw, output):
-    execute([sys.executable, str(HERE / 'analyze.py'), '--input-dir', str(raw),
+    execute([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(raw),
              '--output-dir', str(output), '--no-plots'],
             output.parent / (output.name + '.log'), 180)
     return load(output / 'summary.json')
@@ -188,8 +194,8 @@ def prepare(args):
                 'init_cpu': 48, 'memory_policy': 'bind', 'memory_nodes': [1],
                 'order_seed': args.order_seed, 'cells': cells, 'notes': NOTES}
         save(args.output_root / 'plan.json', plan)
-        for name in plan['source_sha256']:
-            (args.output_root / name).write_bytes((HERE / name).read_bytes())
+        for name, path in source_paths().items():
+            (args.output_root / name).write_bytes(path.read_bytes())
         smoke = args.output_root / 'smoke'
         smoke.mkdir()
         failures = []

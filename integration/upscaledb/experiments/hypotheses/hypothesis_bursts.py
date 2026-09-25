@@ -25,13 +25,14 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from integration.upscaledb._paths import CORE, ROOT, UPSCALEDB
+
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
 BACKENDS = ('native', 'fc', 'fc_pq', 'uscl')
 PATTERNS = ('continuous', 'one_per_role', 'half_per_role')
 CPUS = list(range(32, 40))
 BURSTY = {'continuous': [], 'one_per_role': [0, 4], 'half_per_role': [0, 1, 4, 5]}
-ORIGINAL_HARNESS = HERE / 'native_harness.cc'
+ORIGINAL_HARNESS = CORE / 'native_harness.cc'
 EXPERIMENT = 'h3_intermittent_arrivals_exploration'
 SCHEMA = 'h3-bursts-v1'
 UNSET_ENV = ('NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT')
@@ -240,8 +241,10 @@ def prepare(args):
     receipt = machine()
     check_machine(receipt)
     files = {}
-    for name in ('hypothesis_bursts.py', 'hypothesis_bursts.cc', 'native_harness.cc', 'bridge.h', 'private_ops.h'):
-        frozen_add(files, HERE / name)
+    for source in (HERE / 'hypothesis_bursts.py', HERE / 'hypothesis_bursts.cc',
+                   ORIGINAL_HARNESS, CORE / 'bridge.h', CORE / 'private_ops.h',
+                   UPSCALEDB / '_paths.py'):
+        frozen_add(files, source)
     taskset = shutil.which('taskset')
     ldd = shutil.which('ldd')
     require(taskset is not None and ldd is not None, 'taskset and ldd required for preparation')
@@ -256,8 +259,8 @@ def prepare(args):
         require(manifest['variant'] == backend, 'wrong archived backend')
         require(manifest['hashes']['harness_sha256'] == digest(ORIGINAL_HARNESS),
                 'frozen build does not match this checkout native harness')
-        frozen_add(files, HERE / 'bridge.h', manifest['hashes']['bridge_h_sha256'])
-        frozen_add(files, HERE / 'private_ops.h', manifest['hashes']['private_ops_sha256'])
+        frozen_add(files, CORE / 'bridge.h', manifest['hashes']['bridge_h_sha256'])
+        frozen_add(files, CORE / 'private_ops.h', manifest['hashes']['private_ops_sha256'])
         frozen_add(files, manifest['binary'], manifest['hashes']['binary_sha256'])
         library = manifest['library_verification']
         frozen_add(files, library['shared_object'], library['shared_object_sha256'])
@@ -266,7 +269,7 @@ def prepare(args):
             frozen_add(files, archive['archive'], archive['archive_sha256'])
         command = list(manifest['build']['harness_command'])
         frozen_add(files, command[0], manifest['toolchain']['cxx_sha256'])
-        source = str(HERE / 'native_harness.cc')
+        source = str(ORIGINAL_HARNESS)
         require(command.count(source) == 1 and command.count('-o') == 1, 'unexpected archived compile command')
         binary = root / 'bin' / ('hypothesis-bursts-' + backend)
         require(command[command.index('-o') + 1] == manifest['binary'], 'unexpected archived output')

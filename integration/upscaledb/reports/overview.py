@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot the ten completed, fixed-work UpScaleDB cases without rerunning analysis.
 
-Run: python3 integration/upscaledb/overview.py --input-root .worktree/upscaledb
+Run: python3 -m integration.upscaledb.reports.overview --input-root .worktree/upscaledb
      [--output-dir .worktree/upscaledb/overview]
 """
 

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-HERE = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parents[2]
 MANIFEST = HERE / "integration/redb/Cargo.toml"
 BACKENDS = ("native", "mutex", "mcs", "fc", "fc_pq")
 COHORTS = ("all1", "half1_half8", "half1_half64")
@@ -34,7 +34,7 @@ def digest(path):
 
 def source_hashes():
     sources = [MANIFEST, MANIFEST.with_name("Cargo.lock"),
-               HERE / "integration/redb/src/main.rs", HERE / "integration/redb_transactions.py"]
+               HERE / "integration/redb/src/main.rs", Path(__file__).resolve()]
     sources += sorted((HERE / "crates/libdlock").rglob("*.rs"))
     sources += sorted((HERE / "crates/libdlock").rglob("*.c"))
     sources += sorted((HERE / "crates/libdlock").rglob("*.h"))

@@ -3,9 +3,9 @@
 
 Examples (CPU IDs/layout are illustrative: supply verified eligible topology;
 worker-to-CPU assignment uses the exact ordered CPU list you provide):
-  python3 integration/upscaledb/run_trials.py --variants native,profile --cpus 0,1,2,3 --layout packed
-  python3 integration/upscaledb/run_trials.py --variants native --mode fixed --roles 1 --cpus 0 --layout packed --repetitions 1 --preload 1000 --reads 100 --inserts 100 --warmup 0 --smoke
-  python3 integration/upscaledb/run_trials.py --variants native,refactored,bridge_mutex,fc,fc_pq --cpus 0,1,2,3 --layout packed
+  python3 -m integration.upscaledb.runner.run_trials --variants native,profile --cpus 0,1,2,3 --layout packed
+  python3 -m integration.upscaledb.runner.run_trials --variants native --mode fixed --roles 1 --cpus 0 --layout packed --repetitions 1 --preload 1000 --reads 100 --inserts 100 --warmup 0 --smoke
+  python3 -m integration.upscaledb.runner.run_trials --variants native,refactored,bridge_mutex,fc,fc_pq --cpus 0,1,2,3 --layout packed
 
 Build manifests (build-VARIANT.json beside the default binaries) are mandatory;
 use --build-manifest VARIANT=PATH with --binary for external builds.
@@ -32,7 +32,8 @@ import tarfile
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parents[2]
+from integration.upscaledb._paths import CORE, EXPERIMENTS, REPORTS, ROOT, TESTS, UPSCALEDB
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = ROOT / '.worktree' / 'upscaledb' / 'output'
 VARIANTS = ('native', 'refactored', 'bridge_mutex', 'fc', 'fc_pq', 'uscl', 'cfl_local',
@@ -54,13 +55,15 @@ def digest(path):
 
 def capture_sources(outdir, variants):
     """Archive the exact integration inputs, including Rust bridge and lock source."""
-    paths = [HERE / name for name in ('bridge.h', 'private_ops.h', 'native-lock-timing.patch',
-                                      'native_harness.cc', 'build.py', 'run_trials.py', 'analyze.py')]
+    paths = [CORE / name for name in ('bridge.h', 'private_ops.h', 'native-lock-timing.patch',
+                                      'bridge-ops.patch', 'native_harness.cc', 'build.py')]
+    paths.extend((HERE / 'run_trials.py', REPORTS / 'analyze.py', UPSCALEDB / '_paths.py',
+                  EXPERIMENTS / 'scaling/scaling.py', TESTS / 'test_scaling.py'))
     rust = ROOT / 'crates' / 'upscaledb-bridge'
     if any(v not in ('native', 'refactored', 'profile') for v in variants):
         if not (rust / 'src/lib.rs').is_file():
             raise ValueError('Rust bridge source is missing; cannot establish bridge provenance')
-        from build import rust_sources_files
+        from integration.upscaledb.core.build import rust_sources_files
         paths.extend(rust_sources_files())
     if rust.is_dir():
         paths.extend(p for p in rust.rglob('*') if p.is_file() and not p.is_symlink()
@@ -68,7 +71,6 @@ def capture_sources(outdir, variants):
     paths.extend([ROOT / 'Cargo.toml', ROOT / 'Cargo.lock',
                   ROOT / 'crates/libdlock/src/dlock2/fc/lock.rs',
                   ROOT / 'crates/libdlock/src/dlock2/fc_pq/lock.rs'])
-    paths.extend((HERE / 'scaling.py', HERE / 'test_scaling.py'))
     if any(v.startswith('uscl') for v in variants):
         paths.extend((ROOT / 'c/u-scl' / name for name in
                      ('fairlock.h', 'fairlock.c', 'common.h', 'rdtsc.h')))
@@ -112,23 +114,23 @@ def build_provenance(variant, binary, path):
             manifest.get('hashes', {}).get('binary_sha256') != actual or
             Path(manifest.get('binary', '')).resolve() != binary.resolve()):
         raise ValueError(f'{variant}: build manifest does not identify executable {binary}')
-    if manifest.get('hashes', {}).get('harness_sha256') != digest(HERE / 'native_harness.cc'):
+    if manifest.get('hashes', {}).get('harness_sha256') != digest(CORE / 'native_harness.cc'):
         raise ValueError(f'{variant}: build manifest harness hash differs from current harness; rebuild')
-    if manifest.get('hashes', {}).get('build_py_sha256') != digest(HERE / 'build.py'):
+    if manifest.get('hashes', {}).get('build_py_sha256') != digest(CORE / 'build.py'):
         raise ValueError(f'{variant}: build recipe differs from manifest; rebuild with current recipe')
     source = Path(manifest.get('source', ''))
     recorded = manifest.get('source_verification', {})
     if not source.is_dir() or not recorded.get('head') or not recorded.get('implementation_sha256'):
         raise ValueError(f'{variant}: build manifest lacks verified source checkout')
     if recorded.get('profile_patch_sha256') is not None and (
-            recorded['profile_patch_sha256'] != digest(HERE / 'native-lock-timing.patch')):
+            recorded['profile_patch_sha256'] != digest(CORE / 'native-lock-timing.patch')):
         raise ValueError(f'{variant}: native timing patch differs from build manifest')
     if recorded.get('bridge_patch_sha256') is not None and (
-            recorded['bridge_patch_sha256'] != digest(HERE / 'bridge-ops.patch')):
+            recorded['bridge_patch_sha256'] != digest(CORE / 'bridge-ops.patch')):
         raise ValueError(f'{variant}: bridge patch differs from build manifest')
     for name, filename in (('bridge_h_sha256', 'bridge.h'),
                            ('private_ops_sha256', 'private_ops.h')):
-        if manifest.get('hashes', {}).get(name) != digest(HERE / filename):
+        if manifest.get('hashes', {}).get(name) != digest(CORE / filename):
             raise ValueError(f'{variant}: {filename} differs from build manifest')
     implementation = source / 'src/5upscaledb/upscaledb.cc'
     if digest(implementation) != recorded['implementation_sha256']:
@@ -138,7 +140,7 @@ def build_provenance(variant, binary, path):
         raise ValueError(f'{variant}: library differs from build manifest')
     reuse = manifest.get('database_reuse')
     if reuse is not None:
-        from build import database_reuse_provenance
+        from integration.upscaledb.core.build import database_reuse_provenance
         previous = Path(reuse.get('build_manifest', ''))
         toolchain = manifest.get('toolchain', {})
         if not previous.is_file() or digest(previous) != reuse.get('build_manifest_sha256'):
@@ -151,7 +153,7 @@ def build_provenance(variant, binary, path):
             raise ValueError(f'{variant}: frozen database provenance chain differs from build')
     rust = manifest.get('rust_staticlib')
     if rust is not None:
-        from build import rust_sources_digest
+        from integration.upscaledb.core.build import rust_sources_digest
         if (rust.get('archive_sha256') != digest(Path(rust.get('archive', ''))) or
                 rust.get('rust_sources_sha256') != rust_sources_digest()):
             raise ValueError(f'{variant}: Rust archive or its source inputs differ from build')
@@ -681,10 +683,10 @@ def main():
     except ValueError as exc:
         parser.error(str(exc))
     provenance = {'runner_sha256': digest(Path(__file__)),
-                  'build_recipe_sha256': digest(HERE / 'build.py'),
-                  'native_harness_sha256': digest(HERE / 'native_harness.cc'),
-                  'native_profile_patch_sha256': digest(HERE / 'native-lock-timing.patch'),
-                  'bridge_header_sha256': digest(HERE / 'bridge.h'),
+                  'build_recipe_sha256': digest(CORE / 'build.py'),
+                  'native_harness_sha256': digest(CORE / 'native_harness.cc'),
+                  'native_profile_patch_sha256': digest(CORE / 'native-lock-timing.patch'),
+                  'bridge_header_sha256': digest(CORE / 'bridge.h'),
                   'integration_sources': source_archive, 'binaries': built}
     if any(details['sha256'] is None for details in built.values()):
         parser.error('binary disappeared before its SHA-256 could be recorded')

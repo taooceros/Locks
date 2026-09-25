@@ -6,6 +6,9 @@ from pathlib import Path
 import signal
 import subprocess
 
+from integration.upscaledb._paths import ROOT
+
+
 VARIANTS = ('native', 'refactored', 'bridge_mutex', 'fc', 'fc_pq',
             'uscl', 'cfl_local', 'spinlock', 'mcs', 'ticket', 'clh')
 OPTIONAL_VARIANTS = ('bridge_mutex_profile', 'fc_profile', 'fc_pq_profile',
@@ -30,8 +33,7 @@ def run(binary, case, failstop=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--bin-dir', type=Path, default=Path(__file__).resolve().parents[2] /
-                        '.worktree/upscaledb')
+    parser.add_argument('--bin-dir', type=Path, default=ROOT / '.worktree/upscaledb')
     parser.add_argument('--variants', nargs='+', choices=(*VARIANTS, *OPTIONAL_VARIANTS),
                         help='select independently built variants (default: all primary variants)')
     args = parser.parse_args()

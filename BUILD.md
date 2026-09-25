@@ -27,7 +27,7 @@ cargo test -p libdlock --release --lib
 # Check the synchronization bridge and UpScaleDB setup contracts
 cargo test -p upscaledb-bridge --release -- --test-threads=1
 cargo test -p upscaledb-bridge --release --features profile,test-hooks -- --test-threads=1
-python3 -m unittest discover -s integration/upscaledb -p 'test_*.py' -v
+python3 -m unittest discover -s integration/upscaledb/tests -p 'test_*.py' -v
 
 # Build the standalone database experiment
 cargo build --manifest-path integration/redb/Cargo.toml --release --locked

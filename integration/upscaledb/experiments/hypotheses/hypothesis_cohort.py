@@ -8,9 +8,9 @@ import os
 from pathlib import Path
 import subprocess
 
-from run_trials import discover_topology
+from integration.upscaledb._paths import ROOT
+from integration.upscaledb.runner.run_trials import discover_topology
 
-ROOT = Path(__file__).resolve().parents[2]
 PARTITIONS = {
     'H1': {'cpus': list(range(8)), 'memory_node': 0, 'kind': 'DB role/service asymmetry'},
     'H2': {'cpus': [16, 17], 'memory_node': 0, 'kind': 'synthetic reserved-slice diagnostic'},

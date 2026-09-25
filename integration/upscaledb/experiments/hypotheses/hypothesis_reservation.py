@@ -15,10 +15,10 @@ import subprocess
 import sys
 import time
 
-from build import rust_sources_digest
-from run_trials import discover_topology
+from integration.upscaledb._paths import CORE, ROOT, RUNNER, UPSCALEDB
+from integration.upscaledb.core.build import rust_sources_digest
+from integration.upscaledb.runner.run_trials import discover_topology
 
-ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 BACKENDS = ('bridge_mutex', 'fc', 'fc_pq', 'uscl', 'uscl_local_observed')
 PAUSES = (0, 50, 500, 5000)
@@ -123,8 +123,8 @@ def prepare(args):
             (chosen[1]['socket'], chosen[1]['core']), 'actors must occupy distinct physical cores')
     os.sched_setaffinity(0, {16, 17})
     files = {}
-    for path in (Path(__file__), HERE / 'hypothesis_reservation.cc', HERE / 'bridge.h',
-                 HERE / 'build.py', HERE / 'run_trials.py',
+    for path in (Path(__file__), HERE / 'hypothesis_reservation.cc', UPSCALEDB / '_paths.py',
+                 CORE / 'bridge.h', CORE / 'build.py', RUNNER / 'run_trials.py',
                  ROOT / 'c/u-scl/fairlock.h', ROOT / 'c/u-scl/common.h', ROOT / 'c/u-scl/rdtsc.h'):
         files[str(path.resolve())] = sha(path)
         shutil.copy2(path, root / 'src' / path.name)
@@ -138,7 +138,7 @@ def prepare(args):
     lib = frozen['rust_staticlib']
     rust_hash = rust_sources_digest()
     require(lib['rust_sources_sha256'] == rust_hash, 'current source differs from frozen library provenance')
-    require(sha(HERE / 'bridge.h') == lib['bridge_h_sha256'], 'bridge ABI changed')
+    require(sha(CORE / 'bridge.h') == lib['bridge_h_sha256'], 'bridge ABI changed')
     require(sha(lib['archive']) == lib['archive_sha256'], 'frozen archive changed')
     require(sha(ROOT / frozen['baseline']['source']) == frozen['baseline']['sha256'] and
             sha(ROOT / 'c/u-scl/common.h') == frozen['baseline']['common_sha256'], 'USCL source changed')
@@ -165,7 +165,7 @@ def prepare(args):
     # Only source and -o target change. This is a synthetic callback driver;
     # linking libupscaledb does not make bridge_mutex a native DB workload.
     command = list(frozen['build']['harness_command'])
-    old_source = str(HERE / 'native_harness.cc')
+    old_source = str(CORE / 'native_harness.cc')
     require(command.count(old_source) == 1, 'unexpected frozen harness command')
     command[command.index(old_source)] = str(source)
     command[command.index('-o') + 1] = str(bridge_binary)

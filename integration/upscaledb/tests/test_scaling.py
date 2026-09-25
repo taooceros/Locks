@@ -6,9 +6,10 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from run_trials import (check_memory_selection, cpu_list, discover_topology,
-                        parse_cpu_ranges, roles, trial_command)
-from scaling import artifact_identities, finalize_case, finished_case, select_cpus
+from integration.upscaledb.runner.run_trials import (
+    check_memory_selection, cpu_list, discover_topology, parse_cpu_ranges, roles, trial_command)
+from integration.upscaledb.experiments.scaling.scaling import (
+    artifact_identities, finalize_case, finished_case, select_cpus)
 
 
 class TopologyTests(unittest.TestCase):
@@ -119,7 +120,8 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             directory = Path(path)
             case = {'name': 'fixed-physical-compact-w1'}
-            command = ['python3', 'run_trials.py', '--cases', case['name']]
+            command = ['python3', '-m', 'integration.upscaledb.runner.run_trials',
+                       '--cases', case['name']]
             name = 'block-0000.native.json'
             (directory / 'manifest.json').write_text(json.dumps({
                 'config': {'repetitions': 1, 'variants': ['native']},

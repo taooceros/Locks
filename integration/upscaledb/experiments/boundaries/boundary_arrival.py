@@ -29,8 +29,9 @@ import tarfile
 import time
 from datetime import datetime, timezone
 
+from integration.upscaledb._paths import CORE, ROOT, UPSCALEDB
+
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
 FROZEN = ROOT / '.worktree/upscaledb'
 BACKENDS = ('native', 'bridge_mutex', 'fc', 'fc_pq', 'uscl')
 MIXES = (95, 50)
@@ -41,7 +42,7 @@ WINDOW_NS = 2_000_000_000
 CAP = 2_000_000
 SCHEMA = 'boundary-arrival-v1'
 EXPERIMENT = 'synthetic_poisson_upscaledb'
-ORIGINAL_HARNESS = HERE / 'native_harness.cc'
+ORIGINAL_HARNESS = CORE / 'native_harness.cc'
 UNSET = ('NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT')
 SCOPE = ('Synthetic independent per-worker Poisson arrivals to a real restricted in-memory UpScaleDB; '
          'eight stable requesters; immutable preloaded reads and collision-free inserts; no YCSB, '
@@ -256,7 +257,9 @@ def schedule_file(path, seed, mix, rate, window_ns=WINDOW_NS):
 
 def build_companions(args, files):
     builds = {}
-    archive_sources = set(HERE / name for name in ('boundary_arrival.py', 'boundary_arrival.cc', 'native_harness.cc', 'bridge.h', 'private_ops.h'))
+    archive_sources = {HERE / 'boundary_arrival.py', HERE / 'boundary_arrival.cc',
+                       ORIGINAL_HARNESS, CORE / 'bridge.h', CORE / 'private_ops.h',
+                       UPSCALEDB / '_paths.py'}
     for source in archive_sources:
         freeze(files, source)
     ldd = shutil.which('ldd')
@@ -271,7 +274,7 @@ def build_companions(args, files):
                 build['hashes']['harness_sha256'] == digest(ORIGINAL_HARNESS),
                 'frozen build does not match this checkout native harness')
         for name, field in (('bridge.h', 'bridge_h_sha256'), ('private_ops.h', 'private_ops_sha256')):
-            freeze(files, HERE / name, build['hashes'][field])
+            freeze(files, CORE / name, build['hashes'][field])
         library = build['library_verification']
         freeze(files, library['shared_object'], library['shared_object_sha256'])
         freeze(files, build['binary'], build['hashes']['binary_sha256'])
@@ -288,8 +291,8 @@ def build_companions(args, files):
         binary = args.output_root / 'bin' / f'boundary-arrival-{backend}'
         cmd[candidates[0]] = str(HERE / 'boundary_arrival.cc')
         cmd[cmd.index('-o') + 1] = str(binary)
-        # Quoted includes resolve beside the companion; old include path is also
-        # frozen. All original compiler flags and link operands remain unchanged.
+        # The frozen harness command includes the core/ include path for
+        # native_harness.cc, bridge.h and private_ops.h.
         checked(args.output_root / 'prepare' / f'{backend}-compile', cmd, 180)
         freeze(files, binary)
         depfile = args.output_root / 'prepare' / f'{backend}-dependencies.d'

@@ -18,8 +18,9 @@ import subprocess
 import sys
 import tempfile
 
-import analyze
-import run_trials as runner
+from integration.upscaledb._paths import REPORTS, ROOT, RUNNER, UPSCALEDB
+from integration.upscaledb.reports import analyze
+from integration.upscaledb.runner import run_trials as runner
 
 HERE = Path(__file__).resolve().parent
 PRIMARY = ('fc', 'fc_pq', 'uscl')
@@ -71,9 +72,14 @@ def save(path, value):
     runner.atomic_new(path, value)
 
 
+def source_paths():
+    return {p.name: p for p in
+            (Path(__file__), UPSCALEDB / '_paths.py', RUNNER / 'run_trials.py',
+             REPORTS / 'analyze.py')}
+
+
 def sources():
-    return {p.name: runner.digest(p) for p in
-            (Path(__file__), HERE / 'run_trials.py', HERE / 'analyze.py')}
+    return {name: runner.digest(path) for name, path in source_paths().items()}
 
 
 def fresh(path):
@@ -105,7 +111,7 @@ def artifacts(build_root):
 
 
 def command(args, role, output, seed, smoke=False):
-    cmd = [sys.executable, str(HERE / 'run_trials.py'), '--variants', ','.join(VARIANTS),
+    cmd = [sys.executable, '-m', 'integration.upscaledb.runner.run_trials', '--variants', ','.join(VARIANTS),
            '--mode', 'duration', '--roles', role, '--cpus', '0,1,2,3,4,5,6,7',
            '--layout', 'packed', '--exclusive-cpus', '--init-cpu', '0', '--init-node', '0',
            '--memory-policy', 'bind', '--memory-nodes', '0', '--memory-limit-gib', '32',
@@ -126,7 +132,7 @@ def execute(cmd, log, timeout):
     # The runner owns a separate child session: let its SIGTERM handler clean up.
     with log.open('xb') as stream:
         child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT,
-                                 start_new_session=True, cwd=runner.ROOT)
+                                 start_new_session=True, cwd=ROOT)
         try:
             event['returncode'] = child.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -144,7 +150,7 @@ def execute(cmd, log, timeout):
 
 
 def analyze_cell(raw, output):
-    execute([sys.executable, str(HERE / 'analyze.py'), '--input-dir', str(raw),
+    execute([sys.executable, '-m', 'integration.upscaledb.reports.analyze', '--input-dir', str(raw),
              '--output-dir', str(output), '--no-plots'], output.parent / (output.name + '.log'), 120)
     summary = load(output / 'summary.json')
     if summary['failure_count']:
@@ -180,8 +186,8 @@ def prepare(args):
             'order_seed': args.order_seed, 'cells': cells, 'notes': NOTES}
     save(args.output_root / 'plan.json', plan)
     # Keep an exact controller/helper copy even if the working tree later changes.
-    for filename in plan['source_sha256']:
-        (args.output_root / filename).write_bytes((HERE / filename).read_bytes())
+    for filename, path in source_paths().items():
+        (args.output_root / filename).write_bytes(path.read_bytes())
     execute(command(args, '4+4', smoke / 'raw', args.order_seed, smoke=True),
             smoke / 'runner.log', 780)
     smoke_summary = analyze_cell(smoke / 'raw', smoke / 'analysis')
