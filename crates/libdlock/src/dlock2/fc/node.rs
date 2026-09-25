@@ -13,7 +13,8 @@ pub struct Node<T> {
     pub complete: AtomicBool,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: u64,
+    // Written/read only by this node's ThreadLocal owner; combiners may hold &Node.
+    pub combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
 impl<T> Node<T> {
@@ -28,7 +29,7 @@ impl<T> Node<T> {
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             next: AtomicPtr::default(),
             #[cfg(feature = "combiner_stat")]
-            combiner_time_stat: 0,
+            combiner_time_stat: SyncUnsafeCell::new(0),
         }
     }
 }

@@ -24,6 +24,7 @@ impl<T, W: Parker> Node<T, W> {
             wait: Default::default(),
             completed: Default::default(),
             next: AtomicPtr::default(),
+            #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
     }

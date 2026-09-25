@@ -78,6 +78,7 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
         #[cfg(feature = "combiner_stat")]
         let begin: u64;
 
+        #[cfg(feature = "combiner_stat")]
         unsafe {
             begin = __rdtscp(&mut aux);
         }
@@ -87,8 +88,6 @@ impl<T, P: Parker> FcLock<T, RawSpinLock, P> {
 
             if current.parker.state() == Parked {
                 current.age = pass;
-
-                let _begin = unsafe { __rdtscp(&mut aux) };
 
                 let f = current.f.unwrap();
 

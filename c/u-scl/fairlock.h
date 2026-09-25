@@ -33,10 +33,12 @@ typedef struct stats {
 } stats_t;
 #endif
 
+typedef struct fairlock fairlock_t;
 typedef struct flthread_info {
     ull banned_until;
     ull weight;
     ull slice;
+    fairlock_t *owner;
     ull start_ticks;
     int banned;
 #ifdef DEBUG
@@ -56,14 +58,15 @@ typedef struct qnode {
     struct qnode *next __attribute__ ((aligned (CACHELINE)));
 } qnode_t __attribute__ ((aligned (CACHELINE)));
 
-typedef struct fairlock {
+struct fairlock {
     qnode_t *qtail __attribute__ ((aligned (CACHELINE)));
     qnode_t *qnext __attribute__ ((aligned (CACHELINE)));
     ull slice __attribute__ ((aligned (CACHELINE)));
     int slice_valid __attribute__ ((aligned (CACHELINE)));
     pthread_key_t flthread_info_key;
     ull total_weight;
-} fairlock_t __attribute__ ((aligned (CACHELINE)));
+    int bridge_mode;
+} __attribute__ ((aligned (CACHELINE)));
 
 static inline qnode_t *flqnode(fairlock_t *lock) {
     return (qnode_t *) ((char *) &lock->qnext - offsetof(qnode_t, next));
@@ -73,28 +76,54 @@ static inline int futex(int *uaddr, int futex_op, int val, const struct timespec
     return syscall(SYS_futex, uaddr, futex_op, val, timeout, NULL, 0);
 }
 
-int fairlock_init(fairlock_t *lock) {
-    int rc;
+static void flthread_info_destroy(void *value) {
+    flthread_info_t *info = (flthread_info_t *)value;
+    if (info) {
+        __atomic_fetch_sub(&info->owner->total_weight, info->weight, __ATOMIC_RELAXED);
+        free(info);
+    }
+}
 
+static int fairlock_init_with_destructor(fairlock_t *lock,
+                                         void (*destructor)(void *), int bridge_mode) {
+    int rc;
     lock->qtail = NULL;
     lock->qnext = NULL;
     lock->total_weight = 0;
     lock->slice = 0;
     lock->slice_valid = 0;
-    if (0 != (rc = pthread_key_create(&lock->flthread_info_key, NULL))) {
+    lock->bridge_mode = bridge_mode;
+    if (0 != (rc = pthread_key_create(&lock->flthread_info_key, destructor)))
         return rc;
-    }
     return 0;
+}
+
+/* Preserve legacy USCL<T>'s no-destructor/no-owner-pointer behavior: that
+ * wrapper still moves its lock after initialization and has no Drop. */
+int fairlock_init(fairlock_t *lock) {
+    return fairlock_init_with_destructor(lock, NULL, 0);
+}
+
+/* Only the bridge allocates the lock at its permanent address before init. */
+int fairlock_bridge_init(fairlock_t *lock) {
+    return fairlock_init_with_destructor(lock, flthread_info_destroy, 1);
 }
 
 static flthread_info_t *flthread_info_create(fairlock_t *lock, int weight) {
     flthread_info_t *info;
     info = malloc(sizeof(flthread_info_t));
+    if (!info)
+        abort();
+    info->owner = lock->bridge_mode ? lock : NULL;
     info->banned_until = rdtsc();
     if (weight == 0) {
         int prio = getpriority(PRIO_PROCESS, 0);
+        if (prio < -20 || prio > 19)
+            prio = 0;
         weight = prio_to_weight[prio+20];
     }
+    if (weight <= 0)
+        abort();
     info->weight = weight;
     __sync_add_and_fetch(&lock->total_weight, weight);
     info->banned = 0;
@@ -108,18 +137,49 @@ static flthread_info_t *flthread_info_create(fairlock_t *lock, int weight) {
 }
 
 void fairlock_thread_init(fairlock_t *lock, int weight) {
-    flthread_info_t *info;
-    info = (flthread_info_t *) pthread_getspecific(lock->flthread_info_key);
-    if (NULL != info) {
-        free(info);
+    flthread_info_t *info = (flthread_info_t *)pthread_getspecific(lock->flthread_info_key);
+    if (info) {
+        if (pthread_setspecific(lock->flthread_info_key, NULL))
+            abort();
+        if (info->owner)
+            flthread_info_destroy(info);
+        else
+            free(info);
     }
     info = flthread_info_create(lock, weight);
-    pthread_setspecific(lock->flthread_info_key, info);
+    if (pthread_setspecific(lock->flthread_info_key, info)) {
+        if (info->owner)
+            flthread_info_destroy(info);
+        else
+            free(info);
+        abort();
+    }
 }
 
+/* One stable registration per physical worker and lock, never reset per call. */
+void fairlock_thread_register(fairlock_t *lock, int weight) {
+    if (!pthread_getspecific(lock->flthread_info_key))
+        fairlock_thread_init(lock, weight);
+}
+
+/* The legacy entry point never deleted its key; keep that contract while
+ * legacy USCL<T> may still move/drop without joining its registered users. */
 int fairlock_destroy(fairlock_t *lock) {
-    //return pthread_key_delete(lock->flthread_info_key);
+    (void)lock;
     return 0;
+}
+
+/* Only after every other bridge worker has exited and joined. */
+int fairlock_bridge_destroy(fairlock_t *lock) {
+    if (!lock->bridge_mode)
+        abort();
+    flthread_info_t *info = (flthread_info_t *)pthread_getspecific(lock->flthread_info_key);
+    if (info) {
+        if (pthread_setspecific(lock->flthread_info_key, NULL))
+            abort();
+        flthread_info_destroy(info);
+    }
+    return pthread_key_delete(lock->flthread_info_key);
 }
 
 void fairlock_acquire(fairlock_t *lock) {
@@ -128,10 +188,9 @@ void fairlock_acquire(fairlock_t *lock) {
 
     info = (flthread_info_t *) pthread_getspecific(lock->flthread_info_key);
     if (NULL == info) {
-        info = flthread_info_create(lock, 0);
-        pthread_setspecific(lock->flthread_info_key, info);
+        fairlock_thread_init(lock, 0);
+        info = (flthread_info_t *)pthread_getspecific(lock->flthread_info_key);
     }
-
     if (readvol(lock->slice_valid)) {
         ull curr_slice = lock->slice;
         // If owner of current slice, try to reenter at the beginning of the queue

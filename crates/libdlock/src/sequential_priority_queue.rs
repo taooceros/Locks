@@ -1,6 +1,32 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap};
-pub trait SequentialPriorityQueue<T>
+// Only these adapters may store UsageNode<'static, _>: its reference is valid
+// only while the owning FCPQ is alive. A safe custom queue could copy it out.
+mod sealed {
+    use super::{BTreeSet, BinaryHeap, Reverse};
+
+    pub trait Sealed {}
+    impl<T: Ord> Sealed for BinaryHeap<Reverse<T>> {}
+    impl<T: Ord> Sealed for BTreeSet<T> {}
+}
+
+/// The built-in queues keep their entries inside the owning lock.
+///
+/// A downstream queue cannot implement this trait, even if it implements the
+/// public methods: doing so could leak the lock's internally borrowed nodes.
+///
+/// ```compile_fail
+/// use libdlock::sequential_priority_queue::SequentialPriorityQueue;
+/// struct Custom;
+/// impl SequentialPriorityQueue<u64> for Custom {
+///     fn new() -> Self { Custom }
+///     fn push(&mut self, _: u64) {}
+///     fn peek(&mut self) -> Option<&u64> { None }
+///     fn pop(&mut self) -> Option<u64> { None }
+///     fn len(&self) -> usize { 0 }
+/// }
+/// ```
+pub trait SequentialPriorityQueue<T>: sealed::Sealed
 where
     T: PartialOrd + Ord + Eq,
 {

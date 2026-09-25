@@ -1,8 +1,8 @@
-//! CFL — Compact Fair Lock (Manglik & Kim, PPoPP'24)
+//! Local CFL-family adaptation of fairnumas; published CFL fidelity is unverified.
 //!
-//! Faithful Rust port of the original C CFL algorithm (`c/cfl/cfl.c`).
-//! Code is line-by-line aligned with the C source; comments prefixed with
-//! `// C:` reference the corresponding C lines or constructs.
+//! The queue-shuffling algorithm is ported from the repository's adapted C
+//! implementation (`c/cfl/cfl.c`), NOT a pinned copy of an author release.
+//! The bridge exposes this implementation exclusively as `cfl_local`.
 //!
 //! Memory access strategy (matching C semantics without UB):
 //!
@@ -16,10 +16,9 @@
 //!   or only by the lock holder. No cross-thread data race.
 //!
 //! - **Global vLHT arrays** (`RUNTIME_CHECKER_CORE/NODE`): `AtomicU64`.
-//!   Reads use `load(Relaxed)` (= plain `mov`). Writes in unlock use
-//!   `load(Relaxed)` + add + `store(Relaxed)` (= `mov; add; mov`) instead
-//!   of `fetch_add(Relaxed)` (= `lock xadd`, ~20 cycles overhead).
-//!   Only the lock holder writes, so the non-atomic RMW is safe.
+//!   Relaxed fetch-add is required because different CFL handles may update
+//!   the same process-global entry concurrently. CPU and node indices are
+//!   bounds-checked and unsupported topologies fail-stop.
 //!
 //! - **Lock state** (`tail`, `val`): `AtomicPtr`/`AtomicU32` — need real
 //!   CAS / swap / fetch_or / fetch_and.
@@ -32,7 +31,7 @@ use std::{
     },
 };
 
-use lock_api::{GuardSend, RawMutex};
+use lock_api::{GuardNoSend, RawMutex};
 use thread_local::ThreadLocal;
 
 // ====================================================================
@@ -54,46 +53,56 @@ const THRESHOLD: u32 = 0xffff;
 /// C: #define UNLOCK_COUNT_THRESHOLD 1024
 const UNLOCK_COUNT_THRESHOLD: u32 = 1024;
 
-// ====================================================================
-// Topology detection (C lines 21-44)
-// Matches C pattern: plain globals with zero-check guard.
-// AtomicU32::load(Relaxed) = single `mov`, same as C's plain read.
-// ====================================================================
-
-// C: static int numa_nodes = 1;
-// 0 = uninitialized (numa_nodes is always >= 1 after detection).
-static NUMA_NODES: AtomicU32 = AtomicU32::new(0);
-
-// C: detect_topology()
-#[cold]
-fn detect_topology() {
-    // C: /* Try to count NUMA nodes from sysfs. */
-    let mut nodes = 0u32;
-    for i in 0..256 {
-        let path = format!("/sys/devices/system/node/node{}", i);
-        if std::path::Path::new(&path).exists() {
-            nodes += 1;
-        } else if i > 0 {
-            break;
-        }
-    }
-    // C: numa_nodes = (nodes > 0) ? nodes : 1;
-    if nodes == 0 {
-        nodes = 1;
-    }
-    NUMA_NODES.store(nodes, Ordering::Relaxed);
+// NUMA placement correction to the local proxy: author fairnumas uses
+// AUX CPU ID modulo node count, which is wrong for contiguous socket IDs.
+// Cache the actual sysfs CPU->NUMA-node mapping once. The queue algorithm
+// and vLHT's fixed array sizes are unchanged; unsupported IDs fail-stop.
+struct Topology {
+    nodes: u32,
+    cpu_node: [u8; 256],
 }
 
-/// Returns the number of NUMA nodes, detecting on first call.
-/// Matches C: `if (__builtin_expect(cpu_number == 0, 0)) detect_topology();`
+static TOPOLOGY: std::sync::LazyLock<Topology> = std::sync::LazyLock::new(detect_topology);
+
+#[cold]
+fn detect_topology() -> Topology {
+    let root = std::path::Path::new("/sys/devices/system");
+    let mut physical_nodes = [0usize; 16];
+    let mut node_count = 0;
+    for node in 0..256 {
+        if root.join(format!("node/node{node}")).exists() {
+            if node_count == physical_nodes.len() {
+                std::process::abort();
+            }
+            physical_nodes[node_count] = node;
+            node_count += 1;
+        }
+    }
+    let mut cpu_node = [u8::MAX; 256];
+    if node_count == 0 {
+        // UMA kernels may not expose /sys/devices/system/node.
+        cpu_node.fill(0);
+    } else {
+        for (slot, node) in physical_nodes[..node_count].iter().enumerate() {
+            for cpu in 0..cpu_node.len() {
+                if root.join(format!("cpu/cpu{cpu}/node{node}")).exists() {
+                    if cpu_node[cpu] != u8::MAX {
+                        std::process::abort();
+                    }
+                    cpu_node[cpu] = slot as u8;
+                }
+            }
+        }
+    }
+    Topology {
+        nodes: node_count.max(1) as u32,
+        cpu_node,
+    }
+}
+
 #[inline]
 fn numa_nodes() -> u32 {
-    let n = NUMA_NODES.load(Ordering::Relaxed);
-    if n != 0 {
-        return n;
-    }
-    detect_topology();
-    NUMA_NODES.load(Ordering::Relaxed)
+    TOPOLOGY.nodes
 }
 
 // ====================================================================
@@ -102,11 +111,11 @@ fn numa_nodes() -> u32 {
 // ====================================================================
 
 // ====================================================================
-// Globals (C lines 61-63, from fairnumas.c, verbatim)
+// Globals (adapted fairnumas; deliberately shared across all CFL handles)
 // ====================================================================
 
 // C: unsigned long runtime_checker_core[256];
-// Reads use load(Relaxed) = plain mov. Writes use load+add+store (no lock prefix).
+// Reads are relaxed; writes use fetch_add to avoid lost updates across locks.
 #[allow(clippy::declare_interior_mutable_const)]
 static RUNTIME_CHECKER_CORE: [AtomicU64; 256] = {
     const ZERO: AtomicU64 = AtomicU64::new(0);
@@ -123,38 +132,38 @@ static RUNTIME_CHECKER_NODE: [AtomicU64; 16] = {
 // C: int allowed_node;
 static ALLOWED_NODE: AtomicI32 = AtomicI32::new(0);
 
-/// Unchecked access to `RUNTIME_CHECKER_CORE[idx]`.
-/// SAFETY: caller must ensure `idx < 256`.
+/// Checked access to `RUNTIME_CHECKER_CORE[idx]`; unsupported CPU aborts.
 #[inline(always)]
 unsafe fn rt_core(idx: usize) -> &'static AtomicU64 {
-    RUNTIME_CHECKER_CORE.get_unchecked(idx)
+    RUNTIME_CHECKER_CORE
+        .get(idx)
+        .unwrap_or_else(|| std::process::abort())
 }
 
-/// Unchecked access to `RUNTIME_CHECKER_NODE[idx]`.
-/// SAFETY: caller must ensure `idx < 16`.
+/// Checked access to `RUNTIME_CHECKER_NODE[idx]`; unsupported node aborts.
 #[inline(always)]
 unsafe fn rt_node(idx: usize) -> &'static AtomicU64 {
-    RUNTIME_CHECKER_NODE.get_unchecked(idx)
+    RUNTIME_CHECKER_NODE
+        .get(idx)
+        .unwrap_or_else(|| std::process::abort())
 }
 
 // ====================================================================
-// NUMA helpers (C lines 68-86, from fairnumas.c, verbatim)
+// NUMA helpers (local portability correction, not original CPU modulo N)
 // ====================================================================
 
-/// C: current_numa_node() — core % numa_nodes
+/// Actual sysfs NUMA mapping for the CPU sampled by RDTSCP, not CPU parity.
 #[inline]
-fn current_numa_node() -> i32 {
-    // C: unsigned long a, d, c; int core;
-    // C: __asm__ volatile("rdtscp" : "=a"(a), "=d"(d), "=c"(c));
-    // C: core = c & 0xFFF;
-    let core: u32;
-    unsafe {
-        let mut aux: u32 = 0;
-        core::arch::x86_64::__rdtscp(&mut aux);
-        core = aux & 0xFFF;
+fn node_for_cpu(core: i32) -> i32 {
+    let node = TOPOLOGY
+        .cpu_node
+        .get(core as usize)
+        .copied()
+        .unwrap_or_else(|| std::process::abort());
+    if node == u8::MAX {
+        std::process::abort();
     }
-    // C: return core % numa_nodes;
-    (core % numa_nodes()) as i32
+    i32::from(node)
 }
 
 /// C: current_numa_core() — raw core ID
@@ -168,6 +177,9 @@ fn current_numa_core() -> i32 {
         let mut aux: u32 = 0;
         core::arch::x86_64::__rdtscp(&mut aux);
         core = aux & 0xFFF;
+        if core >= RUNTIME_CHECKER_CORE.len() as u32 {
+            std::process::abort();
+        }
     }
     // C: return core;
     core as i32
@@ -279,9 +291,8 @@ unsafe impl Sync for QNode {}
 
 /// CFL lock implementing [`lock_api::RawMutex`].
 ///
-/// Faithful port of the C CFL algorithm with NUMA-aware, vLHT-based
-/// queue shuffling. Waiters reorder the queue while spinning; unlock
-/// is O(1).
+/// Local adapted fairnumas port with NUMA-aware vLHT-based queue shuffling.
+/// Provenance as a faithful published CFL implementation remains unverified.
 #[derive(Debug)]
 pub struct RawCflLock {
     // C: struct cfl_node *tail;
@@ -297,17 +308,12 @@ unsafe impl Send for RawCflLock {}
 unsafe impl Sync for RawCflLock {}
 
 impl RawCflLock {
-    // ================================================================
-    // Byte-level accessors (matching C union layout, little-endian)
-    // ================================================================
-
-    /// Byte-level view of the locked byte (offset 0 of val).
-    /// C: lock->locked
+    // The lock word is always accessed as a single AtomicU32. A byte-sized
+    // atomic overlay on an AtomicU32 is undefined behavior in Rust.
     #[inline]
-    fn locked_byte(&self) -> &AtomicU8 {
-        unsafe { &*((&self.val as *const AtomicU32).cast::<AtomicU8>()) }
+    fn locked(&self) -> bool {
+        self.val.load(Ordering::Acquire) & 0xff != 0
     }
-
     // ================================================================
     // Stealing control helpers (C lines 117-130)
     // ================================================================
@@ -518,7 +524,7 @@ impl RawCflLock {
             } // end 'numa block
 
             // check:
-            let lock_ready = self.locked_byte().load(Ordering::Acquire) == 0;
+            let lock_ready = !self.locked();
             if one_shuffle
                 && ((is_next_waiter && lock_ready)
                     || (!is_next_waiter && (*node).lstatus.load(Ordering::Acquire) != 0))
@@ -546,7 +552,7 @@ unsafe impl RawMutex for RawCflLock {
         local_node: ThreadLocal::new(),
     };
 
-    type GuardMarker = GuardSend;
+    type GuardMarker = GuardNoSend;
 
     // ================================================================
     // lock() — maps to __cfl_lock() (C lines 312-430)
@@ -558,8 +564,7 @@ unsafe impl RawMutex for RawCflLock {
         unsafe {
             // C: me->cid = current_numa_core();
             (*me).cid = current_numa_core();
-            // C: me->nid = current_numa_node();
-            (*me).nid = current_numa_node();
+            (*me).nid = node_for_cpu((*me).cid);
             // C: me->runtime = 0;
             (*me).runtime = 0;
 
@@ -587,12 +592,11 @@ unsafe impl RawMutex for RawCflLock {
                     }
                 }
 
-                // C: me->locked = CFL_STATUS_WAIT;
-                // One 4-byte store zeroes lstatus(u8)+sleader(u8)+wcount(u16),
-                // matching C's single `movl $0, 0x8(%rbx)` for the union write.
-                // SAFETY: #[repr(C)] guarantees these 4 bytes are contiguous at
-                // offset 8. Node is thread-local here (not yet published).
-                core::ptr::write((me as *mut u8).add(8).cast::<u32>(), 0u32);
+                // The node is private until its tail publication; reset its
+                // atomics individually instead of writing over their storage.
+                (*me).lstatus.store(STATUS_WAIT, Ordering::Relaxed);
+                (*me).sleader.store(false, Ordering::Relaxed);
+                (*me).wcount.store(0, Ordering::Relaxed);
                 // C: me->next = NULL;
                 (*me).next.store(null_mut(), Ordering::Relaxed);
                 // C: me->last_visited = NULL;
@@ -631,7 +635,7 @@ unsafe impl RawMutex for RawCflLock {
                 // C: for (;;)
                 loop {
                     // C: if (!READ_ONCE(impl->locked)) break;
-                    if self.locked_byte().load(Ordering::Acquire) == 0 {
+                    if !self.locked() {
                         break;
                     }
 
@@ -645,17 +649,21 @@ unsafe impl RawMutex for RawCflLock {
 
                 // C: for (;;)
                 loop {
-                    // C: if (smp_cas(&impl->locked, 0, 1) == 0) break;
-                    if self
-                        .locked_byte()
-                        .compare_exchange_weak(0, 1, Ordering::AcqRel, Ordering::Acquire)
-                        .is_ok()
+                    let state = self.val.load(Ordering::Acquire);
+                    if state & 0xff == 0
+                        && self
+                            .val
+                            .compare_exchange_weak(
+                                state,
+                                state | 1,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .is_ok()
                     {
                         break;
                     }
-
-                    // C: while (READ_ONCE(impl->locked)) CPU_PAUSE();
-                    while self.locked_byte().load(Ordering::Acquire) != 0 {
+                    while self.locked() {
                         core::hint::spin_loop();
                     }
                 }
@@ -697,16 +705,20 @@ unsafe impl RawMutex for RawCflLock {
     fn try_lock(&self) -> bool {
         // Fast-path CAS matching __cfl_lock fast path.
         // CAS val: locked=0, no_stealing=0 → locked=1.
+        // Complete all potentially panicking TLS/topology setup before CAS,
+        // so failure cannot leave the lock permanently acquired.
+        let cell = self.local_node.get_or(|| UnsafeCell::new(QNode::new()));
+        let me: *mut QNode = cell.get();
+        let cid = current_numa_core();
+        let nid = node_for_cpu(cid);
         if self
             .val
             .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
         {
-            let cell = self.local_node.get_or(|| UnsafeCell::new(QNode::new()));
-            let me: *mut QNode = cell.get();
             unsafe {
-                (*me).cid = current_numa_core();
-                (*me).nid = current_numa_node();
+                (*me).cid = cid;
+                (*me).nid = nid;
                 (*me).runtime = cfl_rdtsc();
             }
             true
@@ -729,18 +741,16 @@ unsafe impl RawMutex for RawCflLock {
             // C: cslength = cfl_rdtsc() - me->runtime;
             let cslength = cfl_rdtsc().wrapping_sub(runtime);
             // C: runtime_checker_core[me->cid] += cslength;
-            // Non-atomic RMW: load + add + store. Only lock holder writes,
-            // so no concurrent writers. Avoids lock xadd (~20 cycles).
+            // Across independent CFL handles, different owners may update the
+            // same process-wide vLHT slot concurrently.
             let idx_core = (*me).cid as usize;
-            let old_core = rt_core(idx_core).load(Ordering::Relaxed);
-            rt_core(idx_core).store(old_core.wrapping_add(cslength), Ordering::Relaxed);
+            rt_core(idx_core).fetch_add(cslength, Ordering::Relaxed);
             // C: runtime_checker_node[me->nid] += cslength;
             let idx_node = (*me).nid as usize;
-            let old_node = rt_node(idx_node).load(Ordering::Relaxed);
-            rt_node(idx_node).store(old_node.wrapping_add(cslength), Ordering::Relaxed);
+            rt_node(idx_node).fetch_add(cslength, Ordering::Relaxed);
         }
 
         // C: WRITE_ONCE(impl->locked, 0);
-        self.locked_byte().store(0, Ordering::Release);
+        self.val.fetch_and(!0xff, Ordering::Release);
     }
 }

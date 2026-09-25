@@ -4,6 +4,17 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ---
 
+## Experiment setup integration
+
+- [x] **Consolidate the database experiment setup for a main-targeted PR.**
+  [Guide](integration/README.md) and
+  [verification record](plan/2026-09-25/experiment-setup-integration.md).
+  Source only; original worktrees/results preserved. Verified 36 native builds,
+  focused Rust/Python checks, 20 redb and 84 heterogeneous DB smoke cells,
+  14 batch-error gates, and cost/table/contention preparation gates.
+  CFL-local's eight-CPU/128-worker watchdog failure is retained and documented.
+  No formal performance matrices rerun.
+
 ## Phase 0: Foundation & Cleanup
 
 - [x] **Implement Jain's Fairness Index computation.**

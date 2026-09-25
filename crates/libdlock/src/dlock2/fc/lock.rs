@@ -1,5 +1,7 @@
+#[cfg(feature = "combiner_stat")]
+use std::arch::x86_64::__rdtscp;
+
 use std::{
-    arch::x86_64::__rdtscp,
     cell::SyncUnsafeCell,
     mem::MaybeUninit,
     ptr::{null_mut, NonNull},
@@ -50,14 +52,17 @@ where
         }
     }
 
-    fn push_node(&self, node: &mut Node<I>) {
+    fn push_node(&self, node: &Node<I>) {
+        // The list stores addresses, not exclusive borrows. Each ThreadLocal
+        // allocation stays fixed until all calls finish and FC is dropped.
+        let node_ptr = node as *const Node<I> as *mut Node<I>;
         let mut head = self.head.load(Acquire);
         node.active.store(true, Release);
         loop {
             node.next.store(head, Relaxed);
             match self
                 .head
-                .compare_exchange_weak(head, node, Release, Acquire)
+                .compare_exchange_weak(head, node_ptr, Release, Acquire)
             {
                 Ok(_) => {
                     break;
@@ -67,7 +72,7 @@ where
         }
     }
 
-    fn push_if_unactive(&self, node: &mut Node<I>) {
+    fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(Acquire) {
             return;
         }
@@ -90,9 +95,16 @@ where
         }
 
         while let Some(current_nonnull) = current_ptr {
+            // SAFETY: ThreadLocal nodes remain at stable addresses until this lock
+            // is dropped, after all lock() calls have returned. Only atomics and
+            // interior-mutable fields are accessed while a node is published.
             let current = unsafe { current_nonnull.as_ref() };
 
             if current.active.load(Acquire) && !current.complete.load(Acquire) {
+                // SAFETY: acquire of complete=false observes the requester's
+                // release publication. Combiner exclusion gives one reader/writer
+                // of the payload and age; complete=true hands the result back.
+                // No requester publishes another payload before taking this one.
                 unsafe {
                     (*current.age.get()) = pass;
                     current.data.get().write(MaybeUninit::new((self.delegate)(
@@ -111,10 +123,16 @@ where
         unsafe {
             let end = __rdtscp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            // SAFETY: only this thread writes/reads its ThreadLocal statistic;
+            // other threads may hold &Node, hence the separate interior cell.
+            let node = &*self.local_node.get().unwrap().get();
+            *node.combiner_time_stat.get() += end - begin;
         }
     }
 
+    // SAFETY: callers hold the combiner mutex. ThreadLocal nodes remain
+    // allocated until quiescent drop; only the combiner touches age and list
+    // links during traversal, clearing active only after unlinking.
     unsafe fn clean_unactive_node(&self, head: &AtomicPtr<Node<I>>, pass: u32) {
         let previous_ptr = NonNull::new(head.load(Acquire)).unwrap();
 
@@ -152,9 +170,12 @@ where
     fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
-        let node = unsafe { &mut *node.get() };
-
-        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
+        // SAFETY: the ThreadLocal allocation is stable until quiescent FC drop.
+        // Published combiners can retain &Node across calls, so never make &mut
+        // Node or replace its cell. This owner alone starts a new request after
+        // taking the preceding result; release below publishes its input.
+        let node = unsafe { &*node.get() };
+        unsafe { node.data.get().write(MaybeUninit::new(data)) };
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -191,11 +212,18 @@ where
             }
         }
 
+        // SAFETY: acquire of complete=true transfers the initialized result
+        // from the combiner; this owner reads it exactly once before republishing.
         unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]
     fn get_combine_time(&self) -> Option<u64> {
-        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
+        // SAFETY: this thread alone accesses its ThreadLocal statistic.
+        unsafe {
+            self.local_node
+                .get()
+                .map(|x| *(*x.get()).combiner_time_stat.get())
+        }
     }
 }

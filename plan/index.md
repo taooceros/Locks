@@ -5,6 +5,13 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## Current Priorities
 
+### Experiment setup integration
+
+- [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
+  - Status: source integration and local verification complete; main-targeted PR.
+  - Scope: reproducible UpScaleDB/redb setup and required bridge/ownership fixes;
+    source only, preserving original worktrees and excluding measurement artifacts.
+
 ### Priority 1: Algorithm Direction
 
 - [Algorithm Improvement Plan](./2026-03-23/algorithm-improvement-plan.md)
@@ -16,6 +23,10 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     research story, so it should guide later experiment and writing plans
 
 ## By Date
+
+### 2026-09-25
+
+- [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
 
 ### 2026-03-23
 
