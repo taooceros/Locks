@@ -6,14 +6,14 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ## Experiment setup integration
 
-- [x] **Consolidate the database experiment setup for a main-targeted PR.**
+- [x] **Consolidate the redb experiment setup for a main-targeted PR.**
   [Guide](integration/README.md) and
   [verification record](plan/2026-09-25/experiment-setup-integration.md).
-  Source only; original worktrees/results preserved. Verified 36 native builds,
-  focused Rust/Python checks, 20 redb and 84 heterogeneous DB smoke cells,
-  14 batch-error gates, and cost/table/contention preparation gates.
-  CFL-local's eight-CPU/128-worker watchdog failure is retained and documented.
-  No formal performance matrices rerun.
+  Removed the modified-UpScaleDB setup from PR #46 at user request.
+  Retained the unmodified redb dependency and shared lock correctness fixes.
+  Reduced workspace build and both redb builds passed; all 20 real-DB smoke cells
+  verified exactly 1,040 records and close/reopen contents after removal.
+  Original worktrees/results and historical verification records are preserved.
 
 ## Phase 0: Foundation & Cleanup
 

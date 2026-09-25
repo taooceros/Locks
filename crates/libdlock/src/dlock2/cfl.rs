@@ -2,7 +2,6 @@
 //!
 //! The queue-shuffling algorithm is ported from the repository's adapted C
 //! implementation (`c/cfl/cfl.c`), NOT a pinned copy of an author release.
-//! The bridge exposes this implementation exclusively as `cfl_local`.
 //!
 //! Memory access strategy (matching C semantics without UB):
 //!

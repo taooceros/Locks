@@ -1,15 +1,15 @@
 # Integrate the experiment setup for a main-targeted PR
 
-Status: source integration and local verification complete; delivery through a
-user-requested PR to main, not a direct update of main.
+Status: removal complete and locally verified; PR #46 retains redb with its
+unmodified database dependency and shared lock fixes, not modified-UpScaleDB setup.
 
 ## Scope
 
 - Base the integration branch on fetched `origin/main`; do not update main directly.
-- Bring in the tested FC/FC-PQ ownership repair, conventional-backend prerequisites,
-  synchronous UpScaleDB bridge, pinned native build and correctness gates.
-- Consolidate the scaling, hypotheses, boundary/multitable, high-contention and
-  heterogeneous-client harnesses, plus the standalone redb transaction experiment.
+- Retain the tested FC/FC-PQ ownership repair, shared lock correctness fixes,
+  and standalone redb transaction experiment.
+- Remove `integration/upscaledb/`, its Rust/C bridge crate, workspace membership,
+  bridge-only dependencies and CI steps, and obsolete setup instructions.
 - Preserve source worktrees and their uncommitted changes. Import selected snapshots
   with temporary Git indexes; do not stage or commit the original worktrees.
 - Keep primary/profile data semantics and backend identifiers unchanged. Existing
@@ -21,22 +21,34 @@ user-requested PR to main, not a direct update of main.
 
 ## Ownership
 
-The integration owner handles the shared Rust/C bridge and root configuration/docs.
-One worker owns `integration/upscaledb/` except `bridge.h`; another owns
-`integration/redb/` and `integration/redb_transactions.py`. No worker commits,
-pushes, builds, runs tests or formats mid-flight. Run integrated verification once
-all edits are complete; rerun only a failed path after a concrete correction.
+The integration owner performs this removal on `integration/experiment-setup`.
+Original experimental worktrees, ignored artifacts and historical results remain
+untouched. The initial integration used separate UpScaleDB and redb workers;
+their original verification is retained below as historical evidence only.
 
 ## Verification and delivery
 
-Use the pinned devenv environment. Run existing focused Python and Rust release
-checks, then real small workloads exercising the newly combined native/bridge,
-heterogeneous batch and redb primary/profile paths. Do not rerun publication
-performance matrices. Preserve failures and distinguish build/runtime checks from
-research measurements. Review the staged file inventory for source-only scope,
-commit the integration branch, push it and open a PR against main.
+Use the pinned devenv environment. Build the reduced root workspace and prepare
+both redb variants, then run its twenty-cell real-DB smoke. Do not rerun the formal
+performance matrix. Update the setup guide, completion record and PR description,
+commit and push to the existing main-targeted PR without directly changing main.
 
-## Integration findings and exercised checks
+## Verification after user-requested removal
+
+- Removed all tracked `integration/upscaledb/` files and `crates/upscaledb-bridge`,
+  the workspace/lockfile entry, bridge CI steps, and UpScaleDB-only Autotools
+  prerequisites. Replaced the setup guide with the retained redb workflow.
+- `cargo build --workspace --release --locked -j 4` passed in devenv after removal.
+  Existing compiler/dependency warnings remain; no warning-free claim.
+- Fresh redb preparation built primary and profile variants with locked
+  dependencies, using CPUs 16–23 and memory node 0.
+- The real-DB smoke passed all 20 cells (five backends × two durability modes ×
+  primary/profile). Every cell verified exactly 1,040 live records and exact
+  close/reopen contents. This is correctness evidence, not a performance cohort.
+- Evidence: `.worktree/redb-without-upscaledb/`. No formal timing matrix rerun;
+  original worktrees, results and ignored historical build artifacts untouched.
+
+## Historical integration findings (before UpScaleDB removal)
 
 - The root release workspace build passed with the repository's existing compiler
   warnings and a dependency future-incompatibility warning; not a warning-free build.

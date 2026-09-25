@@ -9,10 +9,6 @@
     just
     uv
     numactl
-    autoconf
-    automake
-    libtool
-    gnumake
     git
     util-linux
     linuxPackages.perf

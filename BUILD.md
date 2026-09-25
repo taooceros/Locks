@@ -4,15 +4,14 @@ Requires nightly Rust, GCC/Clang, x86_64. Always use `--release` (debug builds a
 
 ## Workspace Layout
 
-Cargo workspace at repo root with three members:
+Cargo workspace at repo root with two members:
 - `.` — binary crate `dlock` (CLI, benchmarks)
 - `crates/libdlock` — library crate `libdlock` (lock implementations, traits, tests)
-- `crates/upscaledb-bridge` — synchronous C ABI for restricted database experiments
 
-`integration/redb` is a separate, lockfile-pinned Cargo workspace. Database setup,
-native source pins, correctness gates and experiment commands are documented in
-[integration/README.md](integration/README.md). Builds, databases and raw results
-belong under the ignored `.worktree/` directory, not in source control.
+`integration/redb` is a separate, lockfile-pinned Cargo workspace using the
+unmodified redb library. Setup, correctness checks and experiment commands are
+documented in [integration/README.md](integration/README.md). Builds, databases and
+raw results belong under the ignored `.worktree/` directory, not in source control.
 
 ## Commands
 
@@ -23,10 +22,9 @@ cargo build --release --workspace
 # Test library locks
 cargo test -p libdlock --release --lib
 
-# Test the database bridge with and without profiling/test hooks
-cargo test -p upscaledb-bridge --release -- --test-threads=1
-cargo test -p upscaledb-bridge --release --features profile,test-hooks -- --test-threads=1
-python3 -m unittest discover -s integration/upscaledb -p 'test_*.py' -v
+# Build the standalone database experiment
+cargo build --manifest-path integration/redb/Cargo.toml --release --locked
+cargo build --manifest-path integration/redb/Cargo.toml --release --locked --features redb_profile
 
 # Test specific module (e.g. dlock2 unit tests only)
 cargo test -p libdlock --release --lib dlock2_unit_test
