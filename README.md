@@ -4,11 +4,12 @@ Research project implementing usage-fair delegation locks in Rust.
 
 ## Database experiment setup
 
-[The integration guide](integration/README.md) covers standalone redb transaction
-workloads using the unmodified database library. It separates correctness/smoke
-checks from primary/profile measurement and explains CPU/NUMA placement and
-baseline limitations. Raw measurements and generated reports are not part of the
-setup. Database-internal patches and lock-replacement bridges are not included.
+[The integration guide](integration/README.md) covers single-operation UpScaleDB
+synchronization integration and redb transaction workloads. The UpScaleDB adapter
+preserves the original find/insert bodies and operation boundaries; it does not
+add batching or restructure the application to favor a lock. The guide separates
+correctness/smoke checks from primary/profile measurement and documents API and
+CPU/NUMA limits. Raw measurements and generated reports are not included.
 
 ## Binary Crate (`dlock`)
 

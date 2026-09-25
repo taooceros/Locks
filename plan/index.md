@@ -8,9 +8,9 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 ### Experiment setup integration
 
 - [Experiment setup integration](./2026-09-25/experiment-setup-integration.md)
-  - Status: modified-UpScaleDB setup removed; reduced setup locally verified for PR #46.
-  - Scope: redb setup using the unmodified database library and shared lock fixes;
-    source only, preserving original worktrees and excluding measurement artifacts.
+  - Status: single-operation UpScaleDB integration restored and locally verified for PR #46.
+  - Scope: synchronization adapters without application-logic changes, redb setup,
+    and shared lock fixes; preserve original worktrees and exclude result artifacts.
 
 ### Priority 1: Algorithm Direction
 

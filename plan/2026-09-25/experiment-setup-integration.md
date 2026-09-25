@@ -1,15 +1,19 @@
 # Integrate the experiment setup for a main-targeted PR
 
-Status: removal complete and locally verified; PR #46 retains redb with its
-unmodified database dependency and shared lock fixes, not modified-UpScaleDB setup.
+Status: single-operation UpScaleDB integration restored and locally verified for PR #46.
+The earlier complete removal was the assistant's overbroad interpretation.
 
 ## Scope
 
 - Base the integration branch on fetched `origin/main`; do not update main directly.
-- Retain the tested FC/FC-PQ ownership repair, shared lock correctness fixes,
-  and standalone redb transaction experiment.
-- Remove `integration/upscaledb/`, its Rust/C bridge crate, workspace membership,
-  bridge-only dependencies and CI steps, and obsolete setup instructions.
+- Retain FC/FC-PQ ownership repairs, shared lock correctness fixes and redb setup.
+- Restore the single-operation UpScaleDB integration, its bridge, Native and
+  extracted-body/mutex controls, build provenance and correctness gates.
+- Preserve the original find/insert bodies and one-operation critical-section
+  boundary. Do not restore batch8 or split-environment/application-restructuring
+  experiments; keep their historical worktrees and evidence separately.
+- Single-DB workload parameters and synthetic arrival/cost probes are experiment
+  inputs, not modifications of database operation semantics; label them accordingly.
 - Preserve source worktrees and their uncommitted changes. Import selected snapshots
   with temporary Git indexes; do not stage or commit the original worktrees.
 - Keep primary/profile data semantics and backend identifiers unchanged. Existing
@@ -21,19 +25,50 @@ unmodified database dependency and shared lock fixes, not modified-UpScaleDB set
 
 ## Ownership
 
-The integration owner performs this removal on `integration/experiment-setup`.
-Original experimental worktrees, ignored artifacts and historical results remain
-untouched. The initial integration used separate UpScaleDB and redb workers;
-their original verification is retained below as historical evidence only.
+The integration owner handles the bridge crate, root configuration and documentation.
+Separate workers restore the native build/core adapter and standard single-DB
+runner/analysis closure. They do not build, test, format or commit mid-flight.
+Original worktrees and ignored historical artifacts remain untouched.
 
 ## Verification and delivery
 
-Use the pinned devenv environment. Build the reduced root workspace and prepare
-both redb variants, then run its twenty-cell real-DB smoke. Do not rerun the formal
-performance matrix. Update the setup guide, completion record and PR description,
-commit and push to the existing main-targeted PR without directly changing main.
+Use the pinned devenv environment. Run the restored Python and bridge checks,
+build the standard single-operation variants and exercise real-DB correctness and
+small matched workloads. Keep measurements separate from smoke. Update the guide,
+completion record and existing PR #46; do not directly change main.
 
-## Verification after user-requested removal
+## Verification after restoring integration-only scope
+
+- Restored the original single-operation adapter and bridge, retaining the Native,
+  extracted-body/original-mutex and borrowed-mutex controls. Inspected the pinned
+  upstream find/insert bodies against the extraction patch; the protected operation
+  bodies remain the same. No batch8 extension or multitable restructuring restored.
+- Fresh build of all 21 standard primary/profile/control variants plus test hooks:
+  22 binaries in `.worktree/upscaledb-single-operations`, without `--resume`.
+  The local upstream clone supplied Git source only; libraries were freshly built.
+  All 22 binary hashes matched their manifests.
+- Python provenance/topology tests: 21 passed. Restored CLI/import surfaces:
+  18 passed; requesting the removed heterogeneous build variant was rejected.
+- Rust bridge tests: 8 primary and 11 profile/test-hook tests passed. The restored
+  root workspace release build with `--locked` passed.
+- Real DB: 69 gates passed (three checks for each of 21 standard variants, plus
+  six test-hook cases). These cover memory policy, missing/duplicate keys, invalid
+  sizes, caller-owned output canaries, exact contents, 128-worker churn, lifecycle,
+  expected exceptions and fail-stop behavior. Churn ran with CPUs 0–127 available.
+- All 22 variants also completed the same fixed-work smoke: 128 finds + 128 inserts,
+  64 preloaded records, seed 101, CPUs 16–23 and memory node 0. Every run reported
+  the exact 192 final records, zero value/size/status errors, passing integrity and
+  clean DB/environment shutdown.
+- Runtime commands/raw outcomes and summary are retained under
+  `.worktree/single-operation-verification/`. The throwaway verifier was removed
+  after completion. No formal performance matrices rerun. Existing build warnings
+  remain visible; redb source and original research worktrees/results are unchanged.
+
+## Historical verification after the overbroad removal (superseded)
+
+The user clarified that integration should remain and application logic should not
+be changed to favor the experiment. The following removal was not that request's
+intended scope; its verification is retained only as a historical record.
 
 - Removed all tracked `integration/upscaledb/` files and `crates/upscaledb-bridge`,
   the workspace/lockfile entry, bridge CI steps, and UpScaleDB-only Autotools

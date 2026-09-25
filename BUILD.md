@@ -4,14 +4,16 @@ Requires nightly Rust, GCC/Clang, x86_64. Always use `--release` (debug builds a
 
 ## Workspace Layout
 
-Cargo workspace at repo root with two members:
+Cargo workspace at repo root with three members:
 - `.` — binary crate `dlock` (CLI, benchmarks)
 - `crates/libdlock` — library crate `libdlock` (lock implementations, traits, tests)
+- `crates/upscaledb-bridge` — synchronous C ABI for single-operation synchronization integration
 
-`integration/redb` is a separate, lockfile-pinned Cargo workspace using the
-unmodified redb library. Setup, correctness checks and experiment commands are
-documented in [integration/README.md](integration/README.md). Builds, databases and
-raw results belong under the ignored `.worktree/` directory, not in source control.
+`integration/redb` is a separate, lockfile-pinned Cargo workspace using unmodified
+redb. UpScaleDB integration preserves its original single-operation bodies while
+changing synchronization. Setup, correctness checks and commands are documented
+in [integration/README.md](integration/README.md). Builds, databases and raw results
+belong under ignored `.worktree/` paths.
 
 ## Commands
 
@@ -21,6 +23,11 @@ cargo build --release --workspace
 
 # Test library locks
 cargo test -p libdlock --release --lib
+
+# Check the synchronization bridge and UpScaleDB setup contracts
+cargo test -p upscaledb-bridge --release -- --test-threads=1
+cargo test -p upscaledb-bridge --release --features profile,test-hooks -- --test-threads=1
+python3 -m unittest discover -s integration/upscaledb -p 'test_*.py' -v
 
 # Build the standalone database experiment
 cargo build --manifest-path integration/redb/Cargo.toml --release --locked

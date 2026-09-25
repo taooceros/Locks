@@ -6,14 +6,14 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ## Experiment setup integration
 
-- [x] **Consolidate the redb experiment setup for a main-targeted PR.**
+- [x] **Integrate database experiments without changing application logic.**
   [Guide](integration/README.md) and
   [verification record](plan/2026-09-25/experiment-setup-integration.md).
-  Removed the modified-UpScaleDB setup from PR #46 at user request.
-  Retained the unmodified redb dependency and shared lock correctness fixes.
-  Reduced workspace build and both redb builds passed; all 20 real-DB smoke cells
-  verified exactly 1,040 records and close/reopen contents after removal.
-  Original worktrees/results and historical verification records are preserved.
+  Corrected the assistant's overbroad removal: restored single-operation UpScaleDB
+  integration and Native/mutex controls, without batch8 or application restructuring.
+  Verified 22 fresh binaries, 69 DB gates, 22 exact-content fixed-work smokes,
+  21 Python tests, 8+11 bridge tests and the workspace build.
+  Kept redb, shared lock fixes, original worktrees and historical evidence.
 
 ## Phase 0: Foundation & Cleanup
 
