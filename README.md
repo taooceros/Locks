@@ -1,19 +1,26 @@
 # Locks: service-fair delegation
 
-Fairness by switching threads moves data; fairness by switching requests does
-not. Any lock that achieves service fairness by handing the lock to a different
-thread faces a forced trade-off: fairness at granularity g (maximum usage gap)
-requires switching holders at least every g of service, and every switch
-migrates the protected working set D between caches, so throughput
-<= 1/(CS + D_migrate * switch_rate). The only escape is to switch less than
-fairness demands and refuse service to over-consumers, i.e. idle with backlog
-(non-work-conserving; SCL/U-SCL lock slices and bans). CFL, ticket, FIFO-MCS sit
-on the "migrate" horn; U-SCL sits on the "idle" horn. Delegation (flat
-combining) breaks the coupling: the combiner executes every critical section,
-so changing WHO IS CHARGED costs a request handoff (~2 cache lines) independent
-of D; the scheduler (FC-PQ: usage-ordered priority queue) can select per request
-at any granularity, work-conservingly, without moving data. Predicted advantage
-grows with D/CS.
+A lock is two sequences: the clients that receive service and the cores that
+execute it. Caller-executed locks tie them together: choosing who is served
+next also chooses where the protected working set D lives next. That leaves a
+caller-executed lock three options: switch executor every operation and pay
+the migration M(W, topology) each time (MCS, ticket, CLH, service-fair CFL);
+bias selection toward nearby cores to avoid migration, which is exactly the
+freedom a service-fair policy does not have (CNA, ShflLock, CFL's NUMA
+grouping); or refuse service to over-consumers and idle with backlog
+(SCL/U-SCL slices and bans, non-work-conserving). Delegation removes the
+executor from the selection: a combiner runs every critical section, so
+changing who is charged costs a request handoff independent of D, and a
+usage-ordered selection (FC-PQ) can be service-fair per request while staying
+work-conserving. The advantage is amortized, not free: with batch occupancy b
+and per-request delegation cost d, delegation wins only when
+b(M + h - d) > M + A + K (handoff cost h, pass administration A, scheduler
+state K); if d >= h + M no batch wins. Predicted advantage grows with D/CS and
+with b; it vanishes at small D or low contention.
+
+Formal version: `research/logp-analysis@555ad76:analysis/logp/` (`story-draft.tex`
+for the narrative, `performance.tex` for the cost model and crossover,
+`fairness.tex` for the service-spread results and the limits of current FC-PQ).
 
 This repository holds the Rust delegation locks (`crates/libdlock`), the
 microbenchmark CLI, C reference locks, and the UpScaleDB/redb integrations used
@@ -21,8 +28,9 @@ to test that thesis.
 
 ## Claims to falsify
 
-- **H1** Switching locks (MCS, ticket, CLH, CFL) lose throughput as the
-  protected working set D grows, at fixed CS length and fixed fairness.
+- **H1** Caller-executed locks (MCS, ticket, CLH, CFL) lose throughput as the
+  protected working set D grows, at fixed CS length and fixed fairness;
+  locality-biased variants recover throughput only by giving up service share.
 - **H2** U-SCL keeps fairness by idling with backlog; this is measurable as
   idle-with-backlog time.
 - **H3** FC/FC-PQ throughput is flat in D (combiner-local data) while service
@@ -72,9 +80,12 @@ Ordered experiments. E0 is engineering, not results. E1 is the core figure.
   half the threads.
 - Locks: MCS, ticket, CLH, CFL, U-SCL, FC, FC-PQ.
 - Metrics: throughput, service Jain, idle-with-backlog time, per-op L2/LLC
-  misses and HITM via `perf stat`.
-- Prediction: switching locks fall with W, FC/FC-PQ flat, U-SCL Jain high but
-  idle grows. Headline = crossover W\*.
+  misses and HITM via `perf stat`; for FC/FC-PQ also actual batch occupancy b,
+  executor changes per pass p, and wasted pops k/b (the model's amortization
+  inputs).
+- Prediction: caller-executed locks fall with W, FC/FC-PQ flat once b is large
+  enough, U-SCL Jain high but idle grows. Headline = crossover W\*, and the
+  small-W regime where d >= h + M and no delegation variant wins.
 - Placement: same-socket and cross-socket (NUMA) so D_migrate is non-trivial.
 - Harness: `src/benchmark` counter-array style workload (`counter-array`, the
   existing `counter-proportional` with a data footprint; `--array-size`), as an
