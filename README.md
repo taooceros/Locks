@@ -1,20 +1,136 @@
-# Locks
+# Locks: service-fair delegation
 
-Research project implementing usage-fair delegation locks in Rust.
+Fairness by switching threads moves data; fairness by switching requests does
+not. Any lock that achieves service fairness by handing the lock to a different
+thread faces a forced trade-off: fairness at granularity g (maximum usage gap)
+requires switching holders at least every g of service, and every switch
+migrates the protected working set D between caches, so throughput
+<= 1/(CS + D_migrate * switch_rate). The only escape is to switch less than
+fairness demands and refuse service to over-consumers, i.e. idle with backlog
+(non-work-conserving; SCL/U-SCL lock slices and bans). CFL, ticket, FIFO-MCS sit
+on the "migrate" horn; U-SCL sits on the "idle" horn. Delegation (flat
+combining) breaks the coupling: the combiner executes every critical section,
+so changing WHO IS CHARGED costs a request handoff (~2 cache lines) independent
+of D; the scheduler (FC-PQ: usage-ordered priority queue) can select per request
+at any granularity, work-conservingly, without moving data. Predicted advantage
+grows with D/CS.
 
-## Database experiment setup
+This repository holds the Rust delegation locks (`crates/libdlock`), the
+microbenchmark CLI, C reference locks, and the UpScaleDB/redb integrations used
+to test that thesis.
 
-[The integration guide](integration/README.md) covers single-operation UpScaleDB
-synchronization integration and a patched redb whose write path is serialised by
-the delegation lock. Both preserve the original operation bodies and boundaries
-(one find/insert; one fixed-shape write transaction); they do not add batching or
-restructure the application to favor a lock. The guide separates
-correctness/smoke checks from primary/profile measurement and documents API and
-CPU/NUMA limits. Raw measurements and generated reports are not included.
+## Claims to falsify
 
-## Binary Crate (`dlock`)
+- **H1** Switching locks (MCS, ticket, CLH, CFL) lose throughput as the
+  protected working set D grows, at fixed CS length and fixed fairness.
+- **H2** U-SCL keeps fairness by idling with backlog; this is measurable as
+  idle-with-backlog time.
+- **H3** FC/FC-PQ throughput is flat in D (combiner-local data) while service
+  Jain stays >= 0.95 under 1:8 request cost heterogeneity.
+- **H4** The crossover D\* where delegation overtakes the best switching lock
+  shrinks as fairness granularity tightens.
+- **H5** In a real DB (UpScaleDB, redb) the same ordering holds once waiters
+  park instead of spin.
 
-Benchmark harness and CLI for evaluating delegation lock implementations.
+## What existing evidence says
+
+Index: [`docs/evidence/README.md`](docs/evidence/README.md). Raw data lives in
+other branches.
+
+| Verdict | Evidence |
+| --- | --- |
+| Supports (work-conservation) | U-SCL H2 reservation wait ~2.18 ms with a waiting requester vs FC-PQ ~0.6 us. |
+| Supports (work-conservation) | U-SCL backlog ~460K at 1.1x load. |
+| Supports | Hotspot, 32 workers: FC-PQ/MCS 0.743 uniform -> 1.135 hot90. |
+| Supports | redb 1/64 write mix: FC -> FC-PQ service Jain 0.891 -> 0.992 at 0.832x total records; MCS Jain 0.907. |
+| Supports | P8 fixed-work: FC 1.73x native. |
+| Does not yet support | No cache-migration counters anywhere; D_migrate is inferred, not measured. |
+| Does not yet support | CFL-local (`cfl_local`, the Rust port) is an unverified proxy for CFL and matched/beat FC at P8. |
+| Does not yet support | DLock2 waiters spin only -> 4-CPU/8-worker collapse: 0.494x and 4x CPU vs U-SCL ([finding 002](docs/findings/002-dlock2-spin-wait-oversubscription-collapse.md)). |
+| Does not yet support | FC-PQ constant tax: +28% at 1 worker, -13% vs FC at P8 with identical CPU ([finding 002](docs/findings/002-dlock2-spin-wait-oversubscription-collapse.md), [finding 003](docs/findings/003-eight-core-eight-worker-upscaledb.md)). |
+
+## Plan
+
+Ordered experiments. E0 is engineering, not results. E1 is the core figure.
+
+### E0 Prerequisites
+
+- (a) Spin-then-park waiters in `crates/libdlock/src/dlock2/fc/lock.rs` and
+  `crates/libdlock/src/dlock2/fc_pq/lock.rs`, reusing the
+  `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
+- (b) Trim the FC-PQ per-request tax: sample `__rdtscp` every k requests,
+  bound heap arity. Target: FC-PQ/FC >= 0.95 at 1 worker.
+- (c) Obtain and validate the real CFL (Park/Eom, PPoPP'24) instead of
+  `cfl_local`. Neither the `cfl` target (Rust port) nor `cflc` (local
+  fairnumas adaptation in `c/cfl/`) is a verified paper implementation.
+
+### E1 Working-set sweep (core figure)
+
+- Workload: synthetic critical section touching W cache lines,
+  W in {1, 4, 16, 64, 256, 1024, 4096}, fixed compute per CS.
+- Threads: 8/16/32, one per physical core. Request cost heterogeneity 1:8 on
+  half the threads.
+- Locks: MCS, ticket, CLH, CFL, U-SCL, FC, FC-PQ.
+- Metrics: throughput, service Jain, idle-with-backlog time, per-op L2/LLC
+  misses and HITM via `perf stat`.
+- Prediction: switching locks fall with W, FC/FC-PQ flat, U-SCL Jain high but
+  idle grows. Headline = crossover W\*.
+- Placement: same-socket and cross-socket (NUMA) so D_migrate is non-trivial.
+- Harness: `src/benchmark` counter-array style workload (`counter-array`, the
+  existing `counter-proportional` with a data footprint; `--array-size`), as an
+  `experiment.nu` group.
+
+### E2 Fairness-granularity sweep
+
+- Vary CFL/U-SCL slice length and the FC-PQ selection window.
+- Plot throughput vs achieved maximum usage gap.
+- Prediction: FC-PQ sits off the switching locks' trade-off curve.
+
+### E3 Database confirmation (after E0(a))
+
+- UpScaleDB single-operation integration with preload size (1K vs 1M records)
+  as the W knob, plus perf counters.
+- redb 1/64 write-transaction mix as the application endpoint.
+- Both via the [`integration/README.md`](integration/README.md) workflows.
+
+### E4 SCL-fidelity (only if E1-E3 hold)
+
+- Disk-backed UpScaleDB with fsync, 4 find + 4 insert on 4 CPUs, 120 s,
+  lock-opportunity accounting.
+
+## Success criteria
+
+- E1: crossover W\* exists on both same-socket and cross-socket, with ranges
+  not overlapping over >= 5 trials; FC-PQ Jain >= 0.95 at all W; U-SCL
+  idle-with-backlog > 0 where switching locks idle 0.
+- E3: the ordering from E1 reproduced in UpScaleDB and redb.
+- Kill criterion: if real CFL is flat in W on cross-socket, the thesis reduces
+  to work-conservation vs U-SCL only; record and reframe.
+
+## Non-goals
+
+- batch8 / application restructuring.
+- More NUMA/SMT/hotspot cells.
+- New third-party locks beyond those listed.
+- Energy claims.
+
+## Repository map
+
+- `crates/libdlock/` - lock implementations; `dlock2/` is primary (`dlock/` is
+  the legacy callback API, `parker/` thread parking strategies).
+- `src/` - microbenchmark CLI (`src/benchmark/`, see `src/benchmark/README.md`).
+- `c/` - C reference implementations, including `u-scl/`, `cfl/`, `shfllock/`.
+- `integration/` - UpScaleDB + redb integrations; see
+  [`integration/README.md`](integration/README.md).
+- `experiment.nu`, `profile.nu` - sweep scripts.
+- `visualization/*.py` - analysis and plotting.
+- `docs/evidence/` - index of completed studies (raw data in other branches).
+- `docs/findings/` - numbered findings.
+- `docs/related-work/` - CFL, ShflLock, Syncord, TCLocks notes.
+- `docs/archive/` - pre-thesis documents.
+- `plan/` - dated plans; [`plan/index.md`](plan/index.md).
+
+## Build and run
 
 ### Requirements
 
@@ -22,7 +138,7 @@ Benchmark harness and CLI for evaluating delegation lock implementations.
 - **GCC or Clang** (compiles C reference implementations via `build.rs`)
 - **x86_64 only** (uses `__rdtscp` for cycle-accurate timing)
 
-### Build & Run
+### Build
 
 ```bash
 cargo build --release
@@ -51,56 +167,41 @@ GLOBAL OPTIONS:
     -v, --verbose
 ```
 
-### DLock2 Experiments
+### DLock2 experiments
 
-- `counter-proportional` — Shared counter with configurable CS length (`--cs`, `--non-cs`)
-- `fetch-and-multiply` — Multiply on shared counter
-- `queue` — Enqueue/dequeue on shared queue
-- `priority-queue` — Insert/extract-min on shared PQ
+- `counter-proportional` - shared counter with configurable CS length (`--cs`, `--non-cs`)
+- `counter-array` - counter over a protected array; each CS iteration touches a distinct `u64` (`--array-size`, `--random-access`)
+- `fetch-and-multiply` - multiply on shared counter
+- `queue` - enqueue/dequeue on shared queue
+- `priority-queue` - insert/extract-min on shared PQ
+- `hash-map` - get/put/scan mix with scanner threads
 
-### DLock2 Lock Targets (`--lock-targets`)
+### DLock2 lock targets (`--lock-targets`)
 
-`fc`, `fc-ban`, `cc`, `cc-ban`, `dsm`, `fc-sl`, `fc-pq-b-tree`, `fc-pq-b-heap`, `spin-lock`, `mcs`, `mutex`, `uscl`, `fc-c`, `cc-c`, `shfl-lock`, `aqs-c`
+`fc`, `fc-ban`, `cc`, `cc-ban`, `dsm`, `fc-sl`, `fc-pq-b-tree`, `fc-pq-b-heap`,
+`mutex`, `spin-lock`, `uscl`, `fc-c`, `cc-c`, `mcs`, `shfl-lock`, `shfl-lock-c`,
+`cfl`, `cflc`, `ticket`, `clh`, `pthread-mutex`
 
 ### Examples
 
 ```bash
 cargo run --release -- d-lock2 counter-proportional --cs 1000,3000 --non-cs 0
 cargo run --release -- d-lock2 counter-proportional --lock-targets fc,fc-pq-b-tree --cs 1000 -t 4,8,16
+cargo run --release -- d-lock2 counter-array --lock-targets mcs,cfl,uscl,fc,fc-pq-b-heap --cs 100 --array-size 4096 -t 8,16,32
 cargo run --release -- --help
 ```
 
-## Crate Structure
+### Output
 
-```
-src/                            # Binary crate (CLI, benchmarks)
-├── main.rs
-├── command_parser.rs
-├── command_parser/
-│   ├── experiment.rs
-│   └── lock_target.rs
-└── benchmark/                  # See src/benchmark/README.md
+Arrow IPC `.arrow` files written to `<output_path>/<lock_name>/`. Each file
+contains per-thread records: loop counts, latencies, hold times, JFI, combiner
+stats.
 
-crates/libdlock/                # Library crate (lock implementations)
-├── src/
-│   ├── dlock2/                 # Function-delegate API (primary)
-│   ├── dlock/                  # Callback-based API (legacy)
-│   └── parker/                 # Thread parking strategies
-└── binding/                    # C FFI wrapper headers
-
-c/                              # C reference implementations
-visualization/                  # Jupyter notebooks & plots
-```
-
-## Output
-
-Arrow IPC `.arrow` files written to `<output_path>/<lock_name>/`. Each file contains per-thread records: loop counts, latencies, hold times, JFI, combiner stats.
-
-## Justfile Shortcuts
+### Justfile shortcuts
 
 ```bash
 just build                    # cargo build --release
 just run2                     # d-lock2 counter-proportional --cs 1000,3000 --non-cs 0
-just run2 "fc,fcpq"          # specific lock targets
+just run2 "fc,fcpq"           # specific lock targets
 just run1                     # d-lock1 variant
 ```

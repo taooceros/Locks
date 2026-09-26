@@ -22,7 +22,7 @@
 #   group_delegation_vs_shfl      # Delegation vs ShflLock head-to-head
 #   group_factor_analysis         # Factor analysis: FC-PQ overhead decomposition
 #
-# See docs/EXPERIMENT_PLAN.md for detailed experiment specs.
+# See README.md (research plan) and docs/archive/EXPERIMENT_PLAN.md (historical spec).
 
 cargo build --release
 
