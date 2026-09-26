@@ -722,7 +722,7 @@ delegation locks.
 Initial proposal on 2026-09-23; source baseline `56a02ab`, isolated branch
 `research/logp-analysis`. The user subsequently authorized developing a
 publication analysis section; the current scope is recorded in the
-[Publication Analysis Plan](../2026-09-23/logp-publication-analysis.md).
+[Publication Analysis Plan](../../plan/2026-09-23/logp-publication-analysis.md).
 The proposal below is retained as background. No production lock code is changed.
 
 **Recommendation:** use a LogP-inspired communication model plus a separate
