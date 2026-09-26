@@ -9,6 +9,12 @@
     just
     uv
     numactl
+    autoconf
+    automake
+    libtool
+    gnumake
+    git
+    util-linux
     linuxPackages.perf
   ];
 
@@ -18,6 +24,7 @@
     uv.enable = true;
     venv.requirements = ''
       pyarrow
+      matplotlib==3.11.2
     '';
   };
 

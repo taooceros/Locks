@@ -40,9 +40,10 @@ See [BUILD.md](BUILD.md) for all commands and troubleshooting.
 
 | Document | Purpose |
 |----------|---------|
-| [RESEARCH_PLAN.md](RESEARCH_PLAN.md) | Thesis, contributions, positioning vs CFL/Syncord/TCLocks/U-SCL, evaluation plan, paper outline |
+| [README.md](README.md) | Thesis and research plan |
 | [TODO.md](TODO.md) | Phased roadmap: metrics, tradeoff validation, combiner study, baselines, applications, writing |
-| [STATUS_REPORT.md](STATUS_REPORT.md) | Known bugs, hard blockers, algorithm improvements, venue strategy |
+| [docs/evidence/README.md](docs/evidence/README.md) | Index of completed experiments and where raw data lives |
+| [docs/archive/README.md](docs/archive/README.md) | Pre-thesis documents |
 
 ## Architecture Specs
 

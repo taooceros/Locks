@@ -70,6 +70,7 @@ where
         let thread_data = self.local_node.get_or(|| ThreadData {
             nodes: Default::default(),
             toggle: AtomicU8::new(0),
+            #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0.into(),
         });
         let mut aux = 0;

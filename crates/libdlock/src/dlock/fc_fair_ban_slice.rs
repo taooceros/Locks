@@ -137,14 +137,20 @@ impl<T, P: Parker> FcFairBanSliceLock<T, RawSpinLock, P> {
                 //     return;
                 // }
 
-                combine_end = end;
+                #[cfg(feature = "combiner_stat")]
+                {
+                    combine_end = end;
+                }
             }
 
             current_ptr = current.next;
         }
 
         combiner_node.combiner_time = already_work;
-        combiner_node.combiner_time_stat += combine_end - combine_begin;
+        #[cfg(feature = "combiner_stat")]
+        {
+            combiner_node.combiner_time_stat += combine_end - combine_begin;
+        }
 
         unsafe {
             let avg_combiner_slice = &mut *self.avg_combiner_slice.get();

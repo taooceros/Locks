@@ -34,6 +34,7 @@ impl<T, P: Parker> Node<T, P> {
             next: null_mut(),
             banned_until: 0,
             combiner_time: 0,
+            #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
     }

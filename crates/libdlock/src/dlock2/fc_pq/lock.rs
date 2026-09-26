@@ -1,3 +1,6 @@
+#[cfg(not(miri))]
+use std::arch::x86_64::{__rdtscp, _mm_prefetch, _MM_HINT_T0};
+
 use derivative::Derivative;
 use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
@@ -5,7 +8,6 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 use std::thread::current;
 use std::{
-    arch::x86_64::{__rdtscp, _mm_prefetch, _MM_HINT_T0},
     cell::SyncUnsafeCell,
     sync::atomic::{AtomicPtr, Ordering::*},
 };
@@ -26,12 +28,46 @@ use self::buffer::ConcurrentRingBuffer;
 
 use super::node::Node;
 
+// Miri cannot execute x86 timing/prefetch intrinsics. These substitutes are
+// only for exercising the real queue/ownership path under Miri, not for
+// validating production timing or priority decisions.
+#[cfg(miri)]
+#[inline(always)]
+fn timestamp(_aux: &mut u32) -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TICKS: AtomicU64 = AtomicU64::new(0);
+    TICKS.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(not(miri))]
+#[inline(always)]
+fn timestamp(aux: &mut u32) -> u64 {
+    // SAFETY: aux is a valid writable u32; production targets x86_64.
+    unsafe { __rdtscp(aux) }
+}
+
+#[inline(always)]
+fn prefetch_node<I>(node: &Node<I>) {
+    #[cfg(not(miri))]
+    // SAFETY: the node allocation stays live for the duration of this
+    // combiner pass. Prefetch does not read or mutate its payload.
+    unsafe {
+        _mm_prefetch(node.data.get().cast::<i8>(), _MM_HINT_T0);
+    }
+    #[cfg(miri)]
+    let _ = node;
+}
+
 /// Maximum number of combining passes a node may wait before its usage is
 /// clamped to the current queue minimum.  Prevents unbounded starvation under
 /// adversarial arrival patterns where one long-CS thread accumulates high usage
 /// and is perpetually deprioritized by a stream of short-CS newcomers.
 const STARVATION_THRESHOLD: u64 = 8;
 
+/// A queue entry borrows a ThreadLocal node. Its internally manufactured
+/// `'static` lifetime is valid only while its owning FCPQ exists: the sealed
+/// built-in queues retain entries within the lock, and all calls must return
+/// before the lock can be destroyed.
 #[derive(Derivative, Debug)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct UsageNode<'a, I> {
@@ -72,6 +108,7 @@ where
 {
     combiner_lock: CachePadded<L>,
     delegate: F,
+    // Dropped before local_node, after all lock() calls have returned.
     job_queue: SyncUnsafeCell<PQ>,
     waiting_nodes: ConcurrentRingBuffer<(AtomicPtr<Node<I>>, u64), 64>,
     data: SyncUnsafeCell<T>,
@@ -114,7 +151,7 @@ where
         ));
     }
 
-    fn push_if_unactive(&self, node: &mut Node<I>) {
+    fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(Acquire) {
             return;
         }
@@ -124,15 +161,13 @@ where
 
     fn combine(&self) {
         let mut aux: u32 = 0;
-        let mut begin: u64;
-
-        unsafe {
-            begin = __rdtscp(&mut aux);
-        }
+        #[cfg(feature = "combiner_stat")]
+        let pass_begin = timestamp(&mut aux);
 
         const H: usize = 64;
 
-        // only one thread would combine so this is safe
+        // SAFETY: only the combiner mutex holder accesses the queue and
+        // aggregate counters; no other thread borrows these interior values.
         let job_queue: &mut PQ = unsafe { &mut *self.job_queue.get() };
 
         // Advance the combining pass counter (combiner-only, no atomics needed)
@@ -143,6 +178,8 @@ where
         };
 
         if !self.waiting_nodes.empty() {
+            // SAFETY: combiner exclusion admits one iterator; each producer
+            // release-publishes its value before the iterator takes that value.
             let iterator = unsafe { self.waiting_nodes.iter() };
 
             let size = iterator.size_hint();
@@ -152,6 +189,9 @@ where
             for (node, id) in iterator {
                 count += 1;
                 unsafe {
+                    // SAFETY: the ring's release/acquire transfer publishes a
+                    // stable ThreadLocal node; the sealed queues cannot leak it.
+                    // The lock is dropped only after every call has returned.
                     let node = &*node.load_acquire();
                     let mut raw_usage = node.usage.load_acquire();
                     // Newcomer initialization: if usage is 0 and we have history,
@@ -174,6 +214,9 @@ where
 
         let mut buffer = ConstGenericRingBuffer::<UsageNode<I>, 4>::new();
 
+        // SAFETY: combiner exclusion permits one queue/state writer; acquire
+        // of complete=false observes each owner's initialized payload. Each
+        // input is moved once, complete=true release returns the result.
         unsafe {
             for _ in 0..H {
                 let current = job_queue.pop();
@@ -201,19 +244,19 @@ where
                     // latency of loading the next request's input from a remote
                     // core's cache line.
                     if let Some(next) = job_queue.peek() {
-                        _mm_prefetch(next.node.data.get().cast::<i8>(), _MM_HINT_T0);
+                        prefetch_node(next.node);
                     }
 
                     // alternatively we can potentially save one __rdtscp by using `end` here
                     // which would result in a slightly inaccurate usage
-                    begin = __rdtscp(&mut aux);
+                    let begin = timestamp(&mut aux);
 
                     node.data.get().write(MaybeUninit::new((self.delegate)(
                         self.data.get().as_mut().unwrap_unchecked(),
                         node.data.get().read().assume_init(),
                     )));
 
-                    let end = __rdtscp(&mut aux);
+                    let end = timestamp(&mut aux);
                     let cs_time = end - begin;
 
                     current.usage += cs_time;
@@ -257,9 +300,12 @@ where
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
-            let end = __rdtscp(&mut aux);
+            let end = timestamp(&mut aux);
 
-            (*self.local_node.get().unwrap().get()).combiner_time_stat += end - begin;
+            // SAFETY: this ThreadLocal statistic is only written/read by its
+            // owner, even while other combiners retain shared &Node in the PQ.
+            let node = &*self.local_node.get().unwrap().get();
+            *node.combiner_time_stat.get() += end - pass_begin;
         }
     }
 }
@@ -275,9 +321,12 @@ where
     fn lock(&self, data: I) -> I {
         let node = self.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
 
-        let node = unsafe { &mut *node.get() };
-
-        node.data = SyncUnsafeCell::new(MaybeUninit::new(data));
+        // SAFETY: the ThreadLocal allocation stays stable until quiescent drop.
+        // Other combiners can hold &Node across calls. Only this owner
+        // initializes its payload, after taking the previous completed result;
+        // release below publishes the new input without borrowing &mut Node.
+        let node = unsafe { &*node.get() };
+        unsafe { node.data.get().write(MaybeUninit::new(data)) };
         node.complete.store(false, Release);
 
         'outer: loop {
@@ -309,11 +358,18 @@ where
             }
         }
 
+        // SAFETY: acquire of complete=true gives this owner its initialized
+        // result, read once before it can publish another request.
         unsafe { node.data.get().read().assume_init() }
     }
 
     #[cfg(feature = "combiner_stat")]
     fn get_combine_time(&self) -> Option<u64> {
-        unsafe { self.local_node.get().map(|x| (*x.get()).combiner_time_stat) }
+        // SAFETY: only the current ThreadLocal owner accesses this cell.
+        unsafe {
+            self.local_node
+                .get()
+                .map(|x| *(*x.get()).combiner_time_stat.get())
+        }
     }
 }

@@ -1,15 +1,9 @@
 /*
- * CFL — Compact Fair Lock (Manglik & Kim, PPoPP'24)
- *
- * Adapted from the original fairnumas implementation:
- *   https://github.com/rs-ifl/CFL
- *
- * Original code: MIT License, Copyright (c) 2016 Hugo Guiroux.
- * Stripped: COND_VAR, PAPI, LiTL interpose, debug infrastructure.
- * Kept: core CFL algorithm with usage-fair (vLHT-based) queue shuffling.
- *
- * The algorithm in shuffle_waiters(), __cfl_lock(), and __cfl_unlock()
- * is unmodified from the original fairnumas.c.
+ * Local CFL-family adaptation of fairnumas; NOT verified as the paper CFL.
+ * See https://github.com/jonggyup/Completely-Fair-Locking for the author's
+ * separate implementation. This local version strips interposition/PAPI and
+ * changes topology detection and fixed-array sizes. Do not silently label it
+ * a faithful published baseline.
  */
 
 #include "cfl.h"

@@ -28,6 +28,7 @@ impl<T, P: Parker> Node<T, P> {
             usage: 0,
             f: CachePadded::new(None),
             parker: Default::default(),
+            #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
     }

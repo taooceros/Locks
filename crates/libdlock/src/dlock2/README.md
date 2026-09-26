@@ -53,9 +53,16 @@ Wrapped in `c_binding/`: `CFlatCombining<T, F, I>`, `CCCSynch<T, F, I>`.
 
 ## FC-PQ: Key Algorithm
 
-`FCPQ<T, I, PQ, F, L>` is generalized over the priority queue type:
-- `BTreeSet<UsageNode>` — O(log N) insert/pop-min
-- `BinaryHeap<Reverse<UsageNode>>` — O(log N) insert/pop-min
+`FCPQ<T, I, PQ, F, L>` accepts only the library's sealed priority-queue adapters:
+- `BTreeSet<UsageNode<'static, I>>` — O(log N) insert/pop-min
+- `BinaryHeap<Reverse<UsageNode<'static, I>>>` — O(log N) insert/pop-min
+Downstream safe custom `SequentialPriorityQueue` implementations are deliberately
+forbidden: the queue holds references into per-lock thread-local nodes, and a
+queue that copies an entry outside the lock could dereference it after drop.
+The apparent `'static` on an entry is internal to the lock, not a promise to
+users. Stop admissions and wait for **every** `lock()` call to return before
+destroying a lock; completion of a delegate alone is not quiescence. Recursion
+on the same lock and unwinding out of a delegate are unsupported.
 
 **Combining loop** (`combine()`):
 1. Drain `waiting_nodes` ring buffer into `job_queue`, initializing newcomers to running-average usage
@@ -63,7 +70,9 @@ Wrapped in `c_binding/`: `CFlatCombining<T, F, I>`, `CCCSynch<T, F, I>`.
 3. Repeat up to H=64 times per combining pass
 4. Completed nodes (already served but not yet re-requested) are buffered and eventually deactivated
 
-**Fairness bound**: `|U_i - U_j| <= C_max` where `C_max` is the maximum critical section duration.
+**Fairness scope**: accumulated usage drives selection among scheduler-visible
+entries; this alone does not bound request latency or realized service shares.
+Publication, eligibility, combining-pass budgets and callback duration also matter.
 
 ## Common Structure
 
@@ -72,3 +81,13 @@ Each delegation lock module typically contains:
 - `node.rs` — Per-thread node struct (stored in `ThreadLocal<SyncUnsafeCell<Node<I>>>`)
 
 Nodes contain: request data (`MaybeUninit<I>`), completion flag (`AtomicBool`), usage counter (`AtomicU64`), active flag.
+
+FC and FC-PQ publish requests through a persistent interior-mutable payload
+cell and release/acquire completion flag. The requester owns the input before
+publication and the returned output after completion; combiners can still hold
+shared references to the node while the requester starts a later request.
+The node's stable address is retained until quiescent lock destruction. Only
+the node's thread-local owner reads/writes its combining-time statistic; other
+threads may hold shared references to the containing node. The FC-PQ admission
+ring likewise shares entries across producer/consumer, with the valid flag
+transferring ownership of the slot's interior-mutable value.

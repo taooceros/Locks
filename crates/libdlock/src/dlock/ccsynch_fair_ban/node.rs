@@ -29,6 +29,7 @@ impl<T, P: Parker> Node<T, P> {
             completed: AtomicBool::default(),
             next: AtomicPtr::default(),
             current_cs: 0,
+            #[cfg(feature = "combiner_stat")]
             combiner_time_stat: 0,
         }
     }

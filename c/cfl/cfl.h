@@ -1,13 +1,8 @@
 /*
- * CFL — Compact Fair Lock (Manglik & Kim, PPoPP'24)
- *
- * Adapted from the original fairnumas implementation:
- *   https://github.com/rs-ifl/CFL
- *
- * Original code: MIT License, Copyright (c) 2016 Hugo Guiroux.
- * This adaptation strips COND_VAR, PAPI, LiTL interpose, and debug
- * infrastructure, keeping only the core CFL algorithm with usage-fair
- * (vLHT-based) queue shuffling.
+ * Local CFL-family fairnumas adaptation, not a verified paper implementation.
+ * Original fairnumas source: MIT License, Copyright (c) 2016 Hugo Guiroux.
+ * Strips COND_VAR, PAPI, LiTL interpose and debug infrastructure.
+ * Bridge comparisons identify the Rust port as cfl_local.
  */
 #ifndef __CFL_H__
 #define __CFL_H__
