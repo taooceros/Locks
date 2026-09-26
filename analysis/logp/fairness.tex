@@ -1,0 +1,232 @@
+% Fairness metrics, proofs, and implementation obligations.
+\section{Fairness analysis}
+\label{sec:fairness}
+This analysis asks which service metric is equalized, among which clients,
+and with what bound on service disparity or competing selections. Its inputs
+are the selectable set, admission/initialization rules, the selection rule,
+and service charges. It uses no LogP parameters, cache-residency assumption,
+throughput estimate, or batch-speedup result. For a fixed selection sequence
+and fixed charge increments, changing only its elapsed execution speed does
+not change the service-credit guarantee.
+
+\subsection{Service metric and eligibility contract}
+Let $\mathcal A$ be a \emph{fixed} cohort eligible at every selection boundary,
+$U_i$ its cumulative analyzed service, and $D_0=\max_i U_i(0)-\min_i U_i(0)$.
+An analyzed increment is nonnegative and at most $C_{\max}$. This metric may
+be scheduler-billed service or useful protected service, but they must not be
+interchanged. Actual synchronous callers can leave and rejoin eligibility;
+the fixed-cohort assumption is therefore a refinement obligation, not a
+synonym for high contention.
+
+\subsection{Service-spread and accounting-error bounds}
+\begin{theorem}[Approximate-min service bound]
+\label{thm:spread}
+If every selected client $i$ satisfies
+$U_i\le\min_{j\in\mathcal A}U_j+\delta$ for fixed $\delta\ge0$, and no credit
+is reset, then at every service boundary
+\begin{equation}
+ \max_i U_i-\min_i U_i\le B_U
+   :=\max\{D_0,\delta+C_{\max}\}.\label{eq:spread}
+\end{equation}
+\end{theorem}
+\begin{proof}
+Assume the prior minimum is $m$ and spread at most $B_U$. Unchanged credits
+remain in $[m,m+B_U]$. The selected credit becomes at most
+$m+\delta+C_{\max}\le m+B_U$ and cannot decrease below $m$.
+The new minimum cannot decrease, establishing the invariant by induction.
+\end{proof}
+Exact min gives $\delta=0$; a fixed eligibility window gives its window width.
+For weights $w_i>0$, use $U_i=S_i/w_i$ and bound increments by
+$\max_i c_{i,\max}/w_i$. This is a mathematical extension, not a claim that the
+current FC-PQ implements weighted service or FC-EW.
+
+\begin{corollary}[Bounded accounting error]
+\label{cor:error}
+Suppose the selector instead uses $V_i=U_i+e_i$ with
+$\max_i e_i-\min_i e_i\le E_c$ at each selection, and chooses within $\delta$
+of the minimum $V$. Equation~\eqref{eq:spread} holds with $\delta+E_c$ in
+place of $\delta$.
+\end{corollary}
+\begin{proof}
+For every $j$, $U_i+e_i\le U_j+e_j+\delta$, hence
+$U_i\le U_j+\delta+E_c$. Apply Theorem~\ref{thm:spread}.
+\end{proof}
+A common credit offset is harmless. Small \emph{per-operation} timing errors
+are not necessarily harmless: their cumulative pairwise discrepancy may
+increase with unequal operation counts, so they do not establish a constant
+$E_c$ for an unbounded execution.
+
+\subsection{Billed service versus useful service}
+\begin{proposition}[Billed fairness can bias useful service]
+\label{prop:bias}
+For fixed useful cost $c_i>0$ and fixed extra charge $\theta_i\ge0$, let each
+operation add $q_i=c_i+\theta_i$ to billed credit. If all clients remain
+backlogged, their cumulative billed credits diverge to infinity, and their
+billed-credit differences remain bounded, their asymptotic useful-service
+fractions are
+\begin{equation}
+ f_i=\frac{c_i/(c_i+\theta_i)}{\sum_j c_j/(c_j+\theta_j)}.\label{eq:bias}
+\end{equation}
+\end{proposition}
+\begin{proof}
+With $m_i$ completions, billed service is $m_iq_i$ and useful service is
+$m_ic_i=(c_i/q_i)(m_iq_i)$. Bounded differences and divergence make the billed
+service ratios tend to one. Normalize useful services by their sum.
+\end{proof}
+For $(c_1,c_2)=(1,9)$ and $\theta_1=\theta_2=1$, equal billed service gives
+useful shares $(5/14,9/14)$, not $(1/2,1/2)$. This is an exact synthetic
+example, not an estimated bias of the implementation. FC-PQ's outer timer
+includes input/result handling and differs from the benchmark's inner
+\texttt{hold\_time}; the distinction must be calibrated or explicitly chosen
+as the fairness objective.
+
+\paragraph{What JFI can establish.}
+For positive mean cumulative service $\mu$ and variance $\sigma^2$, Jain's
+index is $J=\mu^2/(\mu^2+\sigma^2)$. A range bound $B_U$ implies
+$\sigma^2\le B_U^2/4$, and thus
+$J\ge [1+B_U^2/(4\mu^2)]^{-1}$.
+To see the variance bound, for values in $[m,M]$ expand
+$(U-m)(M-U)\ge0$ and average to get
+$\sigma^2\le(\mu-m)(M-\mu)\le(M-m)^2/4$.
+The converse fails: $(U_1,U_2)=(k^2,k^2+k)$ has unbounded gap $k$ yet $J\to1$.
+Windowed delivered service is a difference of cumulative values; if both
+endpoints have bounded spread $B_U$, a per-pair window gap can be $2B_U$.
+Do not attach this result to arbitrary newcomers or to a different charge
+metric merely because a final JFI is near one.
+
+\subsection{Waiting measured in competing services}
+\begin{theorem}[Service volume before a visible request]
+\label{thm:waiting}
+Fix a target $i$ that remains eligible and unserved with credit $u=U_i$.
+Keep the cohort fixed and the approximate-min condition of
+Theorem~\ref{thm:spread}. If every service charge is at least $c_{\min}>0$,
+the number of competing services before $i$ is selected is at most
+\begin{equation}
+ K_i=\sum_{j\ne i}\max\!\left\{0,
+ \left\lfloor\frac{u+\delta-U_j}{c_{\min}}\right\rfloor+1\right\}.
+ \label{eq:waiting}
+\end{equation}
+Their total charged service is at most
+$\sum_{j\ne i}((u+\delta-U_j)_++C_{\max})$.
+\end{theorem}
+\begin{proof}
+Before a competing service, approximate-min implies its current credit is
+at most $u+\delta$, because $i$ remains eligible. After $k-1$ services of
+$j$, its credit is at least $U_j+(k-1)c_{\min}$. Combining inequalities bounds
+$k$ by the corresponding summand. Its final service can overshoot the
+threshold by at most $C_{\max}$, giving the volume bound. Summing accounts
+for every non-target selection; this also tolerates adversarial ties.
+\end{proof}
+If selection continues, the target must eventually be chosen. Zero-charge
+operations without a tie-progress condition can defeat a selection-count
+argument. This theorem concerns competing service, not wall-clock suspension
+or request-response time. Translating it into elapsed time requires a
+separate set of progress and timing assumptions.
+
+\subsection{Applying the obligations to FC-PQ}
+FC-PQ drains announcements once, then makes up to $H=64$ heap/tree pop
+attempts. A completed entry consumes a pop but no service. It is temporarily
+buffered or deactivated; active callers can republish without entering the
+ring. Thus exact-min is with respect to the current selectable queue, not
+automatically every logically pending requester. The code's attempted
+starvation clamp is applied \emph{after} removing the minimum. Since the next
+minimum is no smaller, $\min(\text{popped},\text{next})$ leaves credit unchanged.
+The threshold provides no extra selection guarantee.
+
+\paragraph{Admission counterexample.}
+A zero-credit newcomer receives total charged service divided by total
+completions: a mean \emph{per-operation} charge, not current cumulative virtual
+time. After unit-cost history, an old pending client may have credit 1000
+while the newcomer begins at 1. A repeatedly resubmitting newcomer remains
+strictly preferred for 999 unit services until it ties the old credit.
+Even the maximum 64 completions per pass requires at least 16 passes;
+completed-node pops can require more. The post-pop threshold of eight cannot
+promote the unpopped old client. This abstract schedule is consistent with
+the selection rule; it is not a recorded Rust execution. Increasing the
+history makes bypass arbitrarily large at fixed population and request cost.
+It refutes a history-independent admission/response bound, not the correctly
+scoped fixed-cohort theorem with its initial spread $D_0$.
+
+\begin{proposition}[Announcement visibility in service units]
+\label{prop:visibility}
+Let $R\ge1$ and $H\ge0$ be integer budgets and $q\ge0$ a ticket count.
+Suppose each FIFO drain consumes the first $\min(R,\text{queued tickets})$
+reserved announcements, waiting for their publication if necessary, and at
+most $H$ services occur between drains. Consider an announcement reserved
+just after the current drain, with $q$ earlier unconsumed tickets ahead of it.
+If drains continue and reserved tickets are eventually published/consumed
+in order, the announcement is discovered after at most
+\begin{equation}
+ H\left\lceil\frac{q+1}{R}\right\rceil
+ \label{eq:visibility}
+\end{equation}
+intervening service completions. This is not a wall-time guarantee.
+\end{proposition}
+\begin{proof}
+Its ticket is in the $\lceil(q+1)/R\rceil$th future drain. There is at most
+one $H$-service segment before each such drain, including the remainder of
+the current pass. Later FIFO reservations cannot overtake the ticket.
+\end{proof}
+For FC-PQ, $R=H=64$ but these are different limits: ring admission versus PQ
+pop attempts. The queue itself can contain more than 64 clients. A producer
+reserves a slot before publishing its valid flag, and the combiner spins
+until that flag appears. Arbitrarily delayed publication makes wall delay
+unbounded even with few or zero intervening completions. Active-node reuse
+and buffered reactivation are separate visibility paths, not covered by
+Equation~\eqref{eq:visibility}. Together these observations explain why a
+budget, visibility bound, usage bound, and response bound are distinct.
+
+\subsection{Fairness of the implemented lock families}
+\label{sec:fairness-instances}
+Table~\ref{tab:fairness} compares selection and accounting contracts only.
+The source evidence is shared with the implementation appendix, but no
+communication cost or throughput ranking is used to infer these guarantees.
+
+\begin{table*}[t]
+\centering\small
+\caption{Fairness comparison only. A policy description is not a proved
+service bound; every conclusion is restricted to the stated metric,
+eligible cohort, and progress assumptions.}
+\label{tab:fairness}
+\begin{tabular}{@{}P{0.14\textwidth}P{0.33\textwidth}P{0.47\textwidth}@{}}
+\toprule
+Family & Selection/admission contract & Service guarantee or missing obligation \\
+\midrule
+FC & Scan order over published active nodes & Scan order alone supplies no bounded cumulative usage gap for heterogeneous service costs. \\
+FC-Ban / CC-Ban & Eligibility filtering at the combiner versus delay before enqueue & Neither penalty rule is proved here to implement approximate-min service. Define the eligible set and charge metric separately for each path. \\
+FC-PQ heap/tree & Minimum recorded credit in the currently selectable PQ & Fixed-cohort theorem is conditional on continuous selectability and bounded charges. Newcomer initialization, reactivation, and the inert clamp prevent an unconditional dynamic-arrival bound. \\
+FC-SL & Ordered SkipSet with distinct publication and charging boundaries & Do not transfer FC-PQ's admission proof. Shared non-atomic counters are a correctness blocker, not a bounded accounting error. \\
+CC / DSM & Linked FIFO combining & FIFO service order is not equal cumulative service. Progress through unpublished links is an additional obligation. \\
+MCS / CLH / Ticket & Ordered queue or ticket acquisition & With continuing progress, acquisition order still does not equalize heterogeneous held service. No min-credit theorem follows from FIFO alone. \\
+Spin / Mutex & Barging or runtime-specific acquisition & No usage-fair selection theorem is supplied by these interfaces; runtime progress must be specified independently. \\
+Shfl / CFL & Queue reshaping; CFL accounts per core/NUMA node & Locality order and accounting domains differ from per-requester service. Do not transfer an FC-PQ $C_{\max}$ bound by analogy. \\
+U-SCL & Slice admission with held-time and weight-based billing & Its actual admission and integer-weight charge require a separate metric/progress argument, not inheritance of the PQ theorem. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Acquisition order is not usage fairness.}
+For fixed useful costs $c_i,c_j$, a cyclic schedule serving each client once
+per round yields a cumulative service gap $r|c_i-c_j|$ after $r$ rounds from
+equal initial service. Thus even repeated equal acquisition counts need
+not bound usage disparity. This argument uses no machine-speed assumption.
+
+\subsection{Fairness validation and limits}
+\label{sec:fairness-validation}
+The artifact's \src{spread}, \src{accounting_error},
+\src{waiting_bound}, \src{charge_bias}, and
+\src{announcement_visibility} checks exercise the stated invariants and
+service-count arguments. Counterexamples challenge dynamic-admission,
+clamp, zero-charge progress, and final-JFI claims. These finite checks
+supplement the proofs; none certifies an executed Rust trace or memory safety.
+
+Implementation refinement must track invocation, publication and selection
+visibility, cohort entry/exit, initial credit, each billed increment, and
+useful protected service separately. Test cumulative and windowed service
+gaps, rather than treating high final JFI or high throughput as sufficient.
+The fixed-additive-charge model predicts unequal useful-service fractions
+despite bounded billed-credit spread; its magnitude in the implementation
+depends on the actual charge boundary, not on a synthetic numerical example.
+No hardware cost calibration establishes continuous eligibility or correct
+accounting. Dynamic membership needs its own service contract before any
+fixed-cohort theorem can be applied.

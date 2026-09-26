@@ -2,6 +2,12 @@
 
 Date: 2026-03-23
 
+Analysis update: 2026-09-23 — see [LogP analysis proposal](#logp-analysis-proposal).
+This update analyzes the implemented locks; it does not approve or implement
+FC-EW or the other algorithm changes below. Earlier unconditional fairness
+claims in this plan must be read with the cohort and accounting assumptions
+specified in the analysis.
+
 ## Goal
 
 Improve the current fairness algorithm without expanding the project into too
@@ -708,3 +714,387 @@ If the plan succeeds, the story improves:
 That is a stronger algorithmic agenda than "more lock variants." It turns the
 project from a set of fairness tweaks into a scheduling framework for
 delegation locks.
+
+## LogP Analysis Proposal
+
+### Status and Scope
+
+Initial proposal on 2026-09-23; source baseline `56a02ab`, isolated branch
+`research/logp-analysis`. The user subsequently authorized developing a
+publication analysis section; the current scope is recorded in the
+[Publication Analysis Plan](../2026-09-23/logp-publication-analysis.md).
+The proposal below is retained as background. No production lock code is changed.
+
+**Recommendation:** use a LogP-inspired communication model plus a separate
+non-preemptive scheduling model. The useful result is a conditional crossover
+criterion and a scoped fairness theorem, not a claim that fairness is free.
+Analyze the implemented DLock2 FC, FC-PQ, FC-Ban, CC/CC-Ban, and handoff baselines
+first. FC-EW, weights, slicing, and dedicated-server variants are extensions,
+not assumptions about the current implementation.
+
+### Model Boundary: What LogP Does and Does Not Supply
+
+Classical LogP [1] describes small-message communication with latency bound
+`L`, processor send/receive overhead `o`, minimum send/receive separation `g`,
+and `P` processors. `o` is time during which the processor cannot do other
+work. `L` is an upper bound absent stalls; the paper's runtime analysis uses
+`L` per message. Under that convention an isolated one-way delivery costs
+`L + 2o`; independent messages can overlap latencies. The bottleneck endpoint's
+gap, not the sum of every message's `L`, constrains sustained throughput.
+At most `ceil(L/g)` messages may be in flight from any processor or to any
+processor; sends stall when that capacity would be exceeded.
+
+For these shared-memory locks, a cache-line coherence transaction is only an
+*analogy* to a message. A load hitting a spinning thread's private cache is not
+a fresh message; ownership acquisition, invalidation, forwarding, and refill
+may require several transactions. We must not assign one `L` to every atomic
+instruction or assume a completion flag costs exactly one network message.
+
+The original paper does discuss implicit messages for remote shared-memory
+references, but does not model hardware cache-coherence states or cache
+capacity. A closer precedent for the required adaptation is Ramos and
+Hoefler's cache-coherent communication model [3]; its architecture-specific
+constants must not be transferred to this machine. LogGP [2] supplies the
+long-message extension, not a ready-made cache-line handoff model.
+
+Use effective parameters indexed by transaction type and topology:
+`L_t`, `o_t`, `g_t` for same-socket/cross-socket reads, ownership transfers, and
+contended RMWs. These are an explicit adaptation, not vanilla homogeneous LogP.
+`P` is the number of hardware execution/communication endpoints; `N` is the
+number of contending application threads. SMT and oversubscription need
+separate treatment. Start with pinned, non-preempted workers, one lock, one
+outstanding request per worker, finite non-blocking delegates, and a warmed
+working set. Then relax those assumptions.
+
+Keep protected-data movement `M(W, topology, reuse)` explicit, with `W` the
+actual lines touched/reused rather than the allocated object size. For
+independent pipelined line transfers, a candidate fit is
+`d + (W - 1) gamma` for `W >= 1`, where `d` is effective transaction latency
+and `gamma` effective issue/transfer spacing. A dependent pointer chain can
+instead cost approximately `W d`. Neither is a universal coherence theorem;
+finite outstanding capacity and bandwidth constrain the first fit. Let
+`M(0) = 0`. LogGP's extra long-message bandwidth parameter is useful only if
+large contiguous payload transfers actually justify that abstraction.
+
+Other necessary parameters are delegate service costs `C_i`, requester
+noncritical work `Z_i`, request/result footprint, pending queue size `n`,
+effective completed batch size `b`, and scheduler/metadata working-set size.
+The combiner's data may spill beyond L1; delegation preserves executor
+identity, not guaranteed L1 residency. Request inputs and scheduler metadata
+still move, and the combiner itself can change.
+
+### Source-Grounded Event Graph
+
+Represent each operation as publication -> discovery -> scheduling -> delegate
+execution -> completion publication -> requester return. Record executor
+election/handoff and protected-data acquisition at their actual positions.
+Overlap independent requests, but preserve the total order of delegates.
+This performance abstraction assumes a correct synchronization protocol; it
+is not a linearizability or Rust memory-model proof.
+
+The most important implementation details are:
+
+| Path | Actual behavior and modeling consequence |
+|---|---|
+| FC-PQ publication | `fc_pq/lock.rs:109-123,275-309`: requester writes input/clears completion; only inactive nodes enter the announcement ring. Active repeat requests reuse their node. Include activation rate, not one ring enqueue per completion. Election uses a shared raw mutex with retries. |
+| FC-PQ ring | `fc_pq/lock/buffer.rs:52-84,96-104,122-150`: tail `fetch_add`, capacity 64, per-slot valid flag; one drain snapshots at most 64 slots. A reserved but unpublished slot can stall the combiner. Capacity 64 does not limit the total pending PQ to 64. |
+| FC-PQ scheduling | `fc_pq/lock.rs:145-255`: drain once, then at most 64 PQ-pop attempts, with completed-node buffering/removal. `H=64` is not 64 completions. A requester may republish and be served again during one pass. Let `k` count pops, `a` new announcements, `b` actual completions. |
+| FC-PQ cost | `sequential_priority_queue.rs:14-61`: BinaryHeap and BTreeSet are sequential under the combiner mutex. Ordinary queue work is `O((a+k) log(n+1))` per pass, plus timing, flag checks, buffers and allocation effects. Heap growth can move `O(n)` storage on a particular insertion; steady-state/amortized cost is not a per-insertion worst-case latency bound. Dividing by `b` requires `b>0`. |
+| Prefetch | `fc_pq/lock.rs:199-205` prefetches the next node's input before the current delegate. Account for possible overlap, not guaranteed elimination of a remote miss. |
+| Executor return | `fc_pq/lock.rs:286-295`: the elected combiner returns from `combine()` and unlocks before testing its own completion. Its request can finish well before its call returns, and it can need multiple passes. |
+| FC | `fc/lock.rs:53-108,118-138,152-170`: inactive-node head-CAS publication, full linked-list scan, completion flags and periodic stale-node cleanup. There is no `H` cap. With `n_list` retained nodes, discovery is `O(n_list)` visits per pass, or `O(n_list/b)` per completion for `b>0`, not necessarily `O(N)` per operation under saturation. Election/activation retries are additional traffic. |
+| FC-Ban | `fc_ban/lock.rs:59-62,105-138,148-167`: same scan with time-based skips; skipped requests can require later passes. The penalty uses a retained-registration counter, not instantaneous waiters. Its measured interval can include skipped-node scan work, so it is not pure delegate cost. Separate eligibility-check work, requester delay and actual server idle time. |
+| CC | `cc/lock.rs:23,52-86,97-121`: one tail swap per submission, predecessor-slot input/link publication, local flag waiting, sequential traversal and completion/baton stores. Default `H=64` bounds executed delegates here, unlike FC-PQ's pops; early termination on an absent next link is possible. Per-batch traversal is `O(b)` plus enqueue/handoff work and stalls. |
+| CC-Ban | `cc_ban/lock.rs:61-96,145-184`: caller delays before enqueue, then CC-style execution with penalties. Its cap is 16 rather than CC's default 64. A raw CC-Ban minus CC result therefore includes a batch-policy difference, not only admission fairness. |
+| MCS | `mcs.rs:78-107,124-152`: tail swap, predecessor linking, local flag spinning and successor flag handoff (or empty-queue CAS). The holder executes the CS; ordinary FIFO handoff already changes executor. A cached polling load is not a new coherence message, and constant successful protocol operations do not imply constant elapsed latency. |
+| CFL | `cfl.rs:354-390,397-534,721-745`: NUMA-counter scans, variable queue shuffling, and per-core/per-NUMA service accounting at unlock. Model shuffle count and nodes visited rather than assigning a fixed message count per operation. Its fairness domain is not automatically identical to FC-PQ's per-requester credit. Both CFL and MCS use caller execution, not combining. |
+
+All paths in the table are relative to `crates/libdlock/src/dlock2/` except
+`sequential_priority_queue.rs`, which is in `crates/libdlock/src/`.
+Treat zero-completion passes, election retries, inactive scans, and ring
+backpressure as costs, not completed work. For aggregate batch size use
+`b = total completions / total passes`, including empty passes; use ratios of
+totals rather than the unweighted average of per-pass costs divided by batch.
+
+For admission-controlled variants, a banned requester's entire cooldown is
+not necessarily server idle time: other requests can execute meanwhile.
+Only uncovered idle intervals enter `I_D` below. CPU spinning and requester
+response delay are additional, distinct costs. Secondary variants (DSM,
+FC-SL, Ticket/CLH, ShflLock, U-SCL) can extend the event table after the core
+model is validated; they should not inherit FC's or CC's budget semantics
+without inspecting their own execution paths.
+
+### Latency Bounds Versus Throughput Estimates
+
+Build an event DAG for a finite interval of `B` completed operations, including
+startup/drain when relevant. In a homogeneous calibrated abstraction let:
+
+- `CP` be its longest causal path, including required communication;
+- `W_p` be non-overlappable CPU occupancy at endpoint `p`, including charged
+  local work and endpoint communication overhead;
+- `v_p_send`, `v_p_recv` be small-message counts at that endpoint;
+- `r_l` be serialized transactions at a hot cache line, each with effective
+  occupancy `a_l` (an added coherence constraint).
+
+For the inequality below, durations and service occupancies are exact costs
+of a deterministic abstract machine, or guaranteed minima. Inserting
+empirical means gives a predictive approximation, not a hardware lower bound.
+In particular, classical LogP's upper-bound `L` is not a measured minimum
+latency from which a physical lower bound follows.
+
+Within that abstraction, the interval time has the necessary lower bound
+
+```text
+T >= max(CP,
+         max_p W_p,
+         max_p max((v_p_send - 1)_+, (v_p_recv - 1)_+) g,
+         max_l r_l a_l)
+```
+
+Here `x_+ = max(x, 0)`. Include capacity stalls and transfer dependencies in the
+DAG; topology-specific service/bandwidth constraints refine the homogeneous
+gap term. Correspondingly `X = B/T` has an upper bound, not an exact prediction.
+Those bottlenecks need not all be simultaneously attainable. Counting all
+messages times `L+2o` as a throughput cost would incorrectly discard overlap.
+
+For an interpretable *serialized-path approximation*, write time per operation:
+
+```text
+t_D ~= C_D + d_D + [A_D + p_D (M_D + K_D)] / b_D + I_D
+t_H ~= C_H + h_H + M_H
+```
+
+`D` is delegation; `H` is a handoff lock. `C` is service with the chosen
+operation mix and warm executor. `d_D` is per-operation scheduling, publication/
+completion and discovery cost exposed on the serialized path. `A_D` is
+per-pass election/administration excluding migration. `p_D` is the fraction
+of passes changing executor; `M_D` is protected-data reacquisition conditional
+on that change, and `K_D` is additional scheduler-state migration. `I_D`
+is exposed admission/empty-server idle time per completion. `h_H` includes
+handoff coordination and any fairness policy. `M_H` is actual data movement
+per handoff operation, including zero or smaller costs for local reuse.
+
+This additive estimate is not an upper bound: resource contention can make it
+optimistic, and residual costs require calibration. A transferred input miss
+must not be counted both inside measured `C` and again in `d`; likewise `M`
+must not be added to service times that already include the same cold misses.
+Check the DAG/resource bounds independently. Throughput is approximately
+`1/t` only in the saturated regime with these overheads represented.
+
+In the deliberately simplified matched-work case `C_D=C_H`, `M_D=M_H=M`,
+`p_D=1`, `I_D=0`, abbreviating other subscripts gives:
+
+```text
+within this approximation, delegation wins iff d - h < (1 - 1/b) M - (A + K)/b
+                 iff b (M + h - d) > M + A + K.
+```
+
+If `M+h-d > 0`, the crossover is `b > (M+A+K)/(M+h-d)`; otherwise no
+batch size wins under these assumptions. This is a testable conditional
+result: increasing batch size amortizes movement and administration, but not
+per-request scheduling/communication. Tiny warm-state CSs can favor ordinary
+locks, while costly cross-core state movement can favor combining. Large
+payloads, cold PQ metadata, or a congested combiner can reverse that advantage.
+Do not substitute the source constant 64 for measured `b`.
+
+### The Cost of Fairness: Use Matched Deltas
+
+Compare `FC-PQ - FC` and `CFL - MCS`, not just FC-PQ against CFL:
+
+```text
+Delta_D ~= Delta C + Delta d
+           + Delta{[A + p(M+K)]/b} + Delta I
+Delta_H ~= Delta C + Delta h + Delta M.
+```
+
+Within an epoch, if all protected state is accessed only by its combiner,
+changing service order cannot by itself transfer that state to another
+executor. This is an ownership argument, not a guarantee of identical cache
+misses: order can change inputs, state accesses, eviction, and service cost.
+Fair scheduling can also change batch occupancy and executor-change frequency.
+
+MCS already hands data between owners. CFL does not uniquely introduce the
+whole migration cost; its marginal cost is policy work plus the *difference*
+in movement/locality relative to MCS. Likewise, an FC-PQ pass does not have
+the same discovery machinery as an FC pass. The deltas above are hypotheses
+to explain, not identities equating all observed slowdown to heap operations.
+
+Control the operation mix. With deterministic class cost `C_i` and service-time
+share `f_i`, an overhead-free saturated server has
+`X_i = f_i/C_i` and `X = sum_i f_i/C_i`. Usage fairness changes `f_i` and hence
+completed-operation throughput even with zero scheduling cost. For two
+threads with costs 1 and 9, one request each per round gives `X=1/5`, while
+equal service-time shares give `X=5/9`. These are illustrative operations per
+normalized time unit, not measurements. Report per-class completions, useful work, service
+shares, and total throughput; do not interpret a changed workload mix as
+pure synchronization overhead.
+
+### Fairness Theorem and Its Implementation Gap
+
+**Ideal exact-min theorem.** Fix a continuously eligible, backlogged cohort.
+At each service boundary, serve a thread with minimum cumulative credit `U_i`
+and add a nonnegative charge `c <= C_max`. Do not reset or rewrite credit.
+If the initial spread is `D_0`, then at every service boundary:
+
+```text
+max_i U_i - min_i U_i <= max(D_0, C_max).
+```
+
+Proof: let the previous minimum be `m`. All other credits remain in
+`[m, m+D]`, while the updated credit lies in `[m, m+C_max]`; the new minimum
+cannot decrease. Induction preserves `D=max(D_0,C_max)`. Equal initial credits
+give the familiar `C_max` bound. The eligibility-window variant may choose
+any credit at most `m+delta`, giving `max(D_0,delta+C_max)` by the same argument.
+This latter statement is about an ideal policy, not implemented FC-EW.
+
+This is a service-credit bound, not an `O(C_max)` response-time bound, a JFI
+guarantee for arbitrary windows, or an unconditional bound on all threads'
+lifetime service. Finite-window service differences subtract initial credits;
+even bounded cumulative spread can give twice that bound across two
+endpoints. Backlogged in the abstract scheduler means a request is eligible
+at every selection; fast resubmission by real synchronous callers is not
+automatically equivalent.
+
+The existing FC-PQ needs a separate refinement argument:
+
+1. `fc_pq/lock.rs:157-162` initializes zero-usage arrivals to
+   `total_usage/total_served`, the mean *per-operation charge*, not the
+   cohort's current cumulative virtual time. Two old threads at credit 100
+   after 200 unit-cost services admit a newcomer at credit 1. The current
+   active-credit spread is 99 although `C_max=1`. Thus the fixed-cohort theorem
+   cannot be quoted for changing membership. Define fairness relative to
+   activation/backlog intervals before choosing a newcomer policy.
+2. `fc_pq/lock.rs:193-197` attempts to clamp credit only after a node is
+   popped. Under the valid min-PQ invariant, the popped credit is already no
+   greater than the next minimum, so `min(current, next_min)` changes nothing.
+   It cannot force an unpopped high-credit node to be selected within eight
+   passes. No additional starvation or wall-clock bound follows from this
+   threshold; credit-reset policies, if later introduced, would need their
+   own proof relating virtual credit to actual delivered service.
+3. Announcements are drained only at pass entry. A lower-credit request can
+   be published but not yet visible to the local PQ; buffering/deactivation
+   and reactivation further affect the eligible set. Any bound needs an
+   explicit discovery-delay term and admission/progress assumptions.
+4. The charge at `fc_pq/lock.rs:209-217` brackets input access, delegate
+   execution and result write. It is not exactly the benchmark's inner
+   `hold_time`, nor the requester's CPU consumption. Bound the charged
+   quantity and state its relationship to application service separately.
+   Counter wraparound and unbounded preemption are excluded from the ideal
+   theorem, not silently handled by it.
+
+Record these as proof obligations, not algorithm changes in this worktree.
+The old README's unconditional `|U_i-U_j| <= C_max` is insufficient evidence.
+
+### Response Time and Batch Tradeoff
+
+For a waiter, decompose invocation-to-return time into publication/admission,
+discovery, scheduler waiting, own service, and completion observation.
+For a caller that combines, add the work it must finish before returning even
+after its own request is complete. These components may overlap across
+different callers; do not sum them to estimate aggregate throughput.
+
+Larger batches reduce `(A+p(M+K))/b` but can lengthen a combiner caller's
+post-completion delay. Only with bounded service, discovery, queue work and
+scheduling delays can a pass-time bound be derived. `H=64` alone is
+insufficient: ring draining waits for publication, acquisition retries can
+continue, and delegates are non-preemptive. A long operation can delay any
+later eligible request by its residual service time.
+
+For a stationary closed workload with `N` callers and one outstanding request
+per caller, use the response-time law `N = X (E[R] + E[Z])` as a consistency
+check, with operation-weighted mean response/noncritical times. It is not a
+p99 formula. Equal usage shares do not imply equal operation counts, equal
+response times, or balanced combiner CPU work.
+
+### Validation Proposal: Approval Required Before Implementation
+
+Proceed in this order, without fitting a new arbitrary constant for each lock:
+
+1. **Protocol accounting.** Derive per-epoch counts from each implementation:
+   completions, scans/pops, announcements/reactivations, failed elections,
+   executor changes, and empty/idle intervals. Draw dependency graphs and
+   separate CPU work from coherence traffic. Do not infer messages by counting
+   source loads. Acceptance: every cost term has a source event and units.
+2. **Independent calibration.** Measure cache-line handoff latency, dependent
+   versus independent transfers, hot-line RMW throughput, publication and
+   completion paths, warm delegate cost, and local PQ cost by size. Repeat
+   same-socket/cross-socket; preserve CPU placement, frequency/TSC convention,
+   memory placement and input footprint. Acceptance: one parameter set per
+   topology/transaction class, not a per-result fitted residual.
+3. **Minimal instrumented comparison.** Begin with FC, FC-PQ BinaryHeap, MCS
+   and CFL; use CC/CC-Ban/FC-Ban to distinguish discovery and admission terms.
+   Measure actual `b`, change probability `p`, metadata footprint and exposed
+   stalls. Sweep threads, non-CS work, CS heterogeneity, protected footprint,
+   request footprint and socket placement. Batch-budget sweeps require an
+   approved code/config change; they are not an existing CLI capability.
+4. **Held-out prediction.** Calibrate on a subset, then predict crossover
+   direction and marginal fairness costs on unseen footprints/thread counts.
+   Plot predicted versus observed per-operation time and explain residuals.
+   At fixed mix/placement, varying effective `b` should expose an amortized
+   `1/b` component until another bottleneck dominates. Failure to predict
+   held-out trends rejects the model or its assumed regime; do not hide it
+   by refitting every point.
+5. **Fairness separately.** Track actual per-thread delivered service and
+   scheduler credit at selection boundaries. Cover steady cohorts,
+   intermittent callers, newcomer bursts, high-cost requests, delayed
+   publication and reactivation. Use counterexamples to refine the theorem,
+   not just final JFI close to one. Scope progress assumptions explicitly.
+
+Expected deliverables after approval: protocol/cost table, scoped theorem
+with proof or counterexamples, crossover figure, matched fairness-cost
+decomposition, and response-time/combiner-work tradeoff plot. Start with
+these implemented mechanisms before using the model to justify FC-EW.
+
+**Measurement caveats found in the current source:**
+
+- `fc_pq/lock.rs:129-131,209,258-263` reuses `begin` at each delegate before
+  adding `end-begin` to `combiner_time_stat`; this is not a full-pass timer
+  when a pass serves requests. Do not calibrate total epoch work from it.
+- `src/benchmark/dlock2/proportional_counter.rs:106-109` labels a request
+  by whether its requester executes its own delegate. That is useful, but
+  not a complete record of which callers spent time combining other requests.
+- `src/benchmark/dlock2/counter_common.rs:228-241` records both
+  `num_acquire` (operations) and `loop_count` (configured counter-work units).
+  Use the appropriate denominator. Inner delegate `hold_time` and outer PQ
+  accounting have different boundaries; retain both definitions.
+- Generic L1/LLC miss counts cannot by themselves identify ownership
+  transfers, protected-state traffic, and scheduler/request traffic. Validate
+  the decomposition using controlled accesses and suitable hardware events,
+  with their platform-specific limitations stated.
+
+### Verification Boundary
+
+The proofs above are conditional mathematical arguments, not a concurrency
+verification of the Rust implementations. The worktree-local scratch script
+`.worktree/logp_checks.py` checked 14,508 one-step integer transitions for
+2–4 participants (exact-min, eligibility-window, and larger initial spread),
+plus 6,912 exact-rational batch-crossover cases and the newcomer/mix examples.
+These finite checks passed; they supplement, not replace, the induction proof.
+They cannot establish hardware costs, Rust correctness, or progress.
+
+The prescribed `devenv shell -- python3 .worktree/logp_checks.py` failed during
+environment evaluation because `dotenv.resolved` has no defined value.
+The standard-library-only arithmetic check was instead run successfully with
+host `python3`; no environment files were changed. No lock tests, performance
+benchmarks or new empirical results are claimed. Instrumentation fixes and
+experiments remain subject to plan approval.
+
+### Primary References
+
+1. Culler et al., *LogP: Towards a Realistic Model of Parallel Computation*,
+   PPoPP 1993, [DOI](https://doi.org/10.1145/155332.155333);
+   [Berkeley report](https://www2.eecs.berkeley.edu/Pubs/TechRpts/1992/6262.html)
+   and [full paper](https://people.eecs.berkeley.edu/~kubitron/cs258/handouts/papers/logp.pdf).
+   Section 3 defines parameters/capacity; section 3.2 discusses shared-memory
+   references as implicit messages. Neither specifies our coherence mapping.
+2. Alexandrov et al., *LogGP*, SPAA 1995,
+   [DOI](https://doi.org/10.1145/215399.215427);
+   [expanded UCSB report](https://cs.ucsb.edu/research/tech-reports/1995-09),
+   *LogGP: Incorporating Long Messages into the LogP Model*.
+   Adds `G`, the per-byte gap for long messages.
+3. Ramos and Hoefler, *Modeling Communication in Cache-Coherent SMP Systems—
+   A Case-Study with Xeon Phi*, HPDC 2013,
+   [author publication record](https://spcl.inf.ethz.ch/Publications/index.php?pub=162)
+   and [paper](https://spcl.inf.ethz.ch/Publications/.pdf/hoefler-ramos-hpdc13-cc_modeling.pdf).
+   Precedent for explicit cache-line state/traffic modeling, not calibration
+   data for our hardware.

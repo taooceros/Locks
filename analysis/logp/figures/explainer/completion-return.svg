@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="610" viewBox="0 0 800 610" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">The executor's own completion need not end its call</title>
+  <desc id="desc">Schematic event order, not measured timing or a return bound. Caller A is the retained executor. It completes its own request and publishes the result, then serves and notifies B and C before releasing and returning. B can observe its published result and return before A returns. Circles mark service completion, diamonds mark result publication or notification, and squares mark caller return. Larger mean batch occupancy does not establish a worst-case deadline.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#526575"/></marker></defs>
+  <rect width="800" height="610" fill="white"/>
+  <text x="30" y="42" font-size="28" font-weight="bold" fill="#18323D">Finished work is not always a returned call</text>
+  <text x="30" y="77" font-size="20" fill="#526575">Schematic event order · widths are not time bounds</text>
+  <circle cx="42" cy="113" r="8" fill="#18323D"/><text x="60" y="120" font-size="20" fill="#18323D">Completion</text>
+  <path d="M270 103 L280 113 L270 123 L260 113 Z" fill="#7057A3"/><text x="288" y="120" font-size="20" fill="#18323D">Notification / publish</text>
+  <rect x="607" y="104" width="18" height="18" fill="#18323D"/><text x="638" y="120" font-size="20" fill="#18323D">Return</text>
+  <text x="30" y="183" font-size="21" font-weight="bold" fill="#18323D"><tspan x="30">A executes</tspan><tspan x="30" dy="28">for everyone</tspan></text>
+  <rect x="220" y="160" width="130" height="61" rx="6" fill="#167D8D"/><text x="285" y="198" text-anchor="middle" font-size="23" fill="white">Own A</text>
+  <rect x="390" y="160" width="120" height="61" rx="6" fill="#C86D35"/><text x="450" y="198" text-anchor="middle" font-size="23" fill="white">Serve B</text>
+  <rect x="550" y="160" width="120" height="61" rx="6" fill="#526575"/><text x="610" y="198" text-anchor="middle" font-size="23" fill="white">Serve C</text>
+  <path d="M220 233 H740" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <g fill="#18323D"><circle cx="350" cy="233" r="8"/><circle cx="510" cy="233" r="8"/><circle cx="670" cy="233" r="8"/></g>
+  <g fill="#7057A3"><path d="M370 223 L380 233 L370 243 L360 233 Z"/><path d="M530 223 L540 233 L530 243 L520 233 Z"/><path d="M690 223 L700 233 L690 243 L680 233 Z"/></g>
+  <text x="350" y="270" text-anchor="middle" font-size="20" fill="#167D8D">A done</text>
+  <text x="640" y="270" font-size="20" fill="#526575">then release</text>
+  <text x="30" y="330" font-size="21" font-weight="bold" fill="#167D8D"><tspan x="30">A's caller</tspan><tspan x="30" dy="28">is still busy</tspan></text>
+  <path d="M350 280 V345 H740" fill="none" stroke="#167D8D" stroke-width="3"/>
+  <circle cx="350" cy="345" r="8" fill="#18323D"/><rect x="731" y="336" width="18" height="18" fill="#18323D"/>
+  <text x="640" y="323" font-size="21" fill="#167D8D">A returns</text>
+  <path d="M350 363 V380 H740 V363" fill="none" stroke="#526575" stroke-width="2"/>
+  <text x="545" y="408" text-anchor="middle" font-size="20" fill="#526575">Post-completion combining + release</text>
+  <text x="30" y="462" font-size="21" font-weight="bold" fill="#C86D35"><tspan x="30">B is a</tspan><tspan x="30" dy="28">waiting caller</tspan></text>
+  <path d="M530 248 V285 H785 V437 H570 V456" fill="none" stroke="#7057A3" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#arrow)"/>
+  <path d="M570 466 H610" fill="none" stroke="#C86D35" stroke-width="3"/>
+  <rect x="601" y="457" width="18" height="18" fill="#18323D"/>
+  <text x="320" y="504" font-size="20" fill="#C86D35">B observes its result; can return before A</text>
+  <text x="30" y="551" font-size="21" fill="#18323D"><tspan x="30">A larger mean batch does not establish a worst-case deadline.</tspan><tspan x="30" dy="30">A return bound must cover all remaining work and suspension.</tspan></text>
+</svg>

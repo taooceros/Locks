@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An illustrated explanation of the fairness, performance, and work-conservation tension in locks, and how delegation changes execution placement. Conceptual examples, not benchmark results.">
+  <title>Who gets the next turn? — A visual guide to fair locks</title>
+  <link rel="stylesheet" href="story-explainer.css">
+  <script src="story-explainer.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#story">Skip to the story</a>
+<header class="masthead">
+  <a href="#top" class="wordmark">LOCKS / VISUAL NOTES</a>
+  <span>A reading companion, not a finished paper</span>
+</header>
+<div class="page-shell">
+  <nav class="contents" aria-label="Story chapters">
+    <p class="eyebrow">Follow the argument</p>
+    <ol>
+      <li><a href="#capacity">Background: what locks schedule</a></li>
+      <li><a href="#turns">Turns are not service</a></li>
+      <li><a href="#approaches">How existing solutions work</a></li>
+      <li><a href="#owners">The three-way tension</a></li>
+      <li><a href="#framework">Keep two ledgers</a></li>
+      <li><a href="#runs">Connect the sequences</a></li>
+      <li><a href="#delegation">Keep the executor</a></li>
+      <li><a href="#combiner">Inside the combiner</a></li>
+      <li><a href="#communication">What communication costs</a></li>
+      <li><a href="#costs">When does it pay?</a></li>
+      <li><a href="#batching">The other side of batching</a></li>
+      <li><a href="#limits">Where the idea stops helping</a></li>
+      <li><a href="#evidence">What remains to establish</a></li>
+    </ol>
+    <a class="source-link" href="story-draft.tex">Manuscript source ↗</a>
+  </nav>
+  <main id="story">
+    <header id="top" class="hero">
+      <p class="eyebrow">Fair service / local execution</p>
+      <h1>Who gets<br>the next turn?</h1>
+      <p class="dek">A lock does more than protect data. It should share service <strong>fairly</strong>, execute useful work <strong>efficiently</strong>, and <strong>not leave runnable work idle</strong>. To understand the tension between these goals, we must separate who receives service from which core does the work.</p>
+      <div class="reading-path" aria-label="The four acts of this story">
+        <a href="#capacity"><span>01</span> See the problem</a>
+        <a href="#framework"><span>02</span> Separate the questions</a>
+        <a href="#delegation"><span>03</span> Change execution</a>
+        <a href="#costs"><span>04</span> Find the boundary</a>
+      </div>
+      <aside class="reading-note"><strong>How to read this.</strong> Follow the pictures and bold takeaways first. Open the technical notes only when you want the assumptions. Every numerical example is invented for explanation; none is a measurement of CFL or FC-PQ.</aside>
+      <noscript><p class="notice">JavaScript is off. All diagrams, explanations, worked examples, and technical notes remain readable. The optional teaching controls are hidden.</p></noscript>
+    </header>
+
+    <section id="capacity" class="chapter" aria-labelledby="capacity-title">
+      <p class="chapter-number">01 / BACKGROUND: LOCKS AS A RESOURCE</p>
+      <h2 id="capacity-title">What a lock protects.<br>What a lock schedules.</h2>
+      <p>A <strong>critical section</strong> is the part of a program that accesses shared state under a lock. For the exclusive locks in this story, only one caller can own the lock at a time. The owner executes its protected operation; competing callers become waiters until they can acquire ownership.</p>
+      <p>Imagine a shared index. One client performs a short lookup; another updates several entries. Their protected operations cannot run at the same time under this lock. Even with many cores, they share one serialized execution path.</p>
+      <figure class="diagram bottleneck">
+        <div class="client-cloud"><span class="pill client-a">A · lookup</span><span class="pill client-b">B · update</span><span class="pill client-c">C · lookup</span></div>
+        <div class="flow-arrow" aria-hidden="true">↓</div>
+        <div class="serial-lane"><span>Only one protected operation executes at a time</span><div class="operation-strip" aria-label="Illustrative service sequence: short A, long B, short C"><span class="client-a">A</span><span class="client-b long">B</span><span class="client-c">C</span></div></div>
+        <div class="flow-arrow" aria-hidden="true">↓</div>
+        <div class="protected-object">One shared index · protected mutable state</div>
+        <figcaption><strong>Figure 1.</strong> The lock protects correctness, but its selection policy also divides serialized capacity. Block widths illustrate different amounts of useful service, not measured time.</figcaption>
+      </figure>
+      <h3>Two schedulers control different resources.</h3>
+      <div class="pair-cards">
+        <article><h3>The CPU scheduler</h3><p>Chooses which runnable thread gets processor time. Equal CPU shares do not automatically give equal access to a shared critical section.</p></article>
+        <article><h3>The lock policy</h3><p>Determines which waiting caller may enter next. That choice determines who can make progress on the protected object.</p></article>
+      </div>
+      <p>Preempting an owner does not release its lock: other callers still cannot enter until ownership is released. When much of an application’s progress depends on the critical section, lock usage can undermine CPU-scheduling goals. <a href="#ref-scl">SCL calls this scheduler subversion.</a></p>
+      <h3>Waiting strategy is not a fairness policy.</h3>
+      <div class="pair-cards">
+        <article><h3>Spin</h3><p>A waiter repeatedly checks for progress. This avoids a sleep/wakeup transition but consumes CPU time while waiting.</p></article>
+        <article><h3>Block</h3><p>A waiter sleeps and must be awakened and scheduled to continue. This saves waiting CPU time but introduces wakeup costs. Hybrid locks do both.</p></article>
+      </div>
+      <p>Either waiting strategy can be combined with different owner-selection rules. A busy spinning core is not proof of useful progress, and a sleeping waiter does not mean the lock is idle while another caller is executing.</p>
+      <details id="background-contract"><summary>Which meanings of “fair” should we keep separate?</summary><ul><li><strong>Acquisition order:</strong> whether waiting acquisition attempts are served in an order such as FIFO.</li><li><strong>Protected service:</strong> how much lock-protected execution each competing client receives, possibly weighted by priority.</li><li><strong>Lock opportunity:</strong> the opportunity to acquire a lock, including available or reserved time—not necessarily time spent completing useful work.</li></ul><p>Our examples target protected-service allocation among equal-weight clients. Other systems may target weighted threads, groups, or opportunities instead. A shared word, “fairness,” does not make their contracts identical. We consider non-preemptive exclusive service, not concurrent reader access or a mechanism that interrupts a critical section halfway through.</p></details>
+      <p class="takeaway">Mutual exclusion answers “can these operations overlap?” It does not answer “is the capacity shared fairly?”</p>
+    </section>
+
+    <section id="turns" class="chapter" aria-labelledby="turns-title">
+      <p class="chapter-number">02 / COUNT THE RIGHT THING</p>
+      <h2 id="turns-title">Equal turns can hide unequal service.</h2>
+      <p>Give A and B three turns each. If A needs one unit of protected work and B needs three, A receives three units and B receives nine. Equal acquisition counts have produced a <strong>25% / 75% service split</strong>.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Equal turns and equal service diagram"><img src="figures/service-allocation.svg" width="720" height="440" alt="Equal turns: A receives three service units, B nine. Minimum-service selection over another twelve-unit window gives each six units, with six A operations and two B operations."></div><figcaption><strong>Figure 2.</strong> Different questions, different answers: count completed operations or add their service. The two rows complete different mixes, so this is not a throughput comparison.</figcaption></figure>
+      <div class="interactive lab" id="service-lab" hidden>
+        <div class="lab-heading"><span class="eyebrow">Try the idea</span><h3>Be the service scheduler</h3></div>
+        <p>Both clients are always selectable; credits begin at zero and never reset. A costs one useful-service unit. You choose B’s cost and the policy. Ties go to A.</p>
+        <fieldset class="control-group"><legend>Selection policy</legend><label><input type="radio" name="service-policy" value="minimum" checked> Least accumulated service</label><label><input type="radio" name="service-policy" value="turns"> Alternate equal turns</label></fieldset>
+        <label class="slider-label" for="b-service">B’s service per operation <output id="b-service-value" for="b-service">3</output></label>
+        <input id="b-service" type="range" min="1" max="6" value="3" step="1">
+        <div class="service-meters">
+          <div><div class="meter-label"><strong>A · short operation</strong><span id="a-total">0 units · 0 operations</span></div><div class="meter-track"><div id="a-credit-bar" class="client-a"></div></div></div>
+          <div><div class="meter-label"><strong>B · longer operation</strong><span id="b-total">0 units · 0 operations</span></div><div class="meter-track"><div id="b-credit-bar" class="client-b"></div></div></div>
+        </div>
+        <div class="step-history" id="service-history" aria-label="Completed client sequence">No operations yet.</div>
+        <div class="button-row"><button id="service-next" type="button">Serve next request</button><button id="service-reset" type="button" class="secondary">Reset</button></div>
+        <p id="service-status" class="lab-status" role="status"></p>
+        <p class="fine-print">Changing a control starts a new example. Limit: 16 steps. Units represent useful service exactly; this is an ideal scheduler, not an execution of the current FC-PQ implementation.</p>
+      </div>
+      <details><summary>Why does minimum-credit selection keep service close?</summary><p>For a fixed continuously selectable group, equal initial credits, no resets, and increments between zero and <var>C</var><sub>max</sub>, choosing a minimum credit keeps the spread at most <var>C</var><sub>max</sub> after every completed operation. Only that minimum is raised, by at most one largest operation; all other credits stay put and the minimum cannot decrease.</p><p>This is about accumulated service, not equal totals at every prefix, equal operation counts, or a wall-clock waiting deadline. With initial spread <var>D</var><sub>0</sub>, the exact-min bound is max(<var>D</var><sub>0</sub>, <var>C</var><sub>max</sub>).</p></details>
+      <p class="takeaway">Choose the fairness metric before judging the scheduler.</p>
+    </section>
+
+    <section id="approaches" class="chapter" aria-labelledby="approaches-title">
+      <p class="chapter-number">03 / HOW EXISTING SOLUTIONS WORK</p>
+      <h2 id="approaches-title">Order the waiters.<br>Account for usage. Control admission.</h2>
+      <p>The unequal-service problem is not new. Existing locks address different parts of it: who goes next, how much service a client has already received, and where the next owner runs. Understanding those mechanisms makes the remaining problem more precise.</p>
+      <div class="pair-cards">
+        <article><h3>FIFO queues: regulate order</h3><p>Ticket and MCS-style locks order acquisition attempts rather than letting every waiter race for an unlocked word. MCS also lets waiters poll separate queue-node state, reducing centralized polling traffic.</p><p><strong>What remains:</strong> FIFO orders attempts, not accumulated service. A long operation still receives more service than a short one per turn; the next owner can execute on a different core.</p></article>
+        <article><h3>Locality-aware handoff: regulate placement</h3><p>NUMA-aware designs such as CNA and ShflLock favor handoffs within a socket to reduce expensive cross-socket movement of lock metadata and protected state.</p><p><strong>What remains:</strong> locality preference alone is not usage accounting. Fairness depends on when other clients are allowed in; keeping a socket is not keeping one executing core.</p></article>
+      </div>
+
+      <h3 id="scl-mechanism">SCL: account, penalize, and grant a slice</h3>
+      <p><a href="#ref-scl">Scheduler-Cooperative Locks (SCL)</a> aim to align lock opportunity with CPU-scheduler shares. The user-space design, u-SCL, combines three steps:</p>
+      <div class="responsibilities" aria-label="The u-SCL mechanism">
+        <article><span>01 / ACCOUNT</span><h3>Track opportunity</h3><p>Track each thread’s usage and target share. The opportunity metric includes time the lock could be acquired, not only useful critical-section work.</p></article>
+        <article><span>02 / PENALIZE</span><h3>Delay early reacquisition</h3><p>Compute a penalty on release. If a thread tries to reacquire before its allowance permits, make it wait so others have an opportunity.</p></article>
+        <article><span>03 / SLICE</span><h3>Amortize ownership</h3><p>Within a lock slice, one thread may acquire and release repeatedly. After expiry, hand off at release—not by interrupting a critical section.</p></article>
+      </div>
+      <p><strong>What this buys:</strong> explicit allocation control and fewer ownership transfers within a slice. <strong>What it costs:</strong> accounting, penalties, and waiting for a slice. In u-SCL, reserving a slice can leave the lock unused while the slice owner executes non-critical work, even though another caller wants the lock. SCL’s kernel and reader–writer variants differ; this is not a claim that all SCL variants use the same slice policy.</p>
+      <details id="scl-note"><summary>Why SCL’s opportunity is not our useful-service metric</summary><p>The SCL paper defines lock opportunity in §3 and describes accounting, penalties, and lock slices in §4.2–4.3. Reserved or available time may give a thread an opportunity without completing a protected operation. The paper also explicitly contrasts u-SCL’s unused time during an owner’s non-critical work with the reader–writer variant (§4.5). Evaluate the intended contract rather than treating opportunity fairness as a bound on completed useful service.</p></details>
+
+      <h3 id="cfl-mechanism">CFL: reorder a queue by virtual lock usage</h3>
+      <p><a href="#ref-cfl">Completely Fair Locking (CFL)</a> treats lock occupation as a schedulable resource. Instead of relying on penalties in its default policy, it changes which waiter reaches the front of the queue.</p>
+      <div class="responsibilities" aria-label="The CFL mechanism">
+        <article><span>01 / CHARGE</span><h3>Maintain virtual hold time</h3><p>Accumulate virtual lock hold time (vLHT). Priorities or configured group weights determine proportional shares.</p></article>
+        <article><span>02 / REORDER</span><h3>Promote suitable waiters</h3><p>A designated waiter acts as lock scheduler: it scans queue statistics and moves qualifying low-usage waiters forward.</p></article>
+        <article><span>03 / HAND OFF</span><h3>Let the next owner run</h3><p>Selection also considers NUMA locality. The selected caller still acquires ownership and executes its own critical section.</p></article>
+      </div>
+      <p><strong>What this buys:</strong> usage-aware scheduling, group support, and locality-aware handoff without default forced cooldowns. The paper reports cases with both better fairness and better throughput. <strong>What remains:</strong> queue-policy work and actual ownership/data movement, even though NUMA scheduling can reduce that movement.</p>
+      <details id="cfl-note"><summary>CFL is not simply “pop the global minimum”</summary><p>In the paper’s basic NUMA policy (§3), a promoted thread has vLHT below the waiting-thread average and belongs to the socket with the lowest per-socket average vLHT. A waiter traverses and reorders the queue; this is not the exact-min priority queue in our separate abstract service example. The paper also specifies group scheduling and initialization for new or returning threads (§3.4.2–3.4.3). Its mechanisms and claims should not be replaced with a different scheduler’s proof.</p></details>
+
+      <h3>CFL makes the policy choices especially concrete.</h3>
+      <div class="responsibilities" aria-label="Three policies described in the CFL paper">
+        <article><span>DEFAULT</span><h3>Keep work moving</h3><p>Do not forcibly idle an over-served caller when it can use an idle lock. This favors work conservation over stricter equalization in some workloads.</p></article>
+        <article><span>STRICT GUARANTEE</span><h3>Allow deliberate idle</h3><p>The optional mode makes over-served threads wait. It trades work conservation for tighter service control; it is disabled by default in the paper.</p></article>
+        <article><span>GRACE PERIOD</span><h3>Keep socket affinity longer</h3><p>The optional mode holds the preferred socket for a period. It seeks better locality at the expense of short-term fairness.</p></article>
+      </div>
+      <p class="fine-print">These are policies described in the CFL paper (§3.4.4–3.4.5 and §4.6.1), not a claim that those options are enabled in this repository, and not new measurements from this project.</p>
+      <p class="takeaway">Existing work already schedules usage and balances locality with progress. The remaining question is what changes when choosing the next client also chooses the executing core.</p>
+    </section>
+
+    <section id="owners" class="chapter" aria-labelledby="owners-title">
+      <p class="chapter-number">04 / THE REMAINING DESIGN TENSION</p>
+      <h2 id="owners-title">Fairness. Performance.<br>Work conservation.</h2>
+      <p>The mechanisms above give the three-way tension a concrete basis. SCL controls opportunity through accounting, penalties, and slices; CFL normally reorders owners without forced cooldowns, with optional stricter or more locality-biased policies. None of this implies that fairness must always reduce performance.</p>
+      <p>In a <strong>caller-executed</strong> lock, the chosen owner also executes its operation. Choosing a different client on another core can therefore change both the service recipient and the location of execution.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Owner and executor coupling diagram"><img src="figures/explainer/owner-coupling.svg" alt="Caller execution ties selection of client A to core 0 and client B to core 1; a change in recipient can move the protected working set."></div><figcaption><strong>Figure 3.</strong> Better owner selection does not remove the owner–executor identity. The amount of data movement still depends on reuse and topology.</figcaption></figure>
+      <aside class="reading-note"><strong>Give prior work its credit.</strong> CFL reduces movement through NUMA-aware selection and reports throughput improvements. Fair scheduling does not necessarily make a lock slower. Same-socket handoff, however, is not the same as keeping one executor.</aside>
+      <div id="trilemma" aria-labelledby="trilemma-title">
+        <h3 id="trilemma-title">The three-way tension—the lock trilemma</h3>
+        <p>In caller-executed locks, service allocation and execution placement are tied together. That coupling can put three desirable properties in tension:</p>
+        <div class="responsibilities" aria-label="The three goals">
+          <article><span>FAIRNESS</span><h3>Share the service</h3><p>Bound service disparity among the stated competing clients, using the chosen service metric—not just equal turn counts.</p></article>
+          <article><span>PERFORMANCE</span><h3>Spend capacity on useful work</h3><p>Achieve high useful-work throughput under matched work and resources. Selection, handoff, and data movement all cost capacity.</p></article>
+          <article><span>WORK CONSERVATION</span><h3>Do not idle ready work</h3><p>When the lock can serve, do not deliberately leave its execution path idle while an otherwise runnable request is waiting.</p></article>
+        </div>
+        <div class="worked-example">
+          <h3>Three reactions, three possible costs</h3>
+          <ul>
+            <li><strong>Keep serving a favored local client.</strong> Reuse can reduce movement and keep work flowing, but other backlogged clients can fall behind in accumulated service.</li>
+            <li><strong>Serve the client owed service next.</strong> Fair allocation can coexist with work conservation, but choosing another caller core can require a costly handoff.</li>
+            <li><strong>Withhold an over-served client’s requests.</strong> A ban or cooldown can limit further service. If it leaves no request allowed to proceed despite runnable demand, the lock becomes non-work-conserving. Another client serving during the cooldown is not idle time.</li>
+          </ul>
+        </div>
+        <p><strong>“Trilemma” names a design tension here, not a universal choose-any-two theorem.</strong> Work-conserving does not mean overhead-free or maximum-throughput. Likewise, avoiding handoffs by idling is not a performance win: the idle time still reduces completed useful work.</p>
+        <details><summary>Which fairness contract makes this tension meaningful?</summary><p>For a fixed continuously backlogged, selectable cohort, a minimum-service scheduler can be both fair and work-conserving; execution costs determine its performance. The three goals are not logically incompatible.</p><p>A different contract—bounding lifetime service disparity against a client that stops submitting requests indefinitely—cannot also allow unlimited positive service to the remaining active client. One must eventually withhold service or change the cohort/accounting contract. Waiting alone does not reduce a cumulative service gap. Delegation cannot manufacture an absent client’s work or remove this contract conflict.</p><p>Assess work conservation against otherwise runnable demand, before fairness bans or cooldowns. Calling every withheld request “ineligible” would hide the issue rather than resolve it. Required protocol work and an unavailable or preempted executor are separate progress and cost questions, not automatically deliberate policy idle.</p></details>
+      </div>
+      <p class="takeaway">Can we share service fairly and keep runnable work moving without paying for an executor change at every change of client?</p>
+    </section>
+
+    <section id="framework" class="chapter" aria-labelledby="framework-title">
+      <p class="chapter-number">05 / THE ANALYSIS FRAMEWORK</p>
+      <h2 id="framework-title">Keep two ledgers before connecting them.</h2>
+      <p>To analyze the three-way tension, keep two ledgers. The first records <strong>who receives service</strong> under an explicit cohort and accounting contract. The second records <strong>what the chosen execution requires</strong>, including movement and uncovered idle time. Mixing them too early makes it easy to confuse a service guarantee with a timing guarantee.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Independent service and execution analyses"><img src="figures/explainer/two-ledgers.svg" alt="Service analysis takes selectable clients, credits, and selection rules. Execution analysis takes operations, executor sequence, communication, and movement. The service sequence is mapped to an executor sequence by the architecture."></div><figcaption><strong>Figure 4.</strong> The service proof needs no LogP latency or cache assumption. Performance accounting does not assume a fairness theorem.</figcaption></figure>
+      <div class="pair-cards"><article><h3>Service question</h3><p>How far apart can clients’ accumulated service become under a stated selection and accounting rule?</p></article><article><h3>Execution question</h3><p>Given the operations and executors, what work and communication delay completion or limit rate?</p></article></div>
+      <h3>A pending request is not necessarily in the choice set.</h3>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Request visibility and return milestones"><img src="figures/explainer/request-journey.svg" alt="Invocation, publication, visibility to the scheduler, selection, completion, and caller return are distinct milestones. Admission governs credit initialization; publication need not immediately make a request selectable."></div><figcaption><strong>Figure 5.</strong> A theorem about continuously selectable clients cannot silently cover a request that has not reached the scheduler.</figcaption></figure>
+      <p>For work conservation, also ask whether runnable demand exists outside the policy’s choice set. A fair ordering of the visible queue says nothing by itself about requests withheld at admission or delayed in discovery.</p>
+      <details><summary>What exactly must a service contract specify?</summary><ul><li>The metric: useful protected work, scheduler-billed occupancy, or another stated resource.</li><li>The eligible cohort and its visibility at every selection boundary.</li><li>How new and returning clients receive credits, and whether credits persist.</li><li>The selection rule and bounds on service increments.</li></ul><p>A billing timer may include request handling as well as useful work. To transfer billed fairness to useful-service fairness, cumulative pairwise accounting error must also be bounded. Small individual timing errors alone do not establish that bound.</p></details>
+      <p class="takeaway">First state what is guaranteed. Then ask how much realizing it costs.</p>
+    </section>
+
+    <section id="runs" class="chapter" aria-labelledby="runs-title">
+      <p class="chapter-number">06 / THE CONNECTION</p>
+      <h2 id="runs-title">A service rule can restrict an execution pattern.</h2>
+      <p>Consider only two backlogged clients on distinct fixed cores. Every operation adds the same positive service amount. If their persistent service credits must stay close after <em>every</em> operation, one client cannot run forever while the other waits.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Bounded consecutive caller services"><img src="figures/explainer/bounded-runs.svg" alt="With equal increments of one and an allowed gap of two, a client's signed credit difference can go from minus two to plus two in four consecutive services. A fifth would violate the gap. Under caller execution, this also bounds a same-core run."></div><figcaption><strong>Figure 6.</strong> A restricted gap argument, not a minimum-credit trace. The allowed service sequence restricts the executor sequence only because clients execute on their own cores.</figcaption></figure>
+      <details><summary>The small result behind the picture</summary><p>Let the allowed gap be <var>B</var>, each increment be <var>c</var> &gt; 0, and <var>B</var> ≥ <var>c</var>. A client can start at most <var>B</var> behind and finish at most <var>B</var> ahead. Its consecutive run therefore has at most ⌊2<var>B</var>/<var>c</var>⌋ operations.</p><p>This uses distinct fixed caller cores, persistent credits, equal positive increments, and a gap bound at every service boundary. Turning executor changes into elapsed-time lower bounds additionally needs a certified non-overlapping movement cost. This is neither a universal impossibility result nor incremental overhead relative to an unfair lock.</p></details>
+      <p class="takeaway">Must changing the service recipient also change the executing core?</p>
+    </section>
+
+    <section id="delegation" class="chapter" aria-labelledby="delegation-title">
+      <p class="chapter-number">07 / THE ARCHITECTURAL RESPONSE</p>
+      <h2 id="delegation-title">Send the work to an executor.<br>Do not move execution with every client.</h2>
+      <p>A delegation lock lets a <strong>combiner</strong> execute operations on clients’ behalf. The next client can receive service while the executor remains the same. The service scheduler still makes a choice; that choice no longer has to transfer execution.</p>
+      <p>This changes the <a href="#trilemma">trilemma’s execution coupling</a>: an ideal scheduler can serve a low-credit ready request on the retained executor, rather than favor the current caller or wait for a cooldown. It can keep serving available requests without a required intra-batch ownership handoff. Whether that arrangement is fast still depends on request and scheduling costs; whether the implementation keeps work moving still depends on discovery, admission, and executor progress.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Same service order with two execution architectures"><img src="figures/execution-placement.svg" width="720" height="560" alt="For the same equal-cost A B A B service order, caller cores alternate zero and one, while delegation can execute all four steps on a retained core E. Requests and results still cross the executor boundary."></div><figcaption><strong>Figure 7.</strong> Hold service order fixed and change execution placement. These columns are service steps, not four separate cores.</figcaption></figure>
+      <div class="interactive lab" id="execution-lab" hidden>
+        <div class="lab-heading"><span class="eyebrow">Try the separation</span><h3>Same four requests. Watch the core.</h3></div>
+        <fieldset class="control-group"><legend>Who executes?</legend><label><input type="radio" name="execution-mode" value="caller" checked> Each selected caller</label><label><input type="radio" name="execution-mode" value="combiner"> Retained combiner E on core 0</label></fieldset>
+        <div id="execution-sequence" class="execution-sequence" aria-label="Equal-cost service order A B A B"><span>A</span><span>B</span><span>A</span><span>B</span></div>
+        <div class="core-pair"><div class="core" id="core-0"><span>CORE 0</span><strong id="core-0-label">Client A</strong><small id="core-0-work">Waiting to start</small></div><div class="core" id="core-1"><span>CORE 1</span><strong>Client B</strong><small id="core-1-work">Waiting to start</small></div></div>
+        <div class="button-row"><button type="button" id="execution-next">Execute next request</button><button type="button" id="execution-reset" class="secondary">Reset</button></div>
+        <p id="execution-status" class="lab-status" role="status"></p>
+        <p class="fine-print">E can be caller A acting as combiner; this example does not add a dedicated core. Executor changes are counted, not cache transfers. No timing or residency is simulated.</p>
+      </div>
+      <aside class="reading-note"><strong>This architectural idea has a history.</strong> Flat combining and queue-based combining exploit retained execution. <a href="#ref-tclocks">TCLocks</a> makes delegation available through ordinary lock interfaces. SCL already suggests usage-fair scheduling of delegated requests. Our question is the contract and cost of that arrangement, not whether the combination can be invented.</aside>
+      <p class="takeaway">Change who benefits without necessarily changing who executes.</p>
+    </section>
+
+    <section id="combiner" class="chapter" aria-labelledby="combiner-title">
+      <p class="chapter-number">08 / THE CONCRETE DESIGN</p>
+      <h2 id="combiner-title">FC-PQ puts the service choice at the combiner.</h2>
+      <p>Think of a priority queue ordered by recorded service. The combiner finds a low-credit client, executes its delegate, charges the service, and publishes the result. The priority queue itself is sequential under combiner ownership; it is not a second concurrently shared scheduler.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Combiner request and service cycle"><img src="figures/explainer/combiner-cycle.svg" alt="Clients publish requests to the combiner. The combiner selects low recorded usage, executes on protected state, charges service, publishes a result, then continues or releases ownership."></div><figcaption><strong>Figure 8.</strong> The design makes the separation concrete. The abstract scheduler contract still needs admission, accounting, and visibility rules in the implementation.</figcaption></figure>
+      <div class="responsibilities"><article><span>01</span><h3>Accounting</h3><p>Does the charged interval represent the service promised?</p></article><article><span>02</span><h3>Admission</h3><p>Is a pending client visible, and is its starting credit justified?</p></article><article><span>03</span><h3>Batch control</h3><p>When does combining stop, and when can the executor return?</p></article></div>
+      <details><summary>What the current implementation does not yet establish</summary><p>The audit at baseline <code>56a02ab</code> found that FC-PQ initializes newcomers from historical mean per-operation charge, not cumulative virtual service. Its post-pop clamp cannot promote an unpopped client; a reserved but unpublished announcement can stall discovery. The limit of 64 counts queue pops, not completed operations. Billing includes more than benchmark useful work, and the combiner timer is not a full-pass measurement.</p><p>These are reasons not to transfer the abstract guarantee unconditionally to the current Rust implementation. Fairness, competitive performance, and work conservation each need their own evidence; a priority queue alone certifies none of them. This explainer makes no production repair.</p></details>
+    </section>
+
+    <section id="communication" class="chapter" aria-labelledby="communication-title">
+      <p class="chapter-number">09 / WHY A COMMUNICATION MODEL HELPS</p>
+      <h2 id="communication-title">A delay can be hidden.<br>Its resource demand is not erased.</h2>
+      <p>Request publication, execution, and result notification can overlap. Adding all their latencies as if they occurred one after another overcharges the critical path. Ignoring communication because it overlaps is also wrong: it still consumes endpoint and communication capacity.</p>
+      <div class="logp-cards" aria-label="LogP vocabulary"><article><strong>L</strong><h3>Latency</h3><p>Delivery delay along a dependency.</p></article><article><strong>o</strong><h3>Overhead</h3><p>Endpoint time spent handling communication.</p></article><article><strong>g</strong><h3>Gap</h3><p>Pacing between sends or receives.</p></article><article><strong>P</strong><h3>Processors</h3><p>The participating execution resources.</p></article></div>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Overlapped communication versus exposed delay"><img src="figures/explainer/overlap.svg" alt="A request transfer partly overlaps another operation's useful service; only the remaining dependent tail delays the next operation. Overlapped communication still consumes resources."></div><figcaption><strong>Figure 9.</strong> Count only exposed, non-overlapping delay on the serialized path. Also check separate rate bottlenecks.</figcaption></figure>
+      <p>We borrow this separation from <a href="#ref-logp">LogP</a> and adapt it to cache-coherent shared memory. <strong>A cached spin load is not automatically a network message.</strong> Coherence events, topology, footprints, and protocol dependencies need their own mapping.</p>
+      <details><summary>What is included in the cost ledger?</summary><p>Useful operation execution; request/result communication; selection and accounting; protected-state movement; scheduler-state reacquisition; and pass administration. A cache miss charged to useful service must not be charged again as movement. The model also distinguishes completion from caller return and hidden latency from a rate limit.</p><p>The following simplified comparison assumes common warm operation cost, matched completed work and resources, sustained contention, and no uncovered idle time. The technical appendix restores differing warm costs and idle terms.</p></details>
+    </section>
+
+    <section id="costs" class="chapter" aria-labelledby="costs-title">
+      <p class="chapter-number">10 / THE CONDITIONAL ADVANTAGE</p>
+      <h2 id="costs-title">Does the movement saved pay the new bill?</h2>
+      <p>Delegation replaces some owner-handoff costs with request handling, scheduling, and combining costs. It wins in the simplified model only when the saved costs cover those remaining costs.</p>
+      <div class="equation-pair"><article><span>Caller-executed CFL</span><div><var>c</var> + <var>h</var> + <var>m</var></div><p>Warm work + protocol/policy + actual movement</p></article><article><span>FC-PQ</span><div><var>c</var> + <var>d</var> + <var>a</var>/<var>b</var></div><p>Warm work + per-request costs + shared pass costs</p></article></div>
+      <p>Cancel the common warm work <var>c</var>. The question becomes whether <strong><var>h</var> + <var>m</var> &gt; <var>d</var> + <var>a</var>/<var>b</var></strong>. Here <var>b</var> means actual completions per pass, not a configured budget.</p>
+      <p>This compact comparison assumes <strong>no uncovered idle time</strong>. If a policy leaves runnable work unserved, charge that idle time as well, as in the technical appendix. A caller’s entire cooldown is not system idle if other requests execute meanwhile. Work conservation and low per-completion overhead are separate questions.</p>
+      <figure class="diagram static-only"><div class="figure-scroll" tabindex="0" role="region" aria-label="Conditional cost crossover diagram"><img src="figures/cost-crossover.svg" width="720" height="456" alt="FC-PQ's modeled overhead d plus a divided by batch occupancy falls toward d. It crosses CFL overhead H only if H is larger than d. If d is at least H, no positive occupancy produces a strict advantage."></div><figcaption><strong>Figure 10.</strong> More completions can dilute a pass cost, but not the per-request cost floor.</figcaption></figure>
+      <div class="interactive lab cost-lab" id="cost-lab" hidden>
+        <div class="lab-heading"><span class="eyebrow">Explore a model, not a benchmark</span><h3>Move the crossover</h3></div>
+        <p>Arbitrary cost units. These controls hold costs fixed as occupancy changes; real protocols may not. Common warm work is omitted from both sides, so the bars show <strong>overhead, not total runtime or speedup</strong>.</p>
+        <div class="preset-row" aria-label="Illustrative model presets"><button type="button" class="secondary" data-preset="reuse">Enough work to amortize</button><button type="button" class="secondary" data-preset="sparse">Sparse passes</button><button type="button" class="secondary" data-preset="local">CFL already local</button><button type="button" class="secondary" data-preset="requests">Expensive requests</button></div>
+        <div class="cost-controls">
+          <label for="cost-h"><span>CFL protocol/policy <var>h</var><output id="cost-h-value" for="cost-h">2</output></span><input id="cost-h" type="range" min="0" max="20" step="1" value="2"></label>
+          <label for="cost-m"><span>CFL actual movement <var>m</var><output id="cost-m-value" for="cost-m">10</output></span><input id="cost-m" type="range" min="0" max="30" step="1" value="10"></label>
+          <label for="cost-d"><span>PQ per-request cost <var>d</var><output id="cost-d-value" for="cost-d">4</output></span><input id="cost-d" type="range" min="0" max="30" step="1" value="4"></label>
+          <label for="cost-a"><span>PQ shared pass cost <var>a</var><output id="cost-a-value" for="cost-a">24</output></span><input id="cost-a" type="range" min="0" max="60" step="1" value="24"></label>
+          <label for="cost-b"><span>Mean completions/pass <var>b</var><output id="cost-b-value" for="cost-b">6</output></span><input id="cost-b" type="range" min="0.25" max="16" step="0.25" value="6"></label>
+        </div>
+        <figure class="live-figure"><div class="cost-bar-row"><strong>CFL</strong><div class="cost-track"><span id="bar-h" class="cost-h"></span><span id="bar-m" class="cost-m"></span></div><output id="cost-cfl-total">12</output></div><div class="cost-bar-row"><strong>FC-PQ</strong><div class="cost-track"><span id="bar-d" class="cost-d"></span><span id="bar-pass" class="cost-pass"></span></div><output id="cost-pq-total">8</output></div><ul class="legend"><li><i class="cost-h"></i> h · protocol</li><li><i class="cost-m"></i> m · movement</li><li><i class="cost-d"></i> d · per request</li><li><i class="cost-pass"></i> a/b · amortized pass</li></ul><div class="figure-scroll" tabindex="0" role="region" aria-label="Interactive cost curve"><svg id="cost-chart" viewBox="0 0 760 330" role="img" aria-labelledby="cost-chart-title cost-chart-desc"><title id="cost-chart-title">Overhead versus mean completed batch occupancy</title><desc id="cost-chart-desc">The FC-PQ curve falls toward its per-request cost floor. The CFL line is constant for this toy model.</desc></svg></div><figcaption><strong>Figure 10.</strong> The same algebra as the static schematic, now with adjustable toy parameters.</figcaption></figure>
+        <p id="cost-status" class="lab-status" role="status"></p>
+        <p id="cost-threshold" class="threshold-note"></p>
+      </div>
+      <div class="worked-example"><h3>A worked example you can read without controls</h3><p>Suppose <var>h</var> + <var>m</var> = 12, <var>d</var> = 4, and <var>a</var> = 24. At two completions per pass, FC-PQ overhead is 4 + 24/2 = <strong>16</strong>: it loses. At three it is <strong>12</strong>: a tie. At six it is <strong>8</strong>: lower modeled overhead. If per-request cost rises to 14, no amount of batching beats 12.</p></div>
+      <details><summary>The threshold and the assumptions behind it</summary><p>Let <var>g</var> = <var>h</var> + <var>m</var> − <var>d</var>. For nonnegative costs and <var>g</var> &gt; 0, strict advantage requires <var>b</var> &gt; <var>a</var>/<var>g</var>. If <var>g</var> ≤ 0, no positive <var>b</var> produces a strict win. If <var>a</var> = 0 and <var>g</var> &gt; 0, every positive <var>b</var> satisfies the inequality.</p><p>The mean <var>b</var> can be fractional, including below one when empty passes are counted. Only a fixed positive integer completed-batch size permits the integer threshold ⌊<var>a</var>/<var>g</var>⌋ + 1. Costs, including executor-change behavior, must remain applicable as occupancy changes.</p><p>CFL’s <var>m</var> credits its actual NUMA policy and local reuse; it is not a compulsory cross-socket transfer. FC-PQ’s pass cost includes remaining protected- and scheduler-state reacquisition. Lower serialized-path cost predicts higher throughput only when that path is the bottleneck. Nothing here is a measured hardware ranking.</p></details>
+      <p class="takeaway">Batching can remove a shared cost per request. It cannot remove every cost per request.</p>
+    </section>
+
+    <section id="batching" class="chapter" aria-labelledby="batching-title">
+      <p class="chapter-number">11 / TWO EASY COUNTING MISTAKES</p>
+      <h2 id="batching-title">A budget is not a batch.<br>A completion is not a return.</h2>
+      <p>A combining pass can attempt work without completing it. To measure amortization, divide <strong>total completions by total passes</strong>, including empty passes.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Actual completions and mean batch occupancy"><img src="figures/explainer/batch-occupancy.svg" alt="Three passes complete four, zero, and two operations. Total N is six, E is three, so mean occupancy b is two. Empty passes still count and can incur overhead."></div><figcaption><strong>Figure 11.</strong> The configured FC-PQ limit of 64 is a queue-pop limit, not evidence of 64 completions per pass.</figcaption></figure>
+      <p>A larger batch can also keep an executor busy after its <em>own</em> request is finished. A waiting caller may observe its result and resume while the combiner continues other clients’ work.</p>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Request completion versus executor return"><img src="figures/explainer/completion-return.svg" alt="The combiner completes its own request, then continues serving B and C before it returns. A waiting client can observe a published result earlier. Completion, notification, and return are separate milestones."></div><figcaption><strong>Figure 12.</strong> Amortization and caller responsiveness are different questions. These are schematic timelines, not measured durations.</figcaption></figure>
+      <details><summary>Why not use mean batch size as a response bound?</summary><p>A mean says nothing about the longest pass. A return-tail bound requires an enforced maximum amount of remaining work and bounds on every part of that work, including unsuccessful attempts, notification, and suspension. A service-gap theorem does not provide those elapsed-time bounds.</p><p>For trace accounting, <var>b</var> = <var>N</var>/<var>E</var> and <var>p</var> = <var>F</var>/<var>E</var>, where <var>F</var> counts executor changes. With mean administration <var>A</var> and conditional change costs <var>M</var> + <var>K</var>, <var>a</var> = <var>A</var> + <var>p</var>(<var>M</var> + <var>K</var>). When <var>F</var> = 0, the change term is zero without defining conditional means.</p></details>
+    </section>
+
+    <section id="limits" class="chapter" aria-labelledby="limits-title">
+      <p class="chapter-number">12 / THE BOUNDARIES MATTER</p>
+      <h2 id="limits-title">A retained executor is an opportunity.<br>Not a cache-residency promise.</h2>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Limits of executor locality"><img src="figures/explainer/residency-limits.svg" alt="One executor can retain access across clients, but distinct or large operation footprints may evict protected data; a later pass can use another executor. Request and scheduler traffic remain."></div><figcaption><strong>Figure 13.</strong> Removing a necessary intra-batch ownership handoff does not remove capacity misses, interference, payload traffic, or later executor changes.</figcaption></figure>
+      <div class="failure-grid"><article><div class="mini-visual sparse" aria-hidden="true"><i></i><i></i><i></i></div><h3>Too little work</h3><p>Small or empty passes leave overhead to amortize over few completions.</p><a href="#costs">Explore sparse passes ↑</a></article><article><div class="mini-visual payload" aria-hidden="true"><i></i><i></i><i></i></div><h3>Too much request traffic</h3><p>Large payloads or scheduler metadata raise the per-request floor.</p></article><article><div class="mini-visual local" aria-hidden="true"><i></i><i></i><i></i></div><h3>Little movement to save</h3><p>Effective CFL locality makes delegation’s extra work harder to justify.</p></article><article><div class="mini-visual tail" aria-hidden="true"><i></i><i></i><i></i></div><h3>Tight return budgets</h3><p>Finishing your operation may not let you stop being the combiner.</p></article></div>
+      <h3>Do not confuse two different comparisons.</h3>
+      <figure class="diagram"><div class="figure-scroll" tabindex="0" role="region" aria-label="Performance advantage versus incremental fairness cost"><img src="figures/explainer/two-comparisons.svg" alt="Compare CFL with FC-PQ to test competitive performance under matched work, service objectives, and resources. Compare fair and policy-disabled variants of the same delegation protocol to isolate what the fairness policy adds."></div><figcaption><strong>Figure 14.</strong> Beating CFL would not, by itself, establish that fairness is cheap. Original FC versus FC-PQ is not the controlled policy ablation.</figcaption></figure>
+      <p class="takeaway">The useful claim is an explained operating region, not “delegation always wins.”</p>
+    </section>
+
+    <section id="evidence" class="chapter" aria-labelledby="evidence-title">
+      <p class="chapter-number">13 / WHAT THIS STORY ESTABLISHES</p>
+      <h2 id="evidence-title">An argument has several kinds of evidence.</h2>
+      <figure class="evidence-map"><div><span>CONCEPT</span><strong>Separate service from execution</strong><p>The diagrams show the architectural choice.</p></div><div><span>CONDITIONAL ANALYSIS</span><strong>State the premises, derive the consequence</strong><p>Service bounds and the cost inequality apply in their stated models.</p></div><div class="open-evidence"><span>STILL REQUIRED</span><strong>Refine, calibrate, and test</strong><p>Show the implementation meets the contract and predicts held-out behavior.</p></div><figcaption><strong>Figure 15.</strong> A picture is not a proof; a model result is not an implementation guarantee; an illustration is not a benchmark.</figcaption></figure>
+      <p>The source analyses and audit already exist. The current diagrams and teaching controls make them easier to understand. They do <strong>not</strong> fill the empirical or implementation gaps.</p>
+      <details id="evidence-slots"><summary>The ten open evidence slots, preserved from the manuscript</summary><ul class="evidence-list">
+        <li data-evidence-id="MOTIVATION-RESULT"><code>MOTIVATION-RESULT</code> — A real application or controlled workload demonstrating the allocation problem.</li>
+        <li data-evidence-id="NOVELTY-POSITION"><code>NOVELTY-POSITION</code> — Broader prior-work comparison before fixing the novelty claim.</li>
+        <li data-evidence-id="EVAL-SETUP"><code>EVAL-SETUP</code> — Revisions, machine, core budget, workload, uncertainty, and instrumentation.</li>
+        <li data-evidence-id="EVAL-SERVICE"><code>EVAL-SERVICE</code> — Cohort, accounting, service-gap, and admission evidence.</li>
+        <li data-evidence-id="EVAL-CFL"><code>EVAL-CFL</code> — Matched-work CFL/FC-PQ results, crossovers, uncertainty, and losing regimes.</li>
+        <li data-evidence-id="EVAL-COST"><code>EVAL-COST</code> — Matched policy controls separating direct and indirect costs.</li>
+        <li data-evidence-id="EVAL-APPLICATION"><code>EVAL-APPLICATION</code> — Semantically equivalent application behavior and role-aware return latency.</li>
+        <li data-evidence-id="IMPLEMENTATION-REFINEMENT"><code>IMPLEMENTATION-REFINEMENT</code> — Admission, visibility, persistent credits, billing, and correct measurements.</li>
+        <li data-evidence-id="ANALYTICAL-CHECKS"><code>ANALYTICAL-CHECKS</code> — Additional finite residency/crossover checks, supplementary to the proofs.</li>
+        <li data-evidence-id="CALIBRATION-CONTRACT"><code>CALIBRATION-CONTRACT</code> — Independently calibrated costs and predictions made before held-out runs.</li>
+      </ul><p>The existing eight-group <code>check_model.py</code> artifact does not cover the companion’s residency result or CFL-specific comparison. Browser checks of these teaching controls do not discharge that evidence slot or establish Rust correctness.</p></details>
+      <div class="closing"><p class="eyebrow">The idea to carry away</p><h3>Fairness constrains service.<br>It need not dictate execution placement.</h3><p>The goal is fair service, high useful-work throughput, and no deliberate idle while runnable work waits. Separating service from execution can ease that three-way tension. Whether the saving pays for scheduling, requests, and batches—and whether admission and progress preserve work conservation—must be established, not assumed.</p><a href="#top">Back to the visual story ↑</a></div>
+    </section>
+
+    <footer class="references" id="references">
+      <h2>Sources and deeper reading</h2>
+      <p>Local source material: <a href="story-draft.tex">manuscript</a>, <a href="story-details.tex">technical appendix</a>, <a href="performance.tex">performance analysis</a>, <a href="fairness.tex">fairness analysis</a>, <a href="implementation-audit.tex">implementation audit</a>, and <a href="README.md">artifact and reproduction notes</a>. The previous <a href="../../.worktree/logp/story-draft.pdf">illustrated PDF</a> remains available when built.</p>
+      <ol>
+        <li id="ref-scl">Patel et al. <a href="https://doi.org/10.1145/3342195.3387521">Avoiding Scheduler Subversion using Scheduler-Cooperative Locks</a>. EuroSys 2020. Lock opportunity and the prior fair-delegation suggestion.</li>
+        <li id="ref-cfl">Park and Eom. <a href="https://doi.org/10.1145/3627535.3638477">Locks as a Resource: Fairly Scheduling Lock Occupation with CFL</a>. PPoPP 2024. Usage/group scheduling and NUMA locality.</li>
+        <li>Hendler, Incze, Shavit, and Tzafrir. <a href="https://doi.org/10.1145/1810479.1810540">Flat Combining and the Synchronization-Parallelism Tradeoff</a>. SPAA 2010.</li>
+        <li>Fatourou and Kallimanis. Revisiting the Combining Synchronization Technique. PPoPP 2012.</li>
+        <li id="ref-tclocks">Gupta et al. <a href="https://www.usenix.org/conference/osdi23/presentation/gupta">Ship your Critical Section, Not Your Data: Enabling Transparent Delegation with TCLocks</a>. OSDI 2023.</li>
+        <li id="ref-logp">Culler et al. <a href="https://doi.org/10.1145/155332.155333">LogP: Towards a Realistic Model of Parallel Computation</a>. PPoPP 1993.</li>
+        <li>Ramos and Hoefler. <a href="https://spcl.inf.ethz.ch/Publications/index.php?pub=162">Modeling Communication in Cache-Coherent SMP Systems—A Case-Study with Xeon Phi</a>. HPDC 2013.</li>
+      </ol>
+      <p class="fine-print">Offline-first: no external scripts, fonts, analytics, or runtime dependencies. Links to publications need a connection. All diagrams are conceptual. Production lock implementations and the existing manuscript are unchanged by this companion.</p>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

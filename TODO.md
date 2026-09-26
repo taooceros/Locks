@@ -9,6 +9,13 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ## Done (infrastructure)
 
+- [x] **Theoretical analysis: separate performance and fairness models.**
+  *(Done on `research/logp-analysis`, merged 2026-09-26: [analysis artifact](analysis/logp/README.md),
+  [story draft](analysis/logp/story-draft.tex), eight passing deterministic
+  checks. Establishes the service-sequence/executor-sequence framework, the
+  conditional crossover b(M+h-d) > M+A+K, and the limits of current FC-PQ's
+  fairness bound. All ten evidence slots remain open; they map to E1-E3 below.)*
+
 - [x] **Reorganize local artifacts for git worktree use.**
   *(Done: 2026-03-28 — benchmark runs default to `.worktree/output`, perf
   profiling writes to `.worktree/profiles`, analysis scripts resolve output
