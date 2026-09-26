@@ -5,12 +5,18 @@ edition = "2021"
 
 [workspace]
 
+# Exactly one of `native` and `patched` per binary; build.py selects them.
 [features]
-redb_profile = []
+native = ["dep:redb_upstream"]
+patched = ["dep:redb", "dep:libdlock"]
+test_hooks = ["patched", "redb/dlock_test_hooks"]
 
 [dependencies]
-redb = "=3.1.0"
-libdlock = { path = "../../crates/libdlock", default-features = false }
+# Upstream redb 3.1.0 from crates.io, untouched (the `native` variant).
+redb_upstream = { package = "redb", version = "=3.1.0", optional = true }
+# The same crate archive with the numbered patches in patches/ applied by build.py.
+redb = { path = "../../.worktree/redb-src/redb-3.1.0", optional = true }
+libdlock = { path = "../../crates/libdlock", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"

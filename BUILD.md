@@ -9,11 +9,13 @@ Cargo workspace at repo root with three members:
 - `crates/libdlock` — library crate `libdlock` (lock implementations, traits, tests)
 - `crates/upscaledb-bridge` — synchronous C ABI for single-operation synchronization integration
 
-`integration/redb` is a separate, lockfile-pinned Cargo workspace using unmodified
-redb. UpScaleDB integration preserves its original single-operation bodies while
-changing synchronization. Setup, correctness checks and commands are documented
-in [integration/README.md](integration/README.md). Builds, databases and raw results
-belong under ignored `.worktree/` paths.
+`integration/redb` is a separate, lockfile-pinned Cargo workspace. Its `native`
+build uses unmodified crates.io redb 3.1.0; its patched builds use the same crate
+plus numbered patches (applied by `integration/redb/build.py`) so the delegation
+lock serialises redb's write path. UpScaleDB integration preserves its original
+single-operation bodies while changing synchronization. Setup, correctness checks
+and commands are documented in [integration/README.md](integration/README.md).
+Builds, databases and raw results belong under ignored `.worktree/` paths.
 
 ## Commands
 
@@ -29,9 +31,8 @@ cargo test -p upscaledb-bridge --release -- --test-threads=1
 cargo test -p upscaledb-bridge --release --features profile,test-hooks -- --test-threads=1
 python3 -m unittest discover -s integration/upscaledb/tests -p 'test_*.py' -v
 
-# Build the standalone database experiment
-cargo build --manifest-path integration/redb/Cargo.toml --release --locked
-cargo build --manifest-path integration/redb/Cargo.toml --release --locked --features redb_profile
+# Build the redb experiment (pinned source + patches, three binaries, provenance)
+python3 -m integration.redb.build --output-dir .worktree/redb-build-01
 
 # Test specific module (e.g. dlock2 unit tests only)
 cargo test -p libdlock --release --lib dlock2_unit_test

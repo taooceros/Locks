@@ -29,6 +29,16 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   Verified 28 Python tests, 14 renamed CLI entrypoints, shared capture of a real DB
   error gate, and shared logged execution through a real trial and renamed analyzer.
 
+- [x] **Integrate delegation locks inside redb's write path (UpScaleDB-style).**
+  [Guide](integration/redb/README.md). Replaced the external-wrapper harness over
+  unmodified redb with pinned redb 3.1.0 + numbered patches: one fixed-shape write
+  body shared by `refactored` (original Mutex/Condvar) and the bridge
+  (`bridge_mutex`/`mcs`/`fc`/`fc_pq`); `native` stays upstream. Admission-only
+  replacement deliberately not built (decision in the guide). Verified: 54/54 DB
+  gate cases, 165 upstream redb tests on the patched tree, a broken-lock negative
+  control tripping the writer assertion, and 72 fresh-process smoke cells with
+  provenance (refactored vs native within repeat noise). No formal matrix run.
+
 ## Phase 0: Foundation & Cleanup
 
 - [x] **Implement Jain's Fairness Index computation.**

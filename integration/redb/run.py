@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
-"""Bounded native redb write-transaction matrix; one immutable trial directory per cell."""
+"""Fresh-process redb write-path trials; one immutable trial directory per cell.
+
+--prepare-only snapshots binaries from a verified build (build.py) and freezes
+their source/patch/binary identity and CPU/NUMA placement. --smoke runs a small
+timed cohort (all variants, 3 repetitions) whose analysis includes the
+refactored-vs-native control check. --run runs the formal matrix only when
+explicitly requested. Every failure is retained.
+"""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import random
 import resource
 import shutil
+import statistics
 import subprocess
 import sys
 
+from integration.redb.build import OUT, load_build
+
 HERE = Path(__file__).resolve().parents[2]
-MANIFEST = HERE / "integration/redb/Cargo.toml"
-BACKENDS = ("native", "mutex", "mcs", "fc", "fc_pq")
-COHORTS = ("all1", "half1_half8", "half1_half64")
-DURABILITIES = ("immediate", "none")
+VARIANTS = ('native', 'refactored', 'bridge_mutex', 'mcs', 'fc', 'fc_pq')
+COHORTS = ('all1', 'half1_half8', 'half1_half64')
+SMOKE_COHORTS = ('all1', 'half1_half64')
+DURABILITIES = ('immediate', 'none')
 DEFAULT_CPUS = tuple(range(8, 16))
 SEEDS = (0x7BEF523C1678F92D, 0xDB3102F89158C44B, 0x7E3BB4A250D1E66F)
+DURATION_MS = 2000
 TRIAL_TIMEOUT_SECONDS = 30
 DB_FILE_LIMIT = 512 * 1024 * 1024
 MAX_RECORDS_PER_WORKER = 8_000_000
@@ -30,18 +42,6 @@ def digest(path):
         for block in iter(lambda: stream.read(1 << 20), b""):
             h.update(block)
     return h.hexdigest()
-
-
-def source_hashes():
-    sources = [MANIFEST, MANIFEST.with_name("Cargo.lock"),
-               HERE / "integration/redb/src/main.rs", Path(__file__).resolve()]
-    sources += sorted((HERE / "crates/libdlock").rglob("*.rs"))
-    sources += sorted((HERE / "crates/libdlock").rglob("*.c"))
-    sources += sorted((HERE / "crates/libdlock").rglob("*.h"))
-    sources += sorted((HERE / "c").rglob("*.c"))
-    sources += sorted((HERE / "c").rglob("*.h"))
-    sources += [HERE / "crates/libdlock/Cargo.toml", HERE / "crates/libdlock/build.rs"]
-    return {str(p.relative_to(HERE)): digest(p) for p in sources}
 
 
 def write_json(path, data):
@@ -70,28 +70,19 @@ def parse_numa_node(value):
     return node
 
 
-def positive_int(value):
-    try:
-        number = int(value)
-    except ValueError as error:
-        raise argparse.ArgumentTypeError("expected a positive integer") from error
-    if number < 1:
-        raise argparse.ArgumentTypeError("expected a positive integer")
-    return number
-
-
 def check_affinity(cpus):
     if os.sched_getaffinity(0) != set(cpus):
         raise RuntimeError(f"run under taskset -c {','.join(map(str, cpus))} (exactly eight requested CPUs)")
 
-def command_capture(command, directory, timeout=None, env=None, limit_db=False):
+
+def command_capture(command, directory, timeout=None, limit_db=False):
     directory.mkdir(parents=True, exist_ok=False)
     (directory / "command.json").write_text(json.dumps(command) + "\n")
     def limits():
         if limit_db:
             resource.setrlimit(resource.RLIMIT_FSIZE, (DB_FILE_LIMIT, DB_FILE_LIMIT))
     try:
-        completed = subprocess.run(command, cwd=HERE, env=env, timeout=timeout,
+        completed = subprocess.run(command, cwd=HERE, timeout=timeout,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    preexec_fn=limits if limit_db else None, check=False)
         out, err, exit_code, timed_out = completed.stdout, completed.stderr, completed.returncode, False
@@ -105,42 +96,66 @@ def command_capture(command, directory, timeout=None, env=None, limit_db=False):
             "timeout_seconds": timeout}
 
 
-def prepare(root, target, cpus, numa_node, build_jobs):
+def placement(cpus, numa_node):
+    """CPU topology rows for the chosen CPUs and the memory policy actually applied."""
+    rows = subprocess.check_output(["lscpu", "-p=CPU,CORE,SOCKET,NODE"], text=True).splitlines()
+    topology = {}
+    for row in rows:
+        if row.startswith("#"):
+            continue
+        cpu, core, socket, node = (int(x) if x else None for x in row.split(","))
+        if cpu in cpus:
+            topology[cpu] = {"core": core, "socket": socket, "node": node}
+    if len(topology) != len(cpus):
+        raise RuntimeError("some requested CPUs are not present in lscpu output")
+    model = next((line.split(":", 1)[1].strip() for line in
+                  subprocess.check_output(["lscpu"], text=True).splitlines()
+                  if line.startswith("Model name")), None)
+    policy = None
+    if numa_node is not None:
+        policy = subprocess.check_output(["numactl", f"--membind={numa_node}", "numactl", "--show"],
+                                         text=True).splitlines()
+    return {"cpus": list(cpus), "topology": topology,
+            "distinct_physical_cores": len({(t["socket"], t["core"]) for t in topology.values()}),
+            "cpu_nodes": sorted({t["node"] for t in topology.values()}),
+            "numa_memory_node": numa_node, "numactl_show_under_membind": policy,
+            "cpu_model": model, "kernel": platform.release()}
+
+
+def prepare(root, build_dir, cpus, numa_node):
     check_affinity(cpus)
+    build = load_build(build_dir)
     root.mkdir(parents=True, exist_ok=False)
-    target.mkdir(parents=True, exist_ok=True)
     binaries = root / "binaries"
     binaries.mkdir()
-    build_info = {}
-    for kind in ("primary", "profile"):
-        command = ["cargo", "build", "--manifest-path", str(MANIFEST),
-                   "--release", "--locked", "--bin", "redb_transactions",
-                   "--target-dir", str(target / kind), "-j", str(build_jobs)]
-        if kind == "profile":
-            command += ["--features", "redb_profile"]
-        log = root / "build" / kind
-        entry = command_capture(command, log, timeout=1200)
-        write_json(log / "result.json", entry)
-        if entry["exit_code"] != 0 or entry["timed_out"]:
-            raise RuntimeError(f"{kind} build failed, evidence: {log}")
-        built = target / kind / "release/redb_transactions"
-        snapshot = binaries / kind
-        shutil.copy2(built, snapshot)
+    snapshots = {}
+    for name, entry in build["binaries"].items():
+        if name == "test_hooks":
+            continue  # correctness-gate only; never timed
+        snapshot = binaries / name
+        shutil.copy2(build_dir / entry["file"], snapshot)
         snapshot.chmod(0o555)
-        build_info[kind] = {"sha256": digest(snapshot), "file": str(snapshot.relative_to(root)),
-                            "command": command}
-    source = source_hashes()
+        if digest(snapshot) != entry["sha256"]:
+            raise RuntimeError(f"snapshot of {name} differs from build manifest")
+        snapshots[name] = {"file": str(snapshot.relative_to(root)), "sha256": entry["sha256"],
+                           "features": entry["features"], "build_command": entry["command"]}
     identity = {
+        "schema": 2,
+        "build_dir": str(build_dir),
+        "redb_source": build["redb_source"],
+        "harness_sources_sha256": build["harness_sources_sha256"],
+        "runner_sha256": digest(Path(__file__).resolve()),
+        "build_git_head": build["git_head"], "build_git_dirty_paths": build["git_dirty_paths"],
         "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip(),
-        "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(),
-        "redb_version": "=3.1.0", "source_sha256": source, "binaries": build_info,
-        "workers": 8, "cpus": list(cpus), "numa_memory_node": numa_node,
+        "rustc": build["rustc"], "binaries": snapshots, "variant_binary": build["variant_binary"],
+        "workers": 8, "placement": placement(cpus, numa_node),
+        "cpus": list(cpus), "numa_memory_node": numa_node,
         "filesystem": subprocess.check_output(["findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "-T", str(root)], text=True).strip(),
         "max_records_per_trial": MAX_RECORDS,
         "max_records_per_worker": MAX_RECORDS_PER_WORKER, "max_db_file_bytes": DB_FILE_LIMIT,
-        "time_limit_seconds": TRIAL_TIMEOUT_SECONDS, "durability_note":
-            "Immediate and None are distinct redb API modes; close/reopen is not a power-failure test",
-        "service_note": "profile service begins after begin_write, includes commit I/O (not CPU); only completed-in-window requests credited, no boundary clipping; FC-PQ internal billing may also include begin_write/admin",
+        "duration_ms": DURATION_MS, "time_limit_seconds": TRIAL_TIMEOUT_SECONDS,
+        "durability_note": "Immediate and None are distinct redb API modes; close/reopen is not a power-failure test",
+        "boundary_note": "Critical section = begin + inserts + commit (incl. commit I/O) of one fixed-shape request; reads are outside every write lock",
         "db_retention": "DB bytes+SHA256 and raw stdout/stderr retained per cell; DB files removed after hashing to bound disk",
         "seeds": SEEDS,
     }
@@ -150,30 +165,35 @@ def prepare(root, target, cpus, numa_node, build_jobs):
 
 def load_identity(root):
     identity = json.loads((root / "manifest.json").read_text())
-    if identity["source_sha256"] != source_hashes():
-        raise RuntimeError("source changed after preparation; create fresh output root")
-    for kind in ("primary", "profile"):
-        file = root / identity["binaries"][kind]["file"]
-        if digest(file) != identity["binaries"][kind]["sha256"]:
-            raise RuntimeError(f"prepared binary changed: {file}")
+    if identity.get("schema") != 2:
+        raise RuntimeError("manifest predates the patched-redb runner; prepare a fresh output root")
+    build = load_build(Path(identity["build_dir"]))
+    for key in ("redb_source", "harness_sources_sha256"):
+        if build[key] != identity[key]:
+            raise RuntimeError(f"{key} changed after preparation; create fresh output root")
+    if identity["runner_sha256"] != digest(Path(__file__).resolve()):
+        raise RuntimeError("runner changed after preparation; create fresh output root")
+    for name, entry in identity["binaries"].items():
+        if digest(root / entry["file"]) != entry["sha256"]:
+            raise RuntimeError(f"prepared binary changed: {name}")
     return identity
 
 
-def trial(root, identity, kind, cohort, durability, backend, repeat, seed, smoke=False):
-    name = f"r{repeat}_{cohort}_{durability}_{kind}_{backend}"
+def trial(root, identity, cohort, durability, variant, repeat, seed, smoke=False):
+    name = f"r{repeat}_{cohort}_{durability}_{variant}"
     directory = root / ("smoke" if smoke else "runs") / name
-    binary = root / "binaries" / kind
+    binary_name = identity["variant_binary"][variant]
+    binary = root / identity["binaries"][binary_name]["file"]
     command = [str(binary), "--database", str(directory / "db.redb"),
-               "--backend", backend, "--cohort", cohort, "--durability", durability,
-               "--seed", str(seed), "--duration-ms", "2000",
+               "--variant", variant, "--cohort", cohort, "--durability", durability,
+               "--seed", str(seed), "--duration-ms", str(DURATION_MS),
                "--cpus", ",".join(map(str, identity["cpus"]))]
     if identity["numa_memory_node"] is not None:
         command = ["numactl", f"--membind={identity['numa_memory_node']}", *command]
-    if smoke:
-        command += ["--smoke-transactions", "4"]
     entry = command_capture(command, directory, timeout=TRIAL_TIMEOUT_SECONDS, limit_db=True)
-    entry.update({"cohort": cohort, "durability": durability, "backend": backend,
-                  "repeat": repeat, "seed": seed, "build": kind, "smoke": smoke})
+    entry.update({"cohort": cohort, "durability": durability, "variant": variant,
+                  "repeat": repeat, "seed": seed, "smoke": smoke, "binary": binary_name,
+                  "binary_sha256": identity["binaries"][binary_name]["sha256"]})
     db_file = directory / "db.redb"
     if db_file.exists():
         entry["database_bytes"] = db_file.stat().st_size
@@ -181,9 +201,9 @@ def trial(root, identity, kind, cohort, durability, backend, repeat, seed, smoke
     if entry["exit_code"] == 0 and not entry["timed_out"]:
         try:
             result = json.loads((directory / "stdout").read_text())
-            if (result["backend"], result["cohort"], result["durability"], result["seed"],
-                result["profile"], len(result["workers"])) != (
-                    backend, cohort, durability, seed, kind == "profile", 8):
+            if (result["variant"], result["cohort"], result["durability"], result["seed"],
+                result["smoke_transactions"], len(result["workers"])) != (
+                    variant, cohort, durability, seed, None, 8):
                 raise ValueError("result identity mismatch")
             if (result["max_records"] != MAX_RECORDS
                 or result["max_records_per_worker"] != MAX_RECORDS_PER_WORKER
@@ -203,25 +223,25 @@ def trial(root, identity, kind, cohort, durability, backend, repeat, seed, smoke
     return "results" in entry
 
 
+def cells(smoke):
+    cohorts = SMOKE_COHORTS if smoke else COHORTS
+    return [(r, cohort, durability) for r in range(len(SEEDS))
+            for cohort in cohorts for durability in DURABILITIES]
+
+
 def run_matrix(root, smoke=False):
     identity = load_identity(root)
     check_affinity(identity["cpus"])
     if (root / ("smoke" if smoke else "runs")).exists():
         raise RuntimeError("refusing to overwrite prior raw trials; use a fresh output root")
     errors = []
-    if smoke:
-        combinations = ((0, COHORTS[-1], durability) for durability in DURABILITIES)
-    else:
-        combinations = ((r, cohort, durability) for r in range(len(SEEDS))
-                        for cohort in COHORTS for durability in DURABILITIES)
-    for repeat, cohort, durability in combinations:
+    for repeat, cohort, durability in cells(smoke):
         seed = SEEDS[repeat]
-        order = list(BACKENDS)
+        order = list(VARIANTS)
         random.Random(seed ^ (COHORTS.index(cohort) << 8) ^ (DURABILITIES.index(durability) << 16)).shuffle(order)
-        for kind in ("primary", "profile"):
-            for backend in order:
-                if not trial(root, identity, kind, cohort, durability, backend, repeat, seed, smoke):
-                    errors.append(f"r{repeat} {cohort} {durability} {kind} {backend}")
+        for variant in order:
+            if not trial(root, identity, cohort, durability, variant, repeat, seed, smoke):
+                errors.append(f"r{repeat} {cohort} {durability} {variant}")
     if errors:
         raise RuntimeError(f"{len(errors)} failed cells; raw failure evidence retained: {errors}")
 
@@ -256,183 +276,144 @@ def metrics(entry):
     histogram = [sum(w["response_ns_log2"][b] for w in workers) for b in range(64)]
     short_histogram = [sum(workers[i]["response_ns_log2"][b] for i in small) for b in range(64)]
     long_histogram = [sum(workers[i]["response_ns_log2"][b] for i in large) for b in range(64)]
-    output = {"throughput_tx_s": sum(tx)/seconds, "throughput_records_s": sum(records)/seconds,
-              "short_tx_s": sum(tx[i] for i in small)/seconds,
-              "long_tx_s": sum(tx[i] for i in large)/seconds,
-              "short_records_s": sum(records[i] for i in small)/seconds,
-              "long_records_s": sum(records[i] for i in large)/seconds,
-              "tx_jain": jain(tx), "max_zero_progress_windows": max(
-                  sum(row[i] == 0 for row in windows) for i in range(8)),
-              "worker_tx": tx, "worker_records": records, "windows_tx": windows,
-              "response_p50_ms_upper": quantile(histogram, 0.50),
-              "response_p95_ms_upper": quantile(histogram, 0.95),
-              "response_p99_ms_upper": quantile(histogram, 0.99),
-              "short_response_p99_ms_upper": quantile(short_histogram, 0.99),
-              "long_response_p99_ms_upper": quantile(long_histogram, 0.99),
-              "process_cpu_seconds": result["process_cpu_ns"] / 1e9,
-              "reopened_exact": result["reopened_exact"],
-              "reopen_error": result["reopen_error"]}
-    if result["profile"]:
-        service = [w["service_wall_ns"] for w in workers]
-        output["service_wall_jain"] = jain(service)
-        output["worker_service_wall_seconds"] = [x/1e9 for x in service]
-        output["service_wall_p99_ms_upper"] = quantile(
-            [sum(w["service_ns_log2"][b] for w in workers) for b in range(64)], 0.99)
-    return output
+    return {"throughput_tx_s": sum(tx)/seconds, "throughput_records_s": sum(records)/seconds,
+            "short_tx_s": sum(tx[i] for i in small)/seconds,
+            "long_tx_s": sum(tx[i] for i in large)/seconds,
+            "tx_jain": jain(tx), "max_zero_progress_windows": max(
+                sum(row[i] == 0 for row in windows) for i in range(8)),
+            "worker_tx": tx, "worker_records": records, "windows_tx": windows,
+            "response_p50_ms_upper": quantile(histogram, 0.50),
+            "response_p99_ms_upper": quantile(histogram, 0.99),
+            "short_response_p99_ms_upper": quantile(short_histogram, 0.99),
+            "long_response_p99_ms_upper": quantile(long_histogram, 0.99),
+            "process_cpu_seconds": result["process_cpu_ns"] / 1e9,
+            "reopened_exact": result["reopened_exact"],
+            "reopen_error": result["reopen_error"]}
 
-def paired_effects(rows):
-    lookup = {(r["repeat"], r["cohort"], r["durability"], r["build"], r["backend"]): r
+
+COMPARISONS = (("refactored", "native"), ("bridge_mutex", "refactored"),
+               ("fc_pq", "fc"), ("fc_pq", "native"), ("mcs", "bridge_mutex"), ("fc", "bridge_mutex"))
+
+
+def paired_effects(rows, cohorts):
+    lookup = {(r["repeat"], r["cohort"], r["durability"], r["variant"]): r
               for r in rows if not r["failure"]}
     effects = []
     for repeat in range(len(SEEDS)):
-        for cohort in COHORTS:
+        for cohort in cohorts:
             for durability in DURABILITIES:
-                for build in ("primary", "profile"):
-                    for comparator in ("fc", "native"):
-                        base = lookup.get((repeat, cohort, durability, build, comparator))
-                        pq = lookup.get((repeat, cohort, durability, build, "fc_pq"))
-                        if base is None or pq is None:
-                            continue
-                        effects.append({
-                            "repeat": repeat, "cohort": cohort, "durability": durability,
-                            "build": build, "comparison": f"fc_pq_vs_{comparator}",
-                            "records_per_s_ratio": pq["throughput_records_s"]/base["throughput_records_s"]
-                                if base["throughput_records_s"] else None,
-                            "transactions_per_s_ratio": pq["throughput_tx_s"]/base["throughput_tx_s"]
-                                if base["throughput_tx_s"] else None,
-                            "short_tx_per_s_ratio": pq["short_tx_s"]/base["short_tx_s"]
-                                if base["short_tx_s"] else None,
-                            "long_tx_per_s_ratio": pq["long_tx_s"]/base["long_tx_s"]
-                                if base["long_tx_s"] else None,
-                            "process_cpu_s_delta": pq["process_cpu_seconds"]-base["process_cpu_seconds"],
-                            "response_p99_ms_upper_delta": (
-                                pq["response_p99_ms_upper"]-base["response_p99_ms_upper"]
-                                if pq["response_p99_ms_upper"] is not None
-                                and base["response_p99_ms_upper"] is not None else None),
-                            "service_wall_jain_delta": (
-                                pq["service_wall_jain"]-base["service_wall_jain"]
-                                if build == "profile" and comparator == "fc"
-                                and pq["service_wall_jain"] is not None
-                                and base["service_wall_jain"] is not None else None),
-                            "zero_progress_windows_delta": (
-                                pq["max_zero_progress_windows"]-base["max_zero_progress_windows"]),
-                        })
-    perturbation = []
-    for repeat in range(len(SEEDS)):
-        for cohort in COHORTS:
-            for durability in DURABILITIES:
-                for backend in BACKENDS:
-                    primary = lookup.get((repeat, cohort, durability, "primary", backend))
-                    profile = lookup.get((repeat, cohort, durability, "profile", backend))
-                    if primary is not None and profile is not None:
-                        perturbation.append({
-                            "repeat": repeat, "cohort": cohort, "durability": durability,
-                            "backend": backend,
-                            "profile_vs_primary_records_per_s_ratio":
-                                profile["throughput_records_s"]/primary["throughput_records_s"]
-                                if primary["throughput_records_s"] else None,
-                            "profile_vs_primary_transactions_per_s_ratio":
-                                profile["throughput_tx_s"]/primary["throughput_tx_s"]
-                                if primary["throughput_tx_s"] else None,
-                        })
-    return effects, perturbation
+                for treatment, base_name in COMPARISONS:
+                    base = lookup.get((repeat, cohort, durability, base_name))
+                    other = lookup.get((repeat, cohort, durability, treatment))
+                    if base is None or other is None:
+                        continue
+                    effects.append({
+                        "repeat": repeat, "cohort": cohort, "durability": durability,
+                        "comparison": f"{treatment}_vs_{base_name}",
+                        "records_per_s_ratio": other["throughput_records_s"]/base["throughput_records_s"]
+                            if base["throughput_records_s"] else None,
+                        "transactions_per_s_ratio": other["throughput_tx_s"]/base["throughput_tx_s"]
+                            if base["throughput_tx_s"] else None,
+                        "process_cpu_s_delta": other["process_cpu_seconds"]-base["process_cpu_seconds"],
+                        "tx_jain_delta": (other["tx_jain"]-base["tx_jain"]
+                                          if other["tx_jain"] is not None and base["tx_jain"] is not None else None),
+                    })
+    return effects
 
 
+def control_check(rows, cohorts):
+    """refactored vs native per cohort/durability: repeat-level spread is the noise."""
+    checks = []
+    for cohort in cohorts:
+        for durability in DURABILITIES:
+            values = {}
+            for variant in ("native", "refactored"):
+                values[variant] = [r["throughput_tx_s"] for r in rows if not r["failure"]
+                                   and r["cohort"] == cohort and r["durability"] == durability
+                                   and r["variant"] == variant]
+            native, refactored = values["native"], values["refactored"]
+            if len(native) < 2 or len(refactored) < 2:
+                checks.append({"cohort": cohort, "durability": durability, "verdict": "insufficient repeats"})
+                continue
+            native_median, refactored_median = statistics.median(native), statistics.median(refactored)
+            spread = max((max(v) - min(v)) / statistics.median(v) for v in (native, refactored))
+            ratio = refactored_median / native_median
+            checks.append({"cohort": cohort, "durability": durability,
+                           "native_tx_s": native, "refactored_tx_s": refactored,
+                           "median_ratio_refactored_over_native": ratio,
+                           "noise_relative_range": spread,
+                           "verdict": "within noise" if abs(ratio - 1) <= spread else "outside noise"})
+    return checks
 
-def analyze(root):
-    paths = sorted((root / "runs").glob("*/result.json"))
-    expected = len(SEEDS) * len(COHORTS) * len(DURABILITIES) * 2 * len(BACKENDS)
+
+def analyze(root, smoke=False):
+    kind = "smoke" if smoke else "runs"
+    cohorts = SMOKE_COHORTS if smoke else COHORTS
+    paths = sorted((root / kind).glob("*/result.json"))
+    expected = len(cells(smoke)) * len(VARIANTS)
     if len(paths) != expected:
-        raise RuntimeError(f"expected {expected} formal raw results, found {len(paths)}")
-    entries = [json.loads(path.read_text()) for path in paths]
+        raise RuntimeError(f"expected {expected} {kind} raw results, found {len(paths)}")
     rows = []
-    for path, entry in zip(paths, entries):
-        row = {key: entry[key] for key in ("cohort", "durability", "backend", "repeat", "seed", "build")}
+    for path in paths:
+        entry = json.loads(path.read_text())
+        row = {key: entry[key] for key in ("cohort", "durability", "variant", "repeat", "seed", "binary", "binary_sha256")}
         row["raw_result"] = str(path.relative_to(root))
         row["failure"] = entry.get("parse_error") or ("timeout" if entry["timed_out"] else
                           f"exit {entry['exit_code']}" if entry["exit_code"] != 0 else None)
         if "results" in entry:
             row.update(metrics(entry))
         rows.append(row)
-    analysis = root / "analysis"
+    analysis = root / ("analysis-smoke" if smoke else "analysis")
     analysis.mkdir(exist_ok=False)
-    effects, perturbation = paired_effects(rows)
     write_json(analysis / "summary.json", {
-        "rows": rows, "paired_effects": effects, "profile_perturbation": perturbation,
+        "cohort_kind": kind, "rows": rows, "paired_effects": paired_effects(rows, cohorts),
+        "refactored_vs_native": control_check(rows, cohorts),
         "failures": sum(bool(r["failure"]) for r in rows),
-        "caveats": ["Each mode is a distinct durability regime; None is not a durable-commit claim.",
-                    "Profile service starts after begin_write, ends after commit, includes I/O and is not CPU; native writer-lock waiting is requester latency. FC-PQ billing may include begin_write/admin. Service allocation credits only requests completed within the 2s window, never clips requests crossing its boundary.",
-                    "Native redb is the baseline; wrappers do not improve the native engine itself.",
-                    "Transaction size changes completed mix; total tx/s is not isolated scheduler overhead.",
-                    "Windowed progress and response tails complement whole-run Jain; zero windows cannot rule out shorter stalls.",
-                    "Close/reopen does not simulate power failure. Profile build timestamps the callback and may perturb scheduling."]})
+        "caveats": ["Each durability mode is a distinct regime; None is not a durable-commit claim.",
+                    "The critical section includes commit I/O; Immediate throughput is dominated by fsync.",
+                    "Reads are outside every write lock and are not measured here.",
+                    "Transaction size changes completed mix; total tx/s is not isolated lock overhead.",
+                    "Smoke uses 3 repetitions: the control check is a noise-bounded sanity check, not a precise estimate.",
+                    "Close/reopen does not simulate power failure."]})
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), sharex=True)
-    for column, cohort in enumerate(COHORTS):
+    fig, axes = plt.subplots(len(DURABILITIES), len(cohorts), figsize=(4.7 * len(cohorts), 8), sharex=True, squeeze=False)
+    for column, cohort in enumerate(cohorts):
         for row_index, durability in enumerate(DURABILITIES):
             axis = axes[row_index][column]
-            for build, style in (("primary", "o"), ("profile", "x")):
-                series = [next((r for r in rows if r["repeat"] == repeat and r["cohort"] == cohort
-                    and r["durability"] == durability and r["build"] == build and r["backend"] == backend), None)
-                    for backend in BACKENDS for repeat in range(len(SEEDS))]
-                for backend_index, backend in enumerate(BACKENDS):
-                    values = [r["throughput_records_s"] for r in series[backend_index*len(SEEDS):(backend_index+1)*len(SEEDS)]
-                              if r is not None and not r["failure"]]
-                    if values:
-                        axis.plot([backend_index]*len(values), values, style, alpha=.65,
-                                  label=build if backend_index == 0 else None)
+            for index, variant in enumerate(VARIANTS):
+                values = [r["throughput_tx_s"] for r in rows if not r["failure"] and r["cohort"] == cohort
+                          and r["durability"] == durability and r["variant"] == variant]
+                axis.plot([index] * len(values), values, "o", alpha=.65)
             axis.set_title(f"{cohort} / {durability}")
-            axis.set_xticks(range(len(BACKENDS)), BACKENDS, rotation=40)
-            axis.set_ylabel("verified records/s (2s window)")
-            if column == 0 and row_index == 0:
-                axis.legend()
+            axis.set_xticks(range(len(VARIANTS)), VARIANTS, rotation=40)
+            axis.set_ylabel(f"verified tx/s ({DURATION_MS // 1000}s window)")
     fig.tight_layout()
     fig.savefig(analysis / "throughput.png", dpi=160)
-    plt.close(fig)
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    for kind, axis in (("primary", axes[0]), ("profile", axes[1])):
-        for cohort in COHORTS[1:]:
-            for durability in DURABILITIES:
-                subset = [r for r in rows if r["build"] == kind and r["cohort"] == cohort
-                    and r["durability"] == durability and r["backend"] in ("fc", "fc_pq") and not r["failure"]]
-                xkey = "tx_jain" if kind == "primary" else "service_wall_jain"
-                for backend, marker in (("fc", "o"), ("fc_pq", "x")):
-                    points = [r for r in subset if r["backend"] == backend and r[xkey] is not None]
-                    if points:
-                        axis.scatter([r[xkey] for r in points],
-                                     [r["throughput_records_s"] for r in points],
-                                     marker=marker, label=f"{cohort} {durability} {backend}", alpha=.75)
-        axis.set_title(f"{kind}: FC/FC-PQ paired tradeoff")
-        axis.set_xlabel("requester " + ("transaction-count" if kind == "primary" else "executor service-wall") + " Jain")
-        axis.set_ylabel("verified records/s")
-        axis.legend(fontsize=7)
-    fig.tight_layout()
-    fig.savefig(analysis / "fairness_tradeoff.png", dpi=160)
     plt.close(fig)
     return len([r for r in rows if r["failure"]])
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare-only", action="store_true")
     mode.add_argument("--smoke", action="store_true")
-    mode.add_argument("--run", action="store_true")
-    mode.add_argument("--analyze-only", action="store_true")
+    mode.add_argument("--run", action="store_true", help="formal matrix; only when explicitly intended")
+    mode.add_argument("--analyze-only", action="store_true", help="analyze the formal matrix")
+    mode.add_argument("--analyze-smoke", action="store_true", help="analyze the smoke cohort")
     parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--target-root", type=Path, default=HERE / ".worktree/redb-cargo-target")
+    parser.add_argument("--build-dir", type=Path, default=OUT, help="verified build.py output (prepare)")
     parser.add_argument("--cpus", type=parse_cpus, help="eight distinct CPUs; default at prepare: 8-15")
     parser.add_argument("--numa-node", type=parse_numa_node, default=argparse.SUPPRESS,
                         help="memory node for numactl; default at prepare: 0; none disables binding")
-    parser.add_argument("--build-jobs", type=positive_int, default=8)
     args = parser.parse_args()
     root = args.output_root.resolve()
     if args.prepare_only:
         cpus = args.cpus if args.cpus is not None else DEFAULT_CPUS
         numa_node = getattr(args, "numa_node", 0)
-        prepare(root, args.target_root.resolve(), cpus, numa_node, args.build_jobs)
+        prepare(root, args.build_dir.resolve(), cpus, numa_node)
     elif args.smoke or args.run:
         identity = load_identity(root)
         if args.cpus is not None and list(args.cpus) != identity["cpus"]:
@@ -440,7 +421,7 @@ def main():
         if hasattr(args, "numa_node") and args.numa_node != identity["numa_memory_node"]:
             raise RuntimeError("--numa-node differs from prepared campaign")
         run_matrix(root, smoke=args.smoke)
-    elif analyze(root):
+    elif analyze(root, smoke=args.analyze_smoke):
         raise RuntimeError("analysis contains failed cells; inspect raw results")
 
 
