@@ -1,0 +1,64 @@
+\section{Evaluation}
+\label{sec:storyevaluation}
+All experimental results remain unfilled. The evaluation distinguishes service
+fairness, conditional advantage over CFL, incremental policy cost, and
+application benefit.
+
+\draftslot{EVAL-SETUP}{Specify revisions, machine/compiler, placement and total
+core budget, workload provenance, repetitions, uncertainty, and instrumentation
+cost.}
+
+\subsection{Does the scheduler distribute the intended service?}
+Heterogeneous operations test whether balanced accounting corresponds to
+balanced useful service. Traces relate selectable membership and every
+charge to completed work, comparing billed and useful-service spread
+(Section~\ref{sec:storyfairness}). The initial test
+uses equal credits and a fixed continuously selectable cohort with bounded
+nonnegative increments and no resets. Separate arrival/reactivation tests
+examine admission rather than borrowing that guarantee. Agreement cannot
+establish unconditional correctness of current FC-PQ.
+
+\draftslot{EVAL-SERVICE}{Supply cohort and accounting evidence, per-class
+service, spread trajectories, and admission failures; identify which contract
+premise each violation challenges.}
+
+\subsection{When does FC-PQ outperform CFL?}
+The principal comparison will use CFL's specified fair-policy mode, aligning
+the scheduled entity and service metric with FC-PQ. Offered work, completed
+operation mix, and hardware resources must be matched; per-class completions
+and useful service prevent cheap operations from inflating throughput.
+Varying footprint, load, and placement tests
+Equation~\eqref{eq:storycrossover}, including CFL's NUMA locality.
+Actual completions, not queue pops or budgets, determine batch occupancy.
+
+We will calibrate costs independently and predict batch occupancy and executor
+changes before held-out runs in the model's stated regime. Measured traces
+will diagnose errors, not count as predictions (Appendix~\ref{app:costs}).
+
+\placeholderfigure{EVAL-CFL}{Matched-work CFL and FC-PQ throughput across
+footprint/load regimes, with useful-service fairness alongside. Mark predicted
+crossovers, uncertainty, and the region where FC-PQ loses.}{Planned comparison
+of conditional performance advantage and service allocation.}
+
+\subsection{What is the incremental price of fairness?}
+We will compare fair and policy-disabled versions of the same delegation
+protocol; original FC versus FC-PQ is not this control. Separate controlled
+measurements will distinguish direct accounting and selection costs from
+changes in order, batching, locality, and completed mix
+(Appendix~\ref{app:evidence}).
+
+\draftslot{EVAL-COST}{Supply matched-control costs, independent calibration,
+held-out prediction errors and crossover failures, distinguishing direct
+components from indirect execution changes.}
+
+\subsection{Does the application retain the benefit?}
+An application comparison must preserve semantics and return to heterogeneous
+service demand, counting adaptation and marshalling costs. Per-class return
+distributions will separate executor-callers from waiting callers: completion
+need not mean the executor can return immediately. Sparse activity, capacity
+eviction, large request metadata, and tight return budgets deliberately probe
+where locality or amortization ceases to help.
+
+\draftslot{EVAL-APPLICATION}{Supply a semantically equivalent application,
+delegate ownership/affinity restrictions, useful-work throughput and role-aware
+return evidence, including losing regimes and non-lock bottlenecks.}

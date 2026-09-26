@@ -299,6 +299,82 @@ Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 9.
 
 Full spec: [`docs/EXPERIMENT_PLAN.md`](docs/EXPERIMENT_PLAN.md) §Group 10.
 
+- [x] **Propose a source-grounded LogP theoretical analysis.**
+  *(Drafted: 2026-09-23, isolated `research/logp-analysis` worktree; see
+  [LogP Analysis Proposal](plan/2026-03-23/algorithm-improvement-plan.md#logp-analysis-proposal).
+  Defines communication versus scheduler costs, a conditional batch crossover,
+  an ideal fixed-cohort fairness proof and implementation gaps. This completes
+  the analysis proposal only; instrumentation, measurements and algorithm
+  changes are not approved or completed.)*
+
+- [x] **Develop the publication analysis framework and implementation audit.**
+  *(Completed in `research/logp-analysis`; see the
+  [Publication Analysis Plan](plan/2026-09-23/logp-publication-analysis.md) and
+  [analysis artifact](analysis/logp/README.md). Delivered separate performance
+  and fairness analyses with proofs, counterexamples and family comparisons,
+  all 21 DLock2 and 11 DLock1 target mappings,
+  and eight passing deterministic checks with identical normal/optimized
+  reports. Mathematical/source review and PDF inspection completed.
+  Production locks unchanged; no hardware-performance or Rust-correctness claim.)*
+
+- [x] **Draft the full paper story with explicit evidence placeholders.**
+  *(Completed user-approved companion:
+  [story draft](analysis/logp/story-draft.tex) and
+  [evaluation narrative](analysis/logp/story-evaluation.tex).
+  Eight-page PDF built and visually inspected; 21 unique evidence slots,
+  including four figure placeholders. Mathematical and narrative review
+  completed. New finite checks, implementation refinement, calibration,
+  and experiments remain explicit placeholders; production code unchanged.)*
+
+- [x] **Study reference-paper storytelling and propose a stronger narrative.**
+  *(Read primary TCLocks, CFL, and SCL sources; recorded their problem-to-design
+  and claim-to-evidence structures in the
+  [narrative study](plan/2026-09-23/logp-publication-analysis.md#reference-paper-narrative-study-2026-09-24).
+  Proposal leads with the cost of a specified service guarantee and execution
+  placement; manuscript/PDF, production code, and experiments unchanged.)*
+
+- [x] **Rewrite the paper story for simpler reader-facing advocacy.**
+  *(Delivered [Fair Service, Local Execution](analysis/logp/story-draft.tex),
+  with CFL as the main conditional performance comparison, two main-text
+  equation displays, an execution diagram, concise evaluation, and a
+  [technical appendix](analysis/logp/story-details.tex). Six-page PDF built
+  and visually inspected; 10 explicit evidence slots. Claim/narrative reviews
+  completed; production code, original analyses, and experiments unchanged.)*
+
+- [x] **Reframe the paper around analysis-motivated lock design.**
+  *(Revised [story draft](analysis/logp/story-draft.tex): current practice and
+  state of the art → unresolved problem → independent service/execution
+  framework → FC-PQ design rationale and conditional CFL comparison.
+  Six-page PDF built and visually inspected; 10 evidence slots retained.
+  Claim and narrative reviews completed. Evaluation, appendix, original
+  analyses, production code, and experiments unchanged.)*
+  Follow-up: introduce delegation only after the usage-fair-lock problem;
+  move combining context to the design section. Six-page PDF rebuilt and
+  visually inspected; mathematics and evidence boundaries unchanged.
+
+- [x] **Illustrate the paper's service, execution, and cost argument.**
+  *(Added three editable [SVG figures](analysis/logp/figures/) and a
+  [vector-PDF exporter](analysis/logp/render_figures.py); integrated them into
+  the problem-first [story draft](analysis/logp/story-draft.tex). Seven-page
+  PDF built and visually inspected, with all 10 evidence slots retained.
+  LaTeX retained; Typst conversion was optional. Mathematics, evaluation,
+  appendix, production code, and original analyses unchanged.)*
+
+- [x] **Develop an illustration-first, interactive reading companion.**
+  *(Delivered [Who gets the next turn?](analysis/logp/story-explainer.html):
+  twelve chapters, fifteen numbered visuals, ten new SVGs, and three toy
+  teaching controls. Browser and source review completed; offline, keyboard,
+  mobile, no-JavaScript, and print paths exercised. Existing manuscripts,
+  mathematical claims, production locks, and evaluation strategy unchanged.
+  All ten missing-evidence slots remain open.)*
+  Follow-up: framed fairness, performance, and work conservation as a scoped
+  caller-execution design tension; distinguished policy idle, handoff costs,
+  and inactive-client contracts before presenting delegation as a response.
+  Further follow-up: expanded the lock/CPU-scheduling background and added
+  an existing-solutions chapter (FIFO, locality-aware handoff, SCL, and CFL).
+  Thirteen chapters now explain mechanisms before the trilemma, including
+  CFL's default, optional strict-guarantee, and grace-period policies.
+
 - [ ] **Run perf stat profiles for all lock variants.**
   Extend `profile.nu` to cover all DLock2 variants. Collect:
   - Cache references/misses (L1, L2, LLC)

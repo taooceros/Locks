@@ -1,0 +1,168 @@
+% Optional technical detail for the simpler paper-story companion.
+\section{Cost accounting and the conditional comparison}
+\label{app:costs}
+For a finite trace, let $N>0$ be completions, $E>0$ passes, and $F$ executor
+changes; count empty passes in $E$. Define ratios of totals
+\begin{equation}
+ \begin{gathered}
+ b=\frac{N}{E},\qquad p=\frac{F}{E},\\
+ a=A+p(M+K),\\
+ \frac{a}{b}=\frac{EA+F(M+K)}{N}.
+ \end{gathered}
+ \label{eq:appendixmapping}
+\end{equation}
+Here $A$ is total exposed administration divided by $E$; $M$ and $K$ are
+exposed protected-state and scheduler-state reacquisition totals divided by
+$F$, respectively. When $F=0$, the change term is zero without defining
+conditional means. Finite startup costs are separate. Warm operation cost
+and $d$ are completion-weighted; unweighted averages of per-pass ratios are
+incorrect. Administration includes work in empty passes, while operation
+costs are attributed across completed work without discarding unsuccessful
+protocol work.
+
+This partition counts only exposed serialized-lane costs. Hidden communication
+latency is not added again, although its resource demand can limit throughput.
+A miss charged to service must not also enter movement or request cost.
+The trace partition is exact accounting; replacing its terms by calibrated
+parameters gives an approximation. With differing warm costs and uncovered
+idle per completion, the fuller expressions are
+\begin{equation}
+ t_{\rm PQ}\simeq c_{\rm PQ}+d+a/b+I_{\rm PQ},\qquad
+ t_{\rm CFL}\simeq c_{\rm CFL}+h+m+I_{\rm CFL}.
+\end{equation}
+A matched completed mix does not alone ensure equal warm costs: order,
+footprint, and interference can matter. In the main text's common-$c$,
+no-idle regime, cancellation gives Equation~\eqref{eq:storycrossover}.
+For nonnegative costs, let $g=m+h-d$. If $g>0$, the equivalent threshold is
+\begin{equation}
+ b>\frac{a}{g}.
+ \label{eq:appendixthreshold}
+\end{equation}
+If $g\le0$, no positive $b$ gives a strict advantage.
+The mean $b$ is real, not necessarily integer or even at least one. Only
+fixed positive integer completed batches permit the threshold
+$b_{\min}=\lfloor a/g\rfloor+1$. Interpreting either threshold as a batch-size
+prediction requires costs, including $p$, to remain applicable as $b$ changes.
+
+CFL's $m$ reflects its actual executor sequence and topology, including
+same-core reuse and same-node versus cross-node transfers. Its NUMA-aware
+policy need not transfer state across sockets on every completion~\cite{cfl}.
+Movement already exists in caller-executed locks; it is not all incremental
+fairness overhead. The inequality orders modeled times, and orders throughput
+only when the serialized lane is the bottleneck in a stable regime. Calibrated
+predictions need actual protocol and hardware parameters. A guaranteed strict
+machine ordering instead needs compatible bounds, for example an upper bound
+on PQ time below a lower bound on CFL time. No numerical gain follows here.
+
+\section{Independent service-fairness argument}
+\label{app:fairness}
+Fix a nonempty finite cohort $\mathcal A$, continuously selectable at every
+selection boundary. Let $U_i$ be cumulative specified service, with initial
+spread $D_0$. One selected client's service increases by a value in
+$[0,C_{\max}]$ at each step; other credits remain unchanged, and none resets.
+For fixed $\delta\ge0$, suppose selection satisfies
+$U_i\le\min_{j\in\mathcal A}U_j+\delta$. Then, at every service boundary,
+\begin{equation}
+ \max_i U_i-\min_i U_i\le B_U:=\max\{D_0,\delta+C_{\max}\}.
+ \label{eq:appendixspread}
+\end{equation}
+\begin{proof}
+Initially the bound holds. If the old minimum is $u$, unchanged credits
+remain in $[u,u+B_U]$. The selected credit cannot decrease and becomes at
+most $u+\delta+C_{\max}\le u+B_U$. The new minimum cannot decrease;
+therefore the spread stays at most $B_U$, completing induction.
+\end{proof}
+Exact-min selection and equal initial credits give $C_{\max}$. This proof
+uses neither execution placement nor any performance parameter. Continuous
+selectability is stronger than having a pending invocation; admission,
+rejoining, and credit resets need separate contracts.
+
+If useful service $U_i$ differs from billed credit $V_i=U_i+e_i$, assume
+$\max_i e_i-\min_i e_i\le E_c$ at every selection. Choosing within $\delta$
+of the minimum $V$ gives, for every $j$,
+$U_i\le U_j+\delta+e_j-e_i\le U_j+\delta+E_c$.
+Thus replace $\delta$ by $\delta+E_c$ above. Small per-operation errors do
+not establish this cumulative pairwise bound. Without it, billed fairness
+need not imply useful-service fairness. Nor does the service invariant
+alone establish an elapsed-time deadline.
+
+\section{Caller-execution residency}
+\label{app:residency}
+\begin{proposition}[Two-client residency constraint]
+\label{prop:appendixresidency}
+Two always-backlogged clients occupy distinct fixed cores. Each operation
+executes on its caller's core, takes fixed protected service $c>0$, and adds
+exactly $c$ to its persistent credit. Suppose $|U_1-U_2|\le B$ initially and
+at every service boundary, with $B\ge c$. A same-client run has length at most
+\begin{equation}
+ q_{\max}=\left\lfloor\frac{2B}{c}\right\rfloor.
+\end{equation}
+If each executor change costs at least $M>0$ on the serialized lane,
+non-overlapped with service or another change, then for every integer $n\ge1$,
+\begin{equation}
+ \begin{aligned}
+ T(n)&\ge nc+M\left(\left\lceil\frac{n}{q_{\max}}\right\rceil-1\right),\\
+ \liminf_{n\to\infty}\frac{T(n)}n&\ge c+\frac{M}{q_{\max}}.
+ \end{aligned}
+\end{equation}
+\end{proposition}
+\begin{proof}
+At a run's start, its client's credit minus the other's is at least $-B$.
+After $k$ services it has increased by $kc$ and cannot exceed $B$, so
+$kc\le2B$. Consequently $n$ services require at least
+$\lceil n/q_{\max}\rceil$ runs and one executor change between adjacent
+runs. Add their stipulated non-overlapping costs; divide by $n$ and take
+the lower limit.
+\end{proof}
+This is total modeled time, not incremental fairness overhead against an
+unfair baseline or an empirical hardware theorem. A measured mean cannot
+supply the stipulated lower bound $M$. Delegation removes the caller--executor
+identity premise: different clients can be served on one core. It does not
+ensure cache residency or remove request, metadata, and eviction costs.
+
+Completion is not caller return. In a pass with actual $k\ge1$ completions,
+an executor finishing its own request first may continue the pass. Only
+certified subsequent-operation and remaining-work bounds justify
+\begin{equation}
+ R_{\rm tail}\le e_{\rm tail}+(k-1)\tau_{\max}.
+\end{equation}
+All post-completion work, including non-service attempts and suspension,
+must be covered. A uniform envelope needs an enforced maximum $k$, never
+mean $b$; service fairness supplies neither bound.
+
+\section{Implementation obligations}
+\label{app:implementation}
+At audited baseline \texttt{56a02ab}, FC-PQ initializes zero-credit newcomers
+with historical mean per-operation charge, not cumulative virtual service.
+Its post-pop minimum clamp is a no-op under valid minimum ordering and
+cannot promote an unpopped client. A reserved but unpublished announcement
+can stall discovery; the pass limit counts 64 pops, not completions.
+Billing surrounds more than benchmark useful work, and the combiner timer
+resets its start during service, invalidating it as a full-pass measurement.
+These facts prevent unconditional application of the abstract contracts.
+\draftslot{IMPLEMENTATION-REFINEMENT}{Establish admission, persistent credits,
+visibility progress, billing semantics, and correct measurement boundaries
+in an identified implementation; supply correctness evidence before claiming
+its guarantees. No production repair is part of this draft.}
+
+\section{Evidence and reproduction}
+\label{app:evidence}
+The separate \src{performance.tex} and \src{fairness.tex} supply independent
+analyses; \src{implementation-audit.tex} records source evidence.
+\src{paper.tex} remains their driver. Build this companion through
+\src{story-draft.tex}; \src{README.md} gives reproduction commands.
+\src{check_model.py}'s existing eight groups do not verify the new residency
+result or this CFL comparison, and prove no Rust or hardware guarantee.
+
+Direct billing overhead needs fixed-selection replay. Direct selector costs
+need identical selectable-state snapshots, pass boundaries, and controlled
+metadata residency, without executing the selectors' chosen delegates.
+End-to-end comparisons separately report changed order, mix, occupancy,
+placement, and idle; equal source budgets do not ensure equal completed work.
+\draftslot{ANALYTICAL-CHECKS}{Add finite residency checks, including nonintegral
+$B/c$ and admissible initial gaps, and exact crossover checks. These supplement,
+not replace, proofs and do not validate concrete concurrent execution.}
+\draftslot{CALIBRATION-CONTRACT}{Calibrate protocol/hardware costs independently;
+predict occupancy and executor changes before held-out runs. Supplying target
+trace $b,p$ reconstructs that trace, not a held-out prediction. Report uncertainty
+and failure regimes; no calibration or measured advantage is asserted.}

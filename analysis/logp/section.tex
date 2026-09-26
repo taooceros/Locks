@@ -1,0 +1,99 @@
+\section{Scope and analytical contract}
+\label{sec:scope}
+We analyze performance and fairness as two separate questions.
+Flat combining~\cite{fc} and queue-based combining~\cite{cc} decouple the
+requester from the executor; handoff locks normally execute the critical
+section on its owner. The same implementation can have a favorable execution
+cost and an inadequate service guarantee, or the reverse.
+
+Section~\ref{sec:performance} models communication, execution placement,
+scheduler work, throughput, and return latency for a given service policy.
+Section~\ref{sec:fairness} defines the service objective and proves bounds
+from selection, visibility, admission, and accounting assumptions, without
+LogP parameters. Each analysis has its own implementation comparison and
+validation criteria. Only Section~\ref{sec:discussion} relates their outputs.
+Batch amortization and minimum-credit scheduling are not claimed as novel.
+We supply conditional results and source evidence, not memory-safety proofs,
+calibrated hardware predictions, or empirical validation from finite checks.
+
+The primary scope is all 21 DLock2 targets at commit \texttt{56a02ab};
+Appendix~\ref{app:inventory} also maps all 11 DLock1 targets and dispatch
+limitations. We assume non-recursive operations on one protected object,
+one outstanding synchronous call per requester, and finite non-preemptive
+delegates. Performance estimates initially assume pinned, non-oversubscribed
+workers; fairness uses explicitly stated cohort and selection assumptions.
+Blocking, preemption, external accesses, and stronger progress or residency
+conditions are not silently treated as harmless.
+
+\begin{definition}[Request and execution epoch]
+A request has events $a$ (invocation), $p$ (publication), $v$ (visibility to the
+service selector), $s$ (service start), $f$ (service finish), $n$ (completion
+notification), and $r$ (caller return). These are causally ordered, but need
+not be adjacent. An execution epoch is one successful combining pass/batch
+or one handoff critical section. Consecutive epochs may use the same core.
+\end{definition}
+Visibility is policy-specific: a node in an announcement ring or a temporary
+completed-node buffer is not necessarily in the current selectable set.
+Completion is not return: a caller acting as combiner may execute more
+requests after its own result is available.
+
+\paragraph{A concrete correctness prerequisite.}
+FC-SL's callers read the global non-atomic usage/served counters before
+acquiring the combiner lock, while a combiner writes them. This is a
+source-level data-race blocker, not a bounded timing-error term
+(Appendix~\ref{app:fcsl-race}). Its abstract scheduler can be analyzed, but
+implementation-level fairness/performance guarantees require synchronization
+repair first. We retain the source unchanged rather than hide the issue by
+analyzing an implicitly repaired implementation.
+
+\input{performance}
+\clearpage
+\input{fairness}
+\clearpage
+\balance
+
+\section{Discussion: relating the two analyses}
+\label{sec:discussion}
+\paragraph{Independent outputs.}
+The performance analysis yields source-work demand, throughput conditions,
+and return-tail certificates for a supplied workload and execution policy.
+The fairness analysis yields service-spread and competing-selection bounds,
+plus the admission and accounting conditions under which they hold.
+Low amortized cost proves no service guarantee; bounded credit spread proves
+no speedup, cache residency, or wall-clock deadline.
+
+\paragraph{An explicit interface, not a circular argument.}
+A policy can change the executed class mix, actual batch occupancy, and
+executor sequence. The performance analysis consumes those quantities as
+measured or separately justified inputs. For example, useful-service
+fractions from Proposition~\ref{prop:bias} can be substituted into
+Equation~\eqref{eq:mix} only when both sets of assumptions hold.
+Its billing overhead is a credit increment, not automatically another
+elapsed-time term to add to the performance equation.
+
+Similarly, a fairness bound on competing selections is not a latency bound.
+Conversion additionally requires bounded admission/discovery, acquisition,
+per-selection elapsed cost, preemption, completion observation, and any
+post-completion combining work. The performance return-tail envelope covers
+only that last component under its stated assumptions. No unconditional
+$O(C_{\max})$ request-response bound follows by combining the two analyses.
+
+\paragraph{Evaluating a design tradeoff.}
+Compare implementation costs at controlled work and placement, then report
+the service guarantee separately. Intra-epoch executor invariance explains
+why reordering requests need not introduce protected-state handoffs, but
+does not remove scheduling cost or establish that the ordering is fair.
+FC-PQ versus FC and CFL versus MCS must therefore be reported as pairs of
+performance and fairness conclusions, not as a single ``fairness is free''
+claim.
+
+\paragraph{Evidence boundary.}
+\label{sec:evidence}
+The same executable artifact runs two independent groups of mathematical
+checks: crossover/return feasibility for performance, and service spread,
+accounting error, waiting, charging bias, and visibility for fairness.
+It also emits explicit counterexamples. Written arguments establish the
+conditional results; finite enumeration supplements them. Neither group is
+an executed Rust schedule, a weak-memory model check, or a machine benchmark.
+The shared appendix records implementation facts and reproduction without
+conflating the two kinds of guarantee.

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="456" viewBox="0 0 720 456" role="img" aria-labelledby="title description">
+  <title id="title">Batching pays only when the per-request cost floor leaves room</title>
+  <desc id="description">Conceptual cost diagram, not measurements. Common warm useful work is removed from both locks. For fixed positive batch cost a and stable nonnegative costs with H equals h plus m greater than d, CFL overhead H is horizontal and FC-PQ overhead d plus a divided by b falls with actual completions per pass b. They cross at b star equals a divided by H minus d. To the right, FC-PQ has lower modeled serialized cost. Its cost approaches d, so if d is at least H, no positive batch occupancy yields a strict advantage. Axes use arbitrary unlabeled scales; the curve samples the reciprocal relationship. No throughput or hardware guarantee is asserted.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 7 4 L 0 8 Z" fill="#526575"/>
+    </marker>
+  </defs>
+  <rect width="720" height="456" fill="#FFFFFF"/>
+  <g font-family="DejaVu Sans, sans-serif" fill="#172B3A">
+    <text x="24" y="34" font-size="27" font-weight="700">Batching helps, but cannot erase every cost</text>
+    <text x="24" y="67" font-size="22" fill="#526575">Exposed overhead per completion (common work omitted)</text>
+
+    <rect x="302" y="91" width="354" height="221" rx="3" fill="#EAF6F5"/>
+    <text x="480" y="123" font-size="24" text-anchor="middle" fill="#126675" font-weight="700">Lower modeled cost</text>
+    <text x="480" y="150" font-size="22" text-anchor="middle" fill="#126675">for delegation</text>
+
+    <path d="M 82 86 L 82 312 L 676 312" fill="none" stroke="#526575" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 82 115 L 82 86" fill="none" stroke="#526575" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <line x1="82" y1="180" x2="656" y2="180" stroke="#2563A6" stroke-width="3"/>
+    <text x="26" y="187" font-size="24" fill="#2563A6" font-weight="700">H</text>
+    <text x="365" y="172" font-size="22" fill="#2563A6">CFL: H = h + m</text>
+
+    <line x1="82" y1="265" x2="656" y2="265" stroke="#7057A3" stroke-width="2.5" stroke-dasharray="8 6"/>
+    <text x="30" y="273" font-size="24" fill="#7057A3" font-weight="700">d</text>
+    <text x="386" y="294" font-size="22" fill="#7057A3">Per-request cost floor</text>
+
+    <polyline points="190,91.852 200,106.525 210,118.906 220,129.493 230,138.649 240,146.646 250,153.690 260,159.944 270,165.532 280,170.556 290,175.096 302,180 315,184.742 330,189.597 350,195.224 380,202.248 410,207.988 450,214.185 490,219.167 530,223.259 570,226.680 610,229.583 650,232.077" fill="none" stroke="#7057A3" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="447" y="205" font-size="22" fill="#7057A3" font-weight="700">FC-PQ: d + a/b</text>
+    <line x1="302" y1="180" x2="302" y2="319" stroke="#526575" stroke-width="2" stroke-dasharray="5 5"/>
+    <circle cx="302" cy="180" r="6" fill="#7057A3" stroke="#FFFFFF" stroke-width="2"/>
+    <text x="114" y="293" font-size="22" fill="#526575">Small batches</text>
+    <text x="302" y="342" font-size="24" text-anchor="middle" font-weight="700">b*</text>
+    <text x="463" y="342" font-size="22">Batch occupancy b</text>
+
+    <text x="24" y="381" font-size="23">Crossover: b* = a / (H − d), for a &gt; 0 and H &gt; d</text>
+    <rect x="24" y="399" width="672" height="43" rx="6" fill="#F2F4F7"/>
+    <text x="360" y="428" font-size="23" text-anchor="middle" font-weight="700">If d ≥ H, no batch gives a strict win.</text>
+  </g>
+</svg>

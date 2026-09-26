@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="650" viewBox="0 0 800 650" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">Retained execution is not guaranteed cache residency</title>
+  <desc id="desc">During one batch, executor E1 serves A, B, and C without a required intra-batch protected-state ownership handoff. Requests, results, and scheduler traffic still exist. The cache drawing is a limited hot subset of one protected state, not a permanent shared-state copy. Large or distinct operation footprints can evict that subset even on the same executor. A later batch may use executor E2 and reacquire the same state.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526575"/></marker></defs>
+  <rect width="800" height="650" fill="white"/>
+  <text x="30" y="42" font-size="28" font-weight="bold" fill="#18323D">One executor removes a handoff requirement</text>
+  <text x="30" y="77" font-size="22" fill="#526575">It does not make the protected working set fit in L1.</text>
+  <rect x="250" y="106" width="520" height="322" rx="12" fill="#F1F5F7" stroke="#18323D" stroke-width="2"/>
+  <text x="273" y="140" font-size="23" font-weight="bold" fill="#18323D">This batch: executor E1</text>
+  <rect x="280" y="164" width="130" height="58" rx="6" fill="#167D8D"/><rect x="443" y="164" width="130" height="58" rx="6" fill="#C86D35"/><rect x="606" y="164" width="130" height="58" rx="6" fill="#526575"/>
+  <g text-anchor="middle" fill="white" font-size="23"><text x="345" y="201">Serve A</text><text x="508" y="201">Serve B</text><text x="671" y="201">Serve C</text></g>
+  <path d="M412 193 H439" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M575 193 H602" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="151" width="147" height="82" rx="8" fill="white" stroke="#526575" stroke-width="2"/>
+  <text x="103" y="184" text-anchor="middle" font-size="22" fill="#18323D"><tspan x="103">Clients</tspan><tspan x="103" dy="29">A, B, C</tspan></text>
+  <path d="M179 180 H246" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M247 212 H181" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="30" y="267" font-size="20" fill="#526575"><tspan x="30">Requests + results</tspan><tspan x="30" dy="28">still cross here</tspan></text>
+  <rect x="280" y="253" width="236" height="119" rx="8" fill="white" stroke="#18323D" stroke-width="2"/>
+  <text x="398" y="282" text-anchor="middle" font-size="21" fill="#18323D">Finite L1 capacity</text>
+  <g fill="#167D8D"><rect x="299" y="298" width="48" height="27"/><rect x="355" y="298" width="48" height="27"/><rect x="411" y="298" width="48" height="27"/></g>
+  <text x="398" y="354" text-anchor="middle" font-size="20" fill="#526575">Hot subset of state</text>
+  <text x="637" y="279" text-anchor="middle" font-size="21" fill="#C86D35"><tspan x="637">Large / distinct</tspan><tspan x="637" dy="28">footprints</tspan></text>
+  <path d="M601 322 H522" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="603" y="354" font-size="20" fill="#C86D35">can evict</text>
+  <text x="510" y="407" text-anchor="middle" font-size="20" fill="#7057A3">Request and scheduler traffic still costs work</text>
+  <path d="M510 430 V483" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="31" y="468" font-size="21" fill="#526575">A later batch may switch</text>
+  <rect x="250" y="487" width="520" height="75" rx="8" fill="white" stroke="#526575" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="510" y="518" text-anchor="middle" font-size="22" fill="#18323D"><tspan x="510">Executor E2</tspan><tspan x="510" dy="28" font-size="20">Same protected state may need reacquisition</tspan></text>
+  <text x="30" y="604" font-size="21" fill="#18323D"><tspan x="30">No required intra-batch ownership handoff ≠ guaranteed L1 residency.</tspan><tspan x="30" dy="29">Conceptual execution arrangement, not a cache-residency guarantee.</tspan></text>
+</svg>

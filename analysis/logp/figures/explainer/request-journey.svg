@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="610" viewBox="0 0 800 610" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">A request crosses distinct protocol events</title>
+  <desc id="desc">Read the upper row left to right, then the lower row right to left, following directed arrows: invocation, publication, visible and selectable, selected, completed, caller returns. Publication does not itself ensure visibility to the selection policy. A pending invocation is therefore not necessarily selectable. Admission must define both eligibility and the credit baseline for new or returning clients. Completion also differs from caller return: result notification, continued executor work, or caller scheduling can remain. Arrow lengths are schematic and promise no elapsed-time deadlines. This is an event vocabulary, not an actual implementation trace.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#18323D"/></marker>
+    <marker id="violet-arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#7057A3"/></marker>
+  </defs>
+  <rect width="800" height="610" fill="white"/>
+  <text x="32" y="43" font-size="28" font-weight="700" fill="#18323D">Pending is not yet selectable</text>
+  <text x="32" y="78" font-size="20" fill="#526575">Follow one request through six distinct events</text>
+  <rect x="25" y="129" width="172" height="91" rx="10" fill="#F1F5F7" stroke="#526575" stroke-width="2"/>
+  <rect x="251" y="129" width="172" height="91" rx="10" fill="#F1F5F7" stroke="#526575" stroke-width="2"/>
+  <rect x="598" y="129" width="177" height="91" rx="10" fill="#F1F5F7" stroke="#7057A3" stroke-width="2.5"/>
+  <text x="111" y="160" text-anchor="middle" font-size="20" fill="#526575">1</text>
+  <text x="111" y="194" text-anchor="middle" font-size="23" font-weight="700" fill="#18323D">Invocation</text>
+  <text x="337" y="160" text-anchor="middle" font-size="20" fill="#526575">2</text>
+  <text x="337" y="194" text-anchor="middle" font-size="23" font-weight="700" fill="#18323D">Publication</text>
+  <text x="686" y="154" text-anchor="middle" font-size="20" fill="#7057A3">3</text>
+  <text x="686" y="182" text-anchor="middle" font-size="22" font-weight="700" fill="#7057A3"><tspan x="686">Visible /</tspan><tspan x="686" dy="26">selectable</tspan></text>
+  <path d="M201 175H244" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M431 175H588" stroke="#7057A3" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#violet-arrow)"/>
+  <path d="M507 135V215 M518 135V215" stroke="#7057A3" stroke-width="4"/>
+  <text x="510" y="110" text-anchor="middle" font-size="20" fill="#7057A3">visibility gate</text>
+  <text x="510" y="249" text-anchor="middle" font-size="20" fill="#7057A3">not automatic</text>
+  <rect x="145" y="269" width="460" height="60" rx="10" fill="#F1F5F7"/>
+  <text x="375" y="294" text-anchor="middle" font-size="20" fill="#18323D"><tspan x="375">Admission defines eligibility</tspan><tspan x="375" dy="25">and a justified credit baseline.</tspan></text>
+  <path d="M686 226V370" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="704" y="292" font-size="20" fill="#526575"><tspan x="704">policy</tspan><tspan x="704" dy="25">choice</tspan></text>
+  <rect x="598" y="379" width="177" height="88" rx="10" fill="#7057A3"/>
+  <rect x="315" y="379" width="193" height="88" rx="10" fill="#F1F5F7" stroke="#526575" stroke-width="2"/>
+  <rect x="25" y="379" width="206" height="88" rx="10" fill="#F1F5F7" stroke="#526575" stroke-width="2"/>
+  <text x="686" y="409" text-anchor="middle" font-size="20" fill="white">4</text>
+  <text x="686" y="444" text-anchor="middle" font-size="23" font-weight="700" fill="white">Selected</text>
+  <text x="412" y="409" text-anchor="middle" font-size="20" fill="#526575">5</text>
+  <text x="412" y="444" text-anchor="middle" font-size="23" font-weight="700" fill="#18323D">Completed</text>
+  <text x="128" y="409" text-anchor="middle" font-size="20" fill="#526575">6</text>
+  <text x="128" y="444" text-anchor="middle" font-size="23" font-weight="700" fill="#18323D">Caller returns</text>
+  <path d="M589 423H517" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M305 423H240" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="552" y="363" text-anchor="middle" font-size="20" fill="#526575">service</text>
+  <text x="269" y="363" text-anchor="middle" font-size="20" fill="#526575">return path</text>
+  <rect x="24" y="500" width="752" height="87" rx="10" fill="#F1F5F7"/>
+  <text x="42" y="530" font-size="20" fill="#18323D"><tspan x="42">Completed ≠ returned: notification or other work can remain.</tspan><tspan x="42" dy="29">These are event boundaries, not elapsed-time promises.</tspan></text>
+</svg>

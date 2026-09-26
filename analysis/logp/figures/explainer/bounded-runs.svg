@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="640" viewBox="0 0 800 640" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">A bounded credit gap limits a restricted caller-executed run</title>
+  <desc id="desc">Allowed-gap illustration, not a minimum-credit trace. This illustrates only the restricted two-client caller-run lemma: always-backlogged clients A and B occupy distinct fixed caller cores 0 and 1; every operation executes on its caller's core, takes the same positive service c, and adds exactly c to its persistent credit. Credits never reset. The absolute credit gap is at most B initially and after every operation. With c equal to 1 and B equal to 2, the most favorable signed gap U_A minus U_B for a run of A is minus 2. Four successive A services make the gap minus 1, 0, 1, and 2. A fifth would make it 3, violating the allowed band. Thus any A run has at most four services under these premises, and under caller execution at most four consecutive executions on core 0. This admissible-gap example is not an exact-minimum schedule, not a claim about general FC-PQ fairness, and not a hardware timing or residency guarantee.</desc>
+  <defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L9 4.5L0 9Z" fill="#18323D"/></marker></defs>
+  <rect width="800" height="640" fill="white"/>
+  <text x="32" y="43" font-size="28" font-weight="700" fill="#18323D">A run cannot exhaust more than the gap</text>
+  <text x="32" y="76" font-size="20" fill="#526575">Allowed-gap illustration, not a minimum-credit trace</text>
+  <rect x="24" y="96" width="752" height="96" rx="10" fill="#F1F5F7"/>
+  <text x="42" y="124" font-size="20" fill="#18323D"><tspan x="42">Always-backlogged A → core 0; B → core 1. Fixed, distinct cores.</tspan><tspan x="42" dy="27">Equal positive increments c = 1; persistent credits, no resets.</tspan><tspan x="42" dy="27">Initially and after every operation: |U_A − U_B| ≤ B = 2.</tspan></text>
+  <text x="120" y="232" text-anchor="middle" font-size="20" fill="#526575">start</text>
+  <text x="235" y="232" text-anchor="middle" font-size="22" font-weight="700" fill="#167D8D">A #1</text>
+  <text x="350" y="232" text-anchor="middle" font-size="22" font-weight="700" fill="#167D8D">A #2</text>
+  <text x="465" y="232" text-anchor="middle" font-size="22" font-weight="700" fill="#167D8D">A #3</text>
+  <text x="580" y="232" text-anchor="middle" font-size="22" font-weight="700" fill="#167D8D">A #4</text>
+  <text x="695" y="232" text-anchor="middle" font-size="22" font-weight="700" fill="#C86D35">A #5?</text>
+  <rect x="74" y="253" width="552" height="113" rx="12" fill="#F1F5F7" stroke="#7057A3" stroke-width="2"/>
+  <text x="350" y="280" text-anchor="middle" font-size="20" fill="#7057A3">Allowed signed gap: −2 to +2</text>
+  <rect x="88" y="297" width="64" height="49" rx="8" fill="white" stroke="#526575" stroke-width="2"/>
+  <rect x="203" y="297" width="64" height="49" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <rect x="318" y="297" width="64" height="49" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <rect x="433" y="297" width="64" height="49" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <rect x="548" y="297" width="64" height="49" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <rect x="663" y="297" width="64" height="49" rx="8" fill="white" stroke="#C86D35" stroke-width="2.5" stroke-dasharray="5 4"/>
+  <text x="120" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#18323D">−2</text>
+  <text x="235" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#18323D">−1</text>
+  <text x="350" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#18323D">0</text>
+  <text x="465" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#18323D">1</text>
+  <text x="580" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#18323D">2</text>
+  <text x="695" y="330" text-anchor="middle" font-size="27" font-weight="700" fill="#C86D35">3</text>
+  <path d="M158 322H195" stroke="#18323D" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M273 322H310" stroke="#18323D" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M388 322H425" stroke="#18323D" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M503 322H540" stroke="#18323D" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M619 322H655" stroke="#18323D" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+  <text x="120" y="396" text-anchor="middle" font-size="20" fill="#526575"><tspan x="120">most favorable</tspan><tspan x="120" dy="25">start for A</tspan></text>
+  <text x="235" y="398" text-anchor="middle" font-size="20" fill="#167D8D">core 0</text>
+  <text x="350" y="398" text-anchor="middle" font-size="20" fill="#167D8D">core 0</text>
+  <text x="465" y="398" text-anchor="middle" font-size="20" fill="#167D8D">core 0</text>
+  <text x="580" y="398" text-anchor="middle" font-size="20" fill="#167D8D">core 0</text>
+  <text x="695" y="382" text-anchor="middle" font-size="20" font-weight="700" fill="#C86D35"><tspan x="695">outside</tspan><tspan x="695" dy="25">the band</tspan></text>
+  <path d="M207 423V433H608V423" fill="none" stroke="#167D8D" stroke-width="2"/>
+  <text x="400" y="470" text-anchor="middle" font-size="23" font-weight="700" fill="#18323D">At most 4 consecutive A services</text>
+  <text x="400" y="503" text-anchor="middle" font-size="21" fill="#18323D">Repeated A means repeated core 0 under caller execution.</text>
+  <rect x="24" y="534" width="752" height="82" rx="10" fill="#F1F5F7"/>
+  <text x="42" y="565" font-size="20" fill="#18323D"><tspan x="42">Each A service adds 1 to U_A − U_B; four use the full band.</tspan><tspan x="42" dy="29">Restricted caller-run lemma only—not general FC-PQ fairness.</tspan></text>
+</svg>

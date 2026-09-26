@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440" viewBox="0 0 720 440" role="img" aria-labelledby="title desc">
+  <title id="title">Equal turns need not mean equal useful service</title>
+  <desc id="desc">Conceptual serialized useful-service schedules for two continuously selectable clients. Each A operation consumes one illustrative service unit; each B operation consumes three. Rectangle width is exactly 56 pixels per service unit, with each rectangle denoting one operation. Both rows span twelve units; overhead is omitted and the axis is not measured wall time. Equal turns selects A, B, A, B, A, B: three operations per client, but A receives three units and B nine. The service-aware example selects A, B, A, A, A, B, A, A: six A operations and two B operations, giving six service units to each. The latter is a minimum-cumulative-service schedule with equal initial credits, ties resolved in favor of A, exact useful-service charging, and no credit resets. Its equal final allocation is an example, not a claim of equality at every intermediate boundary. The rows have different completed operation mixes and do not establish a throughput comparison.</desc>
+  <rect width="720" height="440" fill="#FFFFFF"/>
+  <g font-family="DejaVu Sans, sans-serif" fill="#172B3A">
+    <g font-size="22">
+      <rect x="24" y="14" width="26" height="26" fill="#EAF2FB" stroke="#2563A6" stroke-width="2"/>
+      <text x="61" y="35">A: 1 unit / operation</text>
+      <rect x="369" y="14" width="26" height="26" fill="#FFF2E5" stroke="#B65D13" stroke-width="2"/>
+      <text x="406" y="35">B: 3 units / operation</text>
+    </g>
+
+    <text x="24" y="77" font-size="26" font-weight="bold">Equal turns</text>
+    <g stroke-width="2">
+      <rect x="24" y="89" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="80" y="89" width="168" height="42" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="248" y="89" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="304" y="89" width="168" height="42" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="472" y="89" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="528" y="89" width="168" height="42" fill="#FFF2E5" stroke="#B65D13"/>
+    </g>
+    <g font-size="25" font-weight="bold" text-anchor="middle">
+      <text x="52" y="119">A</text>
+      <text x="164" y="119">B</text>
+      <text x="276" y="119">A</text>
+      <text x="388" y="119">B</text>
+      <text x="500" y="119">A</text>
+      <text x="612" y="119">B</text>
+    </g>
+    <g font-size="22">
+      <text x="24" y="162">A: 3 ops · 3 units (25%)</text>
+      <text x="369" y="162">B: 3 ops · 9 units (75%)</text>
+    </g>
+
+    <text x="24" y="205" font-size="26" font-weight="bold">Service-aware example</text>
+    <g stroke-width="2">
+      <rect x="24" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="80" y="217" width="168" height="42" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="248" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="304" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="360" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="416" y="217" width="168" height="42" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="584" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="640" y="217" width="56" height="42" fill="#EAF2FB" stroke="#2563A6"/>
+    </g>
+    <g font-size="25" font-weight="bold" text-anchor="middle">
+      <text x="52" y="247">A</text>
+      <text x="164" y="247">B</text>
+      <text x="276" y="247">A</text>
+      <text x="332" y="247">A</text>
+      <text x="388" y="247">A</text>
+      <text x="500" y="247">B</text>
+      <text x="612" y="247">A</text>
+      <text x="668" y="247">A</text>
+    </g>
+    <g font-size="22">
+      <text x="24" y="290">A: 6 ops · 6 units (50%)</text>
+      <text x="369" y="290">B: 2 ops · 6 units (50%)</text>
+    </g>
+
+    <g stroke="#526575" stroke-width="2" fill="none">
+      <path d="M24 310 H696 M24 304 V316 M192 304 V316 M360 304 V316 M528 304 V316 M696 304 V316"/>
+    </g>
+    <g font-size="22" fill="#526575" text-anchor="middle">
+      <text x="24" y="340">0</text>
+      <text x="192" y="340">3</text>
+      <text x="360" y="340">6</text>
+      <text x="528" y="340">9</text>
+      <text x="696" y="340">12</text>
+      <text x="360" y="368">Illustrative useful-service units</text>
+    </g>
+    <text x="360" y="402" font-size="24" font-weight="bold" text-anchor="middle">Equal turns do not imply equal service.</text>
+    <text x="360" y="431" font-size="22" fill="#526575" text-anchor="middle">Conceptual; overhead omitted; different operation mixes.</text>
+  </g>
+</svg>
