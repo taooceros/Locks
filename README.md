@@ -18,7 +18,9 @@ b(M + h - d) > M + A + K (handoff cost h, pass administration A, scheduler
 state K); if d >= h + M no batch wins. Predicted advantage grows with D/CS and
 with b; it vanishes at small D or low contention.
 
-Formal version: `research/logp-analysis@555ad76:analysis/logp/` (`story-draft.tex`
+Narrative is not yet fixed: this paragraph is candidate B; candidate A ("fair service at a price") and the relationship between them are in [`docs/story-candidates.md`](docs/story-candidates.md).
+
+Formal version: [`analysis/logp/`](analysis/logp/README.md) (`story-draft.tex`
 for the narrative, `performance.tex` for the cost model and crossover,
 `fairness.tex` for the service-spread results and the limits of current FC-PQ).
 
