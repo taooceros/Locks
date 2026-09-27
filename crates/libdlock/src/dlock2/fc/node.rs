@@ -11,6 +11,9 @@ pub struct Node<T> {
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
+    /// Futex word for spin-then-park; see `dlock2/park.rs`.
+    #[cfg(feature = "spin_park")]
+    pub park: crate::dlock2::park::ParkSlot,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
     // Written/read only by this node's ThreadLocal owner; combiners may hold &Node.
@@ -26,6 +29,8 @@ impl<T> Node<T> {
             age: 0.into(),
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
+            #[cfg(feature = "spin_park")]
+            park: crate::dlock2::park::ParkSlot::new(),
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             next: AtomicPtr::default(),
             #[cfg(feature = "combiner_stat")]

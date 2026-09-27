@@ -12,6 +12,14 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
   - Scope: service-fair delegation thesis, claims H1-H5, experiments E0-E4,
     success and kill criteria; checklist in [TODO.md](../TODO.md)
 
+### E0 engineering prerequisites
+
+- [E0(a) Spin-then-park waiters](./2026-09-27/e0a-spin-then-park.md)
+  - Status: approved 2026-09-27 (user instruction); implemented behind the
+    `spin_park` feature with measured smoke results; default builds unchanged
+  - Scope: FC and FC-PQ waiter loop, wake/progress/enrollment protocol,
+    `release_combiner()` contract that the FC-PQ fast path (E0(b)) must keep
+
 ### Theoretical analysis (formal version of the thesis)
 
 - [Publication Analysis Plan](./2026-09-23/logp-publication-analysis.md)
@@ -41,6 +49,10 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## By Date
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
+
+### 2026-09-27
+
+- [E0(a) Spin-then-park waiters](./2026-09-27/e0a-spin-then-park.md)
 
 ### 2026-09-26
 

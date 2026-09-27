@@ -23,6 +23,8 @@ pub mod dsm;
 pub mod fc;
 pub mod fc_ban;
 pub mod fc_sl;
+#[cfg(feature = "spin_park")]
+pub mod park;
 pub mod rcl;
 
 pub mod c_aqs;

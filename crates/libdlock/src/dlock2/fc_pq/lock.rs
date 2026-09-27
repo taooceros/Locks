@@ -6,6 +6,8 @@ use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
 use std::mem::MaybeUninit;
+#[cfg(feature = "spin_park")]
+use std::sync::atomic::AtomicU32;
 use std::thread::current;
 use std::{
     cell::SyncUnsafeCell,
@@ -16,6 +18,8 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
+#[cfg(feature = "spin_park")]
+use crate::dlock2::park::{self, Parked, SpinBudget};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
@@ -119,6 +123,10 @@ where
     total_served: SyncUnsafeCell<u64>,
     /// Monotonically increasing combining pass counter (combiner-only access)
     combine_pass: SyncUnsafeCell<u64>,
+    /// Waiters that published `PARKED` and are not yet resolved
+    /// (`dlock2/park.rs`, handshake 2).
+    #[cfg(feature = "spin_park")]
+    parked: CachePadded<AtomicU32>,
 }
 
 impl<T, I, PQ, F, L> FCPQ<T, I, PQ, F, L>
@@ -140,23 +148,106 @@ where
             total_usage: SyncUnsafeCell::new(0),
             total_served: SyncUnsafeCell::new(0),
             combine_pass: SyncUnsafeCell::new(0),
+            #[cfg(feature = "spin_park")]
+            parked: CachePadded::new(AtomicU32::new(0)),
         }
     }
 
-    fn push_node(&self, node: &Node<I>) {
-        node.active.store(true, Release);
+    /// Publishes an inactive node in the admission ring. Callers have
+    /// already set `active`.
+    fn enqueue_node(&self, node: &Node<I>) {
         self.waiting_nodes.push((
             AtomicPtr::new(node as *const _ as *mut Node<I>),
             current().id().as_u64().into(),
         ));
     }
 
+    #[cfg(not(feature = "spin_park"))]
     fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(Acquire) {
             return;
         }
 
-        self.push_node(node);
+        node.active.store(true, Release);
+        self.enqueue_node(node);
+    }
+
+    /// Handshake 3 (`dlock2/park.rs`): the SeqCst load follows the owner's
+    /// SeqCst `complete = false`, so this and the combiner's
+    /// `active = false; load complete` in `retire_or_requeue` cannot both
+    /// miss; the CAS lets exactly one side enroll the node.
+    #[cfg(feature = "spin_park")]
+    fn push_if_unactive(&self, node: &Node<I>) {
+        if node.active.load(SeqCst) {
+            return;
+        }
+
+        if node
+            .active
+            .compare_exchange(false, true, SeqCst, SeqCst)
+            .is_ok()
+        {
+            self.enqueue_node(node);
+        }
+    }
+
+    /// A popped entry whose node was found complete: deactivate it so the
+    /// owner re-enrolls next time, or push it back if a request is pending.
+    #[cfg(not(feature = "spin_park"))]
+    fn retire_or_requeue(&self, job_queue: &mut PQ, entry: UsageNode<'static, I>) {
+        if entry.node.complete.load(Acquire) {
+            entry.node.usage.store_release(entry.usage);
+            entry.node.active.store_release(false);
+        } else {
+            job_queue.push(entry);
+        }
+    }
+
+    /// Same, with handshake 3: after `active = false` (SeqCst) re-read
+    /// `complete`; if the owner published a request and could still miss
+    /// the deactivation, win the CAS and keep the entry queued so a parked
+    /// owner is never left with an unenrolled request.
+    #[cfg(feature = "spin_park")]
+    fn retire_or_requeue(&self, job_queue: &mut PQ, entry: UsageNode<'static, I>) {
+        let node = entry.node;
+        if !node.complete.load(Acquire) {
+            job_queue.push(entry);
+            return;
+        }
+        node.usage.store_release(entry.usage);
+        node.active.store(false, SeqCst);
+        if !node.complete.load(SeqCst)
+            && node
+                .active
+                .compare_exchange(false, true, SeqCst, SeqCst)
+                .is_ok()
+        {
+            job_queue.push(entry);
+        }
+    }
+
+    /// Releases `combiner_lock`. Every release of the combiner lock, including
+    /// one by a holder that did not combine (the forthcoming uncontended
+    /// fast path), must go through here: under `spin_park` the release is
+    /// followed by the fenced `parked` check of handshake 2, re-acquiring and
+    /// combining while some waiter is parked (or until another holder takes
+    /// over that obligation).
+    fn release_combiner(&self) {
+        unsafe { self.combiner_lock.unlock() };
+        #[cfg(feature = "spin_park")]
+        while park::parked_after_unlock(&self.parked) && self.combiner_lock.try_lock() {
+            self.combine();
+            unsafe { self.combiner_lock.unlock() };
+        }
+    }
+
+    /// Test hook: hold the combiner lock idle (no combining) while `held`
+    /// runs, then release it the way a non-combining holder must.
+    #[cfg(test)]
+    pub(crate) fn hold_combiner_idle(&self, held: impl FnOnce()) {
+        self.combiner_lock.lock();
+        held();
+        self.release_combiner();
     }
 
     fn combine(&self) {
@@ -217,6 +308,9 @@ where
         // SAFETY: combiner exclusion permits one queue/state writer; acquire
         // of complete=false observes each owner's initialized payload. Each
         // input is moved once, complete=true release returns the result.
+        #[cfg(feature = "spin_park")]
+        let mut unwoken: Option<&Node<I>> = None;
+
         unsafe {
             for _ in 0..H {
                 let current = job_queue.pop();
@@ -251,13 +345,28 @@ where
                     // which would result in a slightly inaccurate usage
                     let begin = timestamp(&mut aux);
 
-                    node.data.get().write(MaybeUninit::new((self.delegate)(
+                    let result = (self.delegate)(
                         self.data.get().as_mut().unwrap_unchecked(),
                         node.data.get().read().assume_init(),
-                    )));
+                    );
+                    #[cfg(not(feature = "spin_park"))]
+                    node.data.get().write(MaybeUninit::new(result));
 
                     let end = timestamp(&mut aux);
                     let cs_time = end - begin;
+
+                    // Handshake 1, deferred: the park check for the previously
+                    // served node runs here, after this delegate and before
+                    // this node's result stores, so its fence finds a drained
+                    // store buffer and does not stall the pass. Neither the
+                    // check nor the result write is inside the timed region.
+                    #[cfg(feature = "spin_park")]
+                    {
+                        if let Some(previous) = unwoken.take() {
+                            previous.park.wake_if_parked(&self.parked);
+                        }
+                        node.data.get().write(MaybeUninit::new(result));
+                    }
 
                     current.usage += cs_time;
 
@@ -266,6 +375,10 @@ where
                     *self.total_served.get() += 1;
 
                     node.complete.store(true, Release);
+                    #[cfg(feature = "spin_park")]
+                    {
+                        unwoken = Some(node);
+                    }
 
                     // Re-insert with reset pass counter
                     current.pass_entered = current_pass;
@@ -273,13 +386,8 @@ where
                 } else {
                     // if the buffer is full then push the nodes back to the job queue
                     if buffer.is_full() {
-                        for node in buffer.drain() {
-                            if node.node.complete.load(Acquire) {
-                                node.node.usage.store_release(node.usage);
-                                node.node.active.store_release(false);
-                            } else {
-                                job_queue.push(node);
-                            }
+                        for entry in buffer.drain() {
+                            self.retire_or_requeue(job_queue, entry);
                         }
                     }
 
@@ -288,14 +396,14 @@ where
                 }
             }
 
-            for node in buffer.drain() {
-                if node.node.complete.load(Acquire) {
-                    node.node.usage.store_release(node.usage);
-                    node.node.active.store_release(false);
-                } else {
-                    job_queue.push(node);
-                }
+            for entry in buffer.drain() {
+                self.retire_or_requeue(job_queue, entry);
             }
+        }
+
+        #[cfg(feature = "spin_park")]
+        if let Some(previous) = unwoken {
+            previous.park.wake_if_parked(&self.parked);
         }
 
         #[cfg(feature = "combiner_stat")]
@@ -304,8 +412,11 @@ where
 
             // SAFETY: this ThreadLocal statistic is only written/read by its
             // owner, even while other combiners retain shared &Node in the PQ.
-            let node = &*self.local_node.get().unwrap().get();
-            *node.combiner_time_stat.get() += end - pass_begin;
+            // A thread that combines through `release_combiner` before ever
+            // issuing a request has no node yet; its pass is not attributed.
+            if let Some(node) = self.local_node.get() {
+                *(*node.get()).combiner_time_stat.get() += end - pass_begin;
+            }
         }
     }
 }
@@ -327,22 +438,50 @@ where
         // release below publishes the new input without borrowing &mut Node.
         let node = unsafe { &*node.get() };
         unsafe { node.data.get().write(MaybeUninit::new(data)) };
+        #[cfg(not(feature = "spin_park"))]
         node.complete.store(false, Release);
+        // Handshake 3: SeqCst pairs with the combiner's SeqCst `active = false`.
+        #[cfg(feature = "spin_park")]
+        node.complete.store(false, SeqCst);
+        #[cfg(feature = "spin_park")]
+        let mut budget = SpinBudget::default();
 
         'outer: loop {
             self.push_if_unactive(node);
 
             if self.combiner_lock.try_lock() {
                 self.combine();
-
-                unsafe {
-                    self.combiner_lock.unlock();
-                }
+                self.release_combiner();
 
                 if node.complete.load(Acquire) {
                     break 'outer;
                 }
             } else {
+                // Spin budget exhausted: the enrollment check and the failed
+                // try_lock above are the last actions before the park attempt,
+                // which re-checks completion and enrollment, tries the lock
+                // once more, and only then sleeps (`dlock2/park.rs`).
+                #[cfg(feature = "spin_park")]
+                if budget.exhausted() {
+                    match node.park.park_or_lock(
+                        &self.parked,
+                        &node.complete,
+                        &node.active,
+                        &*self.combiner_lock,
+                    ) {
+                        Parked::Complete => break 'outer,
+                        Parked::Combiner => {
+                            self.combine();
+                            self.release_combiner();
+                            if node.complete.load(Acquire) {
+                                break 'outer;
+                            }
+                        }
+                        Parked::Retry => {}
+                    }
+                    continue 'outer;
+                }
+
                 let backoff = Backoff::new();
                 let mut count: u32 = 8;
                 loop {

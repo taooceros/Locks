@@ -267,6 +267,113 @@ dlock2_counter_tests!(
     DLock2PthreadMutex::<u64, u64, Delegate>::new(0_u64, counter_delegate)
 );
 
+// A holder takes the combiner lock without combining (the shape of a
+// non-combining unlock, e.g. the forthcoming FC-PQ fast path) and keeps it
+// long enough for waiters to exhaust their spin budget and park. Each waiter
+// must still complete: its last pre-park `try_lock` succeeds, or the holder's
+// post-unlock check re-acquires and combines (`dlock2/park.rs`, handshake 2).
+// Without `spin_park` the waiters spin through the hold; with it they park.
+mod idle_holder_release {
+    use super::*;
+    use std::sync::Barrier;
+
+    const ROUNDS: usize = 40;
+
+    fn run<L>(lock: Arc<L>, hold_idle: fn(&L, Box<dyn FnOnce() + Send>), waiters: usize)
+    where
+        L: DLock2<u64> + Send + Sync + 'static,
+    {
+        let mut completed = 0_u64;
+        for round in 0..ROUNDS {
+            // Alternate a hold far beyond the spin budget with a short one.
+            let hold = if round % 2 == 0 {
+                Duration::from_millis(5)
+            } else {
+                Duration::from_micros(20)
+            };
+            let start = Arc::new(Barrier::new(waiters + 1));
+
+            let holder = {
+                let lock = lock.clone();
+                let start = start.clone();
+                thread::spawn(move || {
+                    hold_idle(
+                        &lock,
+                        Box::new(move || {
+                            // Waiters enroll only after the lock is held.
+                            start.wait();
+                            thread::sleep(hold);
+                        }),
+                    )
+                })
+            };
+            let handles: Vec<_> = (0..waiters)
+                .map(|_| {
+                    let lock = lock.clone();
+                    let start = start.clone();
+                    thread::spawn(move || {
+                        start.wait();
+                        lock.lock(1)
+                    })
+                })
+                .collect();
+
+            holder.join().expect("idle holder panicked");
+            let mut returned: Vec<_> = handles
+                .into_iter()
+                .map(|h| h.join().expect("waiter panicked"))
+                .collect();
+            returned.sort_unstable();
+            let end = completed + waiters as u64;
+            assert_eq!(
+                returned,
+                ((completed + 1)..=end).collect::<Vec<_>>(),
+                "round {round}: waiter lost or duplicated while holder idled",
+            );
+            completed = end;
+        }
+    }
+
+    #[test]
+    fn fc() {
+        for waiters in [1, 3] {
+            panic_after(Duration::from_secs(60), move || {
+                run(
+                    Arc::new(FC::<u64, u64, Delegate>::new(0, counter_delegate)),
+                    |lock, held| lock.hold_combiner_idle(held),
+                    waiters,
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn fc_pq_bheap() {
+        for waiters in [1, 3] {
+            panic_after(Duration::from_secs(60), move || {
+                run(
+                    Arc::new(FCPQBHeap::new(0, counter_delegate)),
+                    |lock, held| lock.hold_combiner_idle(held),
+                    waiters,
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn fc_pq_btree() {
+        for waiters in [1, 3] {
+            panic_after(Duration::from_secs(60), move || {
+                run(
+                    Arc::new(FCPQBTree::new(0, counter_delegate)),
+                    |lock, held| lock.hold_combiner_idle(held),
+                    waiters,
+                );
+            });
+        }
+    }
+}
+
 // Reuse each worker's published node across many requests. The payload owns a
 // non-Copy heap allocation and is dropped by the caller, never by a stale PQ
 // entry or a stale copy left in a MaybeUninit slot.

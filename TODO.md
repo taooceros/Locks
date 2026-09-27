@@ -70,10 +70,20 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ## E0 Prerequisites (engineering, not results)
 
-- [ ] **(a) Spin-then-park waiters in FC and FC-PQ.**
+- [x] **(a) Spin-then-park waiters in FC and FC-PQ.**
   `crates/libdlock/src/dlock2/fc/lock.rs` and
   `crates/libdlock/src/dlock2/fc_pq/lock.rs`; reuse the
   `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
+  *(Done: 2026-09-27 on `e0-engineering`, [plan](plan/2026-09-27/e0a-spin-then-park.md).
+  `spin_park` cargo feature, default off; per-node futex in `dlock2/park.rs`,
+  100 us spin budget (`DLOCK_SPIN_BEFORE_PARK_US` at build time), combiner
+  wakes after publishing each result, `release_combiner()` re-checks parked
+  waiters after every unlock, SeqCst enroll/retire handshake so a parked
+  waiter is always enrolled; protocol in `dlock2/README.md`. Tests pass in
+  both modes incl. new `idle_holder_release`. Smoke (cs=1000, 8 threads on
+  4 CPUs): FC-PQ +4-10% throughput, FC within noise, CPU-s 16.0 -> 15.4-15.9;
+  cs=20000: FC +19%, FC-PQ +10%, CPU-s 16.0 -> 13.5-15.1. 8 threads on 8
+  CPUs: -1 to -4%. Tuning of the budget is left to E1/E3.)*
 
 - [ ] **(b) Trim FC-PQ per-request tax.**
   Sample `__rdtscp` every k requests; bound heap arity.

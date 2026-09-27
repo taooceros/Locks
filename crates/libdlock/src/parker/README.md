@@ -29,4 +29,4 @@ pub trait Parker: Debug + Default + Send + Sync {
 
 DLock1 locks are parameterized by `P: Parker` (e.g., `FcLock<T, L, SpinParker>`). The benchmark harness tests both parker types via the `BenchmarkType::SpinDLock` / `BlockDLock` variants.
 
-DLock2 locks use spin-backoff (`crossbeam::Backoff`) directly instead of the Parker trait.
+DLock2 locks use spin-backoff (`crossbeam::Backoff`) directly instead of the Parker trait. With the `spin_park` feature, FC and FC-PQ add a bounded spin followed by a futex park built on the `BlockParker` state machine (`dlock2/park.rs`; protocol in `dlock2/README.md`).
