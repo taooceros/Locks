@@ -143,6 +143,16 @@ Ordered experiments. E0 is engineering, not results. E1 is the core figure.
 - `docs/archive/` - pre-thesis documents.
 - `plan/` - dated plans; [`plan/index.md`](plan/index.md).
 
+## Version control
+
+Active work uses [jj](https://jj-vcs.github.io) on top of the bare git repo at
+`~/Locks` (`jj git init --git-repo=~/Locks` in `~/Locks/main`; bookmark `main`
+tracks `main@origin`). Historical evidence branches remain plain git worktrees
+under `~/Locks/<name>` and are read-only; jj and git share refs, so `jj log`
+sees every branch as a bookmark. Add parallel working copies with
+`jj workspace add ../<name>` rather than `git worktree add`. Build with
+`devenv shell -- cargo ...`; plain `cargo` lacks the `clang` linker.
+
 ## Build and run
 
 ### Requirements
