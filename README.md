@@ -145,13 +145,14 @@ Ordered experiments. E0 is engineering, not results. E1 is the core figure.
 
 ## Version control
 
-Active work uses [jj](https://jj-vcs.github.io) on top of the bare git repo at
-`~/Locks` (`jj git init --git-repo=~/Locks` in `~/Locks/main`; bookmark `main`
-tracks `main@origin`). Historical evidence branches remain plain git worktrees
-under `~/Locks/<name>` and are read-only; jj and git share refs, so `jj log`
-sees every branch as a bookmark. Add parallel working copies with
-`jj workspace add ../<name>` rather than `git worktree add`. Build with
-`devenv shell -- cargo ...`; plain `cargo` lacks the `clang` linker.
+`~/Locks` is a single colocated [jj](https://jj-vcs.github.io) repo (`.jj` and
+`.git` side by side; bookmark `main` tracks `main@origin`). Historical
+experiment branches exist only as bookmarks (`jj bookmark list`); their
+git-ignored raw data was archived to `~/Locks-artifacts/<branch-name>/` (see
+[`docs/evidence/README.md`](docs/evidence/README.md)). Materialize a branch with
+`jj new <bookmark>` or, for a parallel checkout, `jj workspace add ../<name>
+-r <bookmark>`; do not use `git worktree`. Build with `devenv shell -- cargo
+...`; plain `cargo` lacks the `clang` linker.
 
 ## Build and run
 

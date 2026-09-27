@@ -1,6 +1,6 @@
 # Evidence index
 
-This directory indexes the completed experiments that bear on the thesis: fairness by switching threads moves data, fairness by switching requests does not. Raw data lives in other git worktrees/branches (listed in the table) and in git-ignored `.worktree/` roots on the machine that ran the experiments; the full ledger is copied here as `all-experiments-2026-09-25.md`.
+This directory indexes the completed experiments that bear on the thesis: fairness by switching threads moves data, fairness by switching requests does not. Committed reports live on the branches listed in the table (`jj new <bookmark>` or `jj workspace add` to materialize). Raw `.worktree/` roots were git-ignored; on 2026-09-26 the roots cited below were moved off the removed worktrees to `~/Locks-artifacts/<branch-name>/<root>` (e.g. `~/Locks-artifacts/experiment-upscaledb-fc-pq-integration/upscaledb-joined-scaling/`), and every smoke, verification, build and superseded-campaign root was deleted. `.worktree/logp` in this checkout is a symlink into that archive. The full ledger is copied here as `all-experiments-2026-09-25.md`.
 
 | Study | Branch@commit | Report path | Trials | Key result for the thesis |
 |---|---|---|---:|---|
