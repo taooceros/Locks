@@ -28,8 +28,9 @@ use crate::{
     spin_lock::RawSpinLock,
 };
 
-/// Number of lock operations per thread in each test.
-const ITERATIONS: usize = 1_000;
+/// Number of lock operations per thread in each test. Scaled down under Miri,
+/// whose virtual clock drives panic_after's 60 s watchdog; release unchanged.
+const ITERATIONS: usize = if cfg!(miri) { 50 } else { 1_000 };
 
 /// Delegate that increments a shared counter and returns its new value.
 ///
@@ -489,4 +490,352 @@ mod admission_churn_stress {
             run(FCPQBHeap::new(0, counter_delegate), workers);
         }
     }
+}
+
+// E0(b) fast path (plan/2026-09-27/e0b-fcpq-fast-path.md). Compiled under
+// every fcpq_* feature combination; without a fast-path feature the same
+// schedules exercise only the slow path. Each request carries its issuer and
+// draws a unique ticket, so a lost, duplicated or misdelivered request fails
+// regardless of schedule, and panic_after turns a hang into a failure.
+mod fc_pq_fast_path {
+    use super::*;
+    use crate::{
+        dlock2::fc_pq::ENROLL_WINDOW_HOOK, sequential_priority_queue::SequentialPriorityQueue,
+    };
+    use std::{
+        fmt::Debug,
+        hint::spin_loop,
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering::*},
+            Barrier,
+        },
+    };
+
+    const FAST_PATH: bool = cfg!(any(
+        feature = "fcpq_fast_path",
+        feature = "fcpq_fast_path_notime"
+    ));
+    const STAT: bool = cfg!(feature = "fcpq_fast_path_stat");
+
+    /// Makes a CS keep the combiner lock until released.
+    #[derive(Debug, Default)]
+    struct Hold {
+        entered: AtomicBool,
+        released: AtomicBool,
+    }
+
+    impl Hold {
+        fn enter_and_wait(&self) {
+            self.entered.store(true, Release);
+            while !self.released.load(Acquire) {
+                spin_loop();
+            }
+        }
+
+        fn wait_entered(&self) {
+            while !self.entered.load(Acquire) {
+                spin_loop();
+            }
+        }
+
+        fn release(&self) {
+            self.released.store(true, Release);
+        }
+    }
+
+    #[derive(Debug)]
+    struct Request {
+        worker: usize,
+        sequence: usize,
+        ticket: u64,
+        /// How often this (worker, sequence) had executed, this run included.
+        executions: u32,
+        hold: Option<Arc<Hold>>,
+    }
+
+    impl Request {
+        fn new(worker: usize, sequence: usize) -> Self {
+            Request {
+                worker,
+                sequence,
+                ticket: 0,
+                executions: 0,
+                hold: None,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct State {
+        tickets: u64,
+        seen: Vec<Vec<u32>>,
+        executions: Arc<Vec<AtomicUsize>>,
+    }
+
+    fn serve(state: &mut State, mut request: Request) -> Request {
+        if let Some(hold) = &request.hold {
+            hold.enter_and_wait();
+        }
+        state.tickets += 1;
+        request.ticket = state.tickets;
+        let seen = &mut state.seen[request.worker][request.sequence];
+        *seen += 1;
+        request.executions = *seen;
+        state.executions[request.worker].fetch_add(1, Relaxed);
+        request
+    }
+
+    type Serve = fn(&mut State, Request) -> Request;
+    type Lock<PQ> = FCPQ<State, Request, PQ, Serve, RawSpinLock>;
+    type BTree = BTreeSet<UsageNode<'static, Request>>;
+    type BHeap = BinaryHeap<Reverse<UsageNode<'static, Request>>>;
+    trait Queue =
+        SequentialPriorityQueue<UsageNode<'static, Request>> + Debug + Send + Sync + 'static;
+
+    fn new_lock<PQ: Queue>(
+        workers: usize,
+        max_requests: usize,
+    ) -> (Arc<Lock<PQ>>, Arc<Vec<AtomicUsize>>) {
+        let executions = Arc::new(
+            (0..workers)
+                .map(|_| AtomicUsize::new(0))
+                .collect::<Vec<_>>(),
+        );
+        let state = State {
+            tickets: 0,
+            seen: vec![vec![0; max_requests]; workers],
+            executions: executions.clone(),
+        };
+        (Arc::new(Lock::<PQ>::new(state, serve)), executions)
+    }
+
+    fn set_enroll_hook(hook: impl Fn() + 'static) {
+        ENROLL_WINDOW_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    /// This thread's fast-path hits; 0 when the counter is compiled out.
+    fn own_hits<PQ: Queue>(lock: &Lock<PQ>) -> u64 {
+        #[cfg(feature = "fcpq_fast_path_stat")]
+        return lock.get_fast_path_hits().unwrap_or(0);
+        #[cfg(not(feature = "fcpq_fast_path_stat"))]
+        {
+            let _ = lock;
+            0
+        }
+    }
+
+    fn issue<PQ: Queue>(lock: &Lock<PQ>, worker: usize, sequence: usize) -> u64 {
+        let response = lock.lock(Request::new(worker, sequence));
+        assert_eq!(
+            (response.worker, response.sequence),
+            (worker, sequence),
+            "response delivered to the wrong request",
+        );
+        assert_eq!(
+            response.executions, 1,
+            "request ({worker}, {sequence}) executed {} times, ticket {}",
+            response.executions, response.ticket,
+        );
+        response.ticket
+    }
+
+    const WORKERS: usize = if cfg!(miri) { 3 } else { 8 };
+    const ROUNDS: usize = if cfg!(miri) { 1 } else { 8 };
+    const SOLO: usize = if cfg!(miri) { 20 } else { 2_000 };
+    const BURST: usize = if cfg!(miri) { 10 } else { 1_000 };
+    const HAMMER: usize = if cfg!(miri) { 40 } else { 4_000 };
+    const TRICKLE: usize = if cfg!(miri) { 5 } else { 100 };
+    const THINK_SPINS: usize = if cfg!(miri) { 10 } else { 500 };
+    const WINDOW_SPINS: usize = if cfg!(miri) { 10 } else { 2_000 };
+
+    /// Rounds of: one worker alone (fast path expected after at most one
+    /// miss), all workers at once, then worker 0 hammering while the others
+    /// trickle in. Odd workers stall on every enrollment between
+    /// `active=true` and ring publication, so fast-path CSs run while they
+    /// are invisible to the gate (plan D5).
+    fn phased_stress<PQ: Queue>() {
+        let (lock, executions) = new_lock::<PQ>(WORKERS, ROUNDS * (SOLO + BURST + HAMMER));
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let handles: Vec<_> = (0..WORKERS)
+            .map(|worker| {
+                let lock = lock.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    if worker % 2 == 1 {
+                        set_enroll_hook(|| (0..WINDOW_SPINS).for_each(|_| spin_loop()));
+                    }
+                    let mut tickets = Vec::new();
+                    let mut run = |count: usize, think: usize| {
+                        for _ in 0..count {
+                            tickets.push(issue(&lock, worker, tickets.len()));
+                            (0..think).for_each(|_| spin_loop());
+                        }
+                    };
+                    for round in 0..ROUNDS {
+                        barrier.wait();
+                        if worker == round % WORKERS {
+                            let before = own_hits(&lock);
+                            run(SOLO, 0);
+                            let hits = own_hits(&lock) - before;
+                            if STAT && FAST_PATH {
+                                // One combine pass retires stale PQ nodes.
+                                assert!(hits >= SOLO as u64 - 1, "solo hits {hits}/{SOLO}");
+                            } else {
+                                assert_eq!(hits, 0);
+                            }
+                        }
+                        barrier.wait();
+                        run(BURST, 0);
+                        barrier.wait();
+                        if worker == 0 {
+                            run(HAMMER, 0);
+                        } else {
+                            run(TRICKLE, THINK_SPINS);
+                        }
+                    }
+                    (tickets, own_hits(&lock))
+                })
+            })
+            .collect();
+
+        let mut tickets = Vec::new();
+        let mut hits = 0;
+        for (worker, handle) in handles.into_iter().enumerate() {
+            let (worker_tickets, worker_hits) = handle.join().expect("stress worker panicked");
+            assert_eq!(
+                executions[worker].load(Relaxed),
+                worker_tickets.len(),
+                "worker {worker}: executions != requests",
+            );
+            tickets.extend(worker_tickets);
+            hits += worker_hits;
+        }
+        let total = ROUNDS * (SOLO + WORKERS * BURST + HAMMER + (WORKERS - 1) * TRICKLE);
+        tickets.sort_unstable();
+        assert_eq!(
+            tickets,
+            (1..=total as u64).collect::<Vec<_>>(),
+            "missing or duplicated execution",
+        );
+        #[cfg(feature = "fcpq_fast_path_stat")]
+        assert_eq!(lock.fast_path_hits(), hits);
+        if !FAST_PATH {
+            assert_eq!(hits, 0);
+        }
+    }
+
+    const WINDOW_REQUESTS: usize = if cfg!(miri) { 5 } else { 100 };
+
+    /// Deterministic D5 window: while worker 1 is stalled between
+    /// `active=true` and its ring publication, worker 0's requests take the
+    /// fast path (they never enroll). Worker 1 is then served exactly once,
+    /// after all of them, by its own retry: worker 0 is idle by then.
+    fn enrollment_window<PQ: Queue>() {
+        let (lock, executions) = new_lock::<PQ>(2, WINDOW_REQUESTS + 1);
+        let first = Arc::new(Hold::default());
+        let window = Arc::new(Hold::default());
+        let hammer_done = Arc::new(AtomicBool::new(false));
+
+        let hammer = {
+            let (lock, first, hammer_done) = (lock.clone(), first.clone(), hammer_done.clone());
+            thread::spawn(move || {
+                let enrollments = Arc::new(AtomicUsize::new(0));
+                let counter = enrollments.clone();
+                set_enroll_hook(move || {
+                    counter.fetch_add(1, Relaxed);
+                });
+                // Holds the combiner lock until worker 1 is in the window.
+                let mut request = Request::new(0, 0);
+                request.hold = Some(first);
+                assert_eq!(lock.lock(request).ticket, 1);
+
+                let (enrolled, hit) = (enrollments.load(Relaxed), own_hits(&lock));
+                let tickets: Vec<u64> = (1..=WINDOW_REQUESTS)
+                    .map(|sequence| issue(&lock, 0, sequence))
+                    .collect();
+                let window_enrollments = enrollments.load(Relaxed) - enrolled;
+                let window_hits = own_hits(&lock) - hit;
+                hammer_done.store(true, Release);
+                (tickets, window_enrollments, window_hits)
+            })
+        };
+
+        first.wait_entered();
+        let enroller = {
+            let (lock, window) = (lock.clone(), window.clone());
+            thread::spawn(move || {
+                set_enroll_hook(move || window.enter_and_wait());
+                issue(&lock, 1, 0)
+            })
+        };
+        // Worker 1 has stored active=true but reserved no ring ticket.
+        window.wait_entered();
+        first.release();
+        while !hammer_done.load(Acquire) {
+            spin_loop();
+        }
+        window.release();
+
+        let (tickets, window_enrollments, window_hits) = hammer.join().expect("hammer panicked");
+        let enroller_ticket = enroller.join().expect("enroller panicked");
+        assert_eq!(
+            tickets,
+            (2..=WINDOW_REQUESTS as u64 + 1).collect::<Vec<_>>()
+        );
+        assert_eq!(enroller_ticket, WINDOW_REQUESTS as u64 + 2);
+        assert_eq!(executions[0].load(Relaxed), WINDOW_REQUESTS + 1);
+        assert_eq!(executions[1].load(Relaxed), 1);
+        if FAST_PATH {
+            assert_eq!(window_enrollments, 0, "window requests left the fast path");
+        } else {
+            assert_eq!(window_enrollments, WINDOW_REQUESTS);
+        }
+        if STAT {
+            let expected = if FAST_PATH { WINDOW_REQUESTS as u64 } else { 0 };
+            assert_eq!(window_hits, expected);
+        }
+    }
+
+    /// One thread: every request, including the first, takes the fast path;
+    /// a fresh node starts inactive, so it never enrolls.
+    #[cfg(feature = "fcpq_fast_path_stat")]
+    fn single_thread_hits<PQ: Queue>() {
+        const REQUESTS: usize = if cfg!(miri) { 20 } else { 10_000 };
+        let (lock, executions) = new_lock::<PQ>(1, REQUESTS);
+        assert_eq!(lock.get_fast_path_hits(), None);
+        for sequence in 0..REQUESTS {
+            assert_eq!(issue(&lock, 0, sequence), sequence as u64 + 1);
+        }
+        let expected = if FAST_PATH { REQUESTS as u64 } else { 0 };
+        assert_eq!(lock.get_fast_path_hits(), Some(expected));
+        assert_eq!(lock.fast_path_hits(), expected);
+        assert_eq!(executions[0].load(Relaxed), REQUESTS);
+    }
+
+    macro_rules! per_queue {
+        ($name:ident, $queue:ty) => {
+            mod $name {
+                use super::*;
+
+                #[test]
+                fn phased_stress() {
+                    panic_after(Duration::from_secs(120), super::phased_stress::<$queue>);
+                }
+
+                #[test]
+                fn enrollment_window() {
+                    panic_after(Duration::from_secs(60), super::enrollment_window::<$queue>);
+                }
+
+                #[cfg(feature = "fcpq_fast_path_stat")]
+                #[test]
+                fn single_thread_hits() {
+                    super::single_thread_hits::<$queue>();
+                }
+            }
+        };
+    }
+
+    per_queue!(btree, BTree);
+    per_queue!(bheap, BHeap);
 }

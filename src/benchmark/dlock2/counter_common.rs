@@ -199,6 +199,8 @@ where
                     let mut loop_count = 0u64;
                     let mut num_acquire = 0u64;
                     let mut aux = 0;
+                    #[cfg(feature = "fcpq_fast_path_stat")]
+                    let mut all_acquire = 0u64;
 
                     let data = Data::Input {
                         data: cs_loop,
@@ -218,6 +220,11 @@ where
                         };
 
                         let output = lock_ref.lock(data);
+
+                        #[cfg(feature = "fcpq_fast_path_stat")]
+                        {
+                            all_acquire += 1;
+                        }
 
                         if let Data::Output {
                             is_combiner,
@@ -276,6 +283,8 @@ where
                         combine_time: lock_ref.get_combine_time(),
                         locktype: format!("{}", lock_ref),
                         waiter_type: "".to_string(),
+                        #[cfg(feature = "fcpq_fast_path_stat")]
+                        all_acquire,
                         ..Records::from_bencher(bencher)
                     }
                 })

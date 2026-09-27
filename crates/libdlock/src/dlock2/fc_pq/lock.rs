@@ -6,6 +6,7 @@ use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
 use std::mem::MaybeUninit;
+#[cfg(not(feature = "fcpq_cached_tid"))]
 use std::thread::current;
 use std::{
     cell::SyncUnsafeCell,
@@ -27,6 +28,18 @@ mod buffer;
 use self::buffer::ConcurrentRingBuffer;
 
 use super::node::Node;
+
+#[cfg(all(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime"))]
+compile_error!("features `fcpq_fast_path` and `fcpq_fast_path_notime` are mutually exclusive");
+
+// Test-only hook run by `push_node` between `active=true` and the ring
+// publication (`tail.fetch_add`). A fast-path gate cannot see a request in
+// this window; the fast-path tests widen it (plan D5).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ENROLL_WINDOW_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 // Miri cannot execute x86 timing/prefetch intrinsics. These substitutes are
 // only for exercising the real queue/ownership path under Miri, not for
@@ -145,10 +158,20 @@ where
 
     fn push_node(&self, node: &Node<I>) {
         node.active.store(true, Release);
-        self.waiting_nodes.push((
-            AtomicPtr::new(node as *const _ as *mut Node<I>),
-            current().id().as_u64().into(),
-        ));
+        #[cfg(test)]
+        ENROLL_WINDOW_HOOK.with(|hook| {
+            if let Some(hook) = &*hook.borrow() {
+                hook();
+            }
+        });
+        // Plan D6: the tie-breaker id is cached in the node instead of
+        // cloning and dropping a `Thread` handle per enrollment.
+        #[cfg(feature = "fcpq_cached_tid")]
+        let tid = node.tid;
+        #[cfg(not(feature = "fcpq_cached_tid"))]
+        let tid = current().id().as_u64().into();
+        self.waiting_nodes
+            .push((AtomicPtr::new(node as *const _ as *mut Node<I>), tid));
     }
 
     fn push_if_unactive(&self, node: &Node<I>) {
@@ -157,6 +180,137 @@ where
         }
 
         self.push_node(node);
+    }
+
+    /// Release the combiner lock; the caller must hold it. Every unlock path,
+    /// the non-combining fast path included, goes through here so that E0(a)'s
+    /// `spin_park` post-unlock `parked` check (`../Locks-e0`) merges as one
+    /// hunk. Without `spin_park` it is just `unlock()`.
+    #[inline(always)]
+    fn release_combiner(&self) {
+        // SAFETY: the caller holds the combiner lock.
+        unsafe { self.combiner_lock.unlock() };
+    }
+
+    /// Fast-path gate (plan D2), evaluated once per request, before this
+    /// request is published. True iff no request but the caller's is pending:
+    /// the caller's node is in neither the ring nor the PQ, so no combiner can
+    /// reach its payload; every PQ node is active, hence pending; and no ring
+    /// ticket is reserved.
+    ///
+    /// Arrival is ring publication (plan D5): another thread B is pending from
+    /// its `tail.fetch_add` in `waiting_nodes.push`, not from its earlier
+    /// `active=true`. Before that increment B is invisible to the gate, so
+    /// any number of fast-path CSs may run while B sits between the two
+    /// stores. A gate that reads B's increment fails, as does every later
+    /// gate until B is served: the ticket stays visible until drained, then
+    /// B's node is in the PQ. Fast-path CSs hold the combiner lock, so once
+    /// the increment is visible (on x86, when the locked `fetch_add`
+    /// completes) at most one fast-path CS, already past its gate, finishes
+    /// ahead of B.
+    /// B's progress does not depend on the holder: B retries `try_lock` every
+    /// 8 backoffs and its own combine drains its entry.
+    ///
+    /// # Safety
+    /// The caller holds `combiner_lock` and `node` is its own ThreadLocal node.
+    #[cfg(any(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime"))]
+    #[inline(always)]
+    unsafe fn fast_path_gate(&self, node: &Node<I>) -> bool {
+        // SAFETY: only this owner sets `active`; only lock holders clear it,
+        // with release before their unlock, so under the lock the load is
+        // exact. The queue and the ring's `head` change only under the lock,
+        // so peek and `head` are exact; `tail` can only lag, as stated above.
+        !node.active.load(Acquire)
+            && (*self.job_queue.get()).peek().is_none()
+            && self.waiting_nodes.empty()
+    }
+
+    /// Serve the caller's own, never published request under the combiner
+    /// lock, charge it as a one-node combine pass would (plan D4), and
+    /// release the lock.
+    ///
+    /// # Safety
+    /// The caller holds `combiner_lock`, `fast_path_gate(node)` returned true
+    /// under it, `node` is the caller's ThreadLocal node, and `input` has not
+    /// been published in the node.
+    #[cfg(any(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime"))]
+    #[inline(always)]
+    unsafe fn run_fast_path(&self, node: &Node<I>, input: I) -> I {
+        // SAFETY: the request was never published and the gate saw the node
+        // inactive under the lock, so no combiner holds the node and only this
+        // owner touches its usage. The lock gives exclusive access to data and
+        // the totals.
+        let data = self.data.get().as_mut().unwrap_unchecked();
+
+        #[cfg(feature = "fcpq_fast_path")]
+        let output = {
+            let mut aux: u32 = 0;
+            let begin = timestamp(&mut aux);
+            let output = (self.delegate)(data, input);
+            let end = timestamp(&mut aux);
+            let cs_time = end - begin;
+
+            // Same charge as combine()'s ring drain plus one serve: newcomer
+            // initialization, then the CS. The deactivating combiner released
+            // `usage` before its unlock; the next combiner to drain this node
+            // acquires it through the lock and the ring.
+            let served = *self.total_served.get();
+            let mut usage = node.usage.load_acquire();
+            if usage == 0 && served > 0 {
+                usage = *self.total_usage.get() / served;
+            }
+            node.usage.store_release(usage + cs_time);
+            *self.total_usage.get() += cs_time;
+            *self.total_served.get() = served + 1;
+
+            // SAFETY: owner-only statistic, as in combine(). The holder is its
+            // own combiner for this one-request pass.
+            #[cfg(feature = "combiner_stat")]
+            {
+                *node.combiner_time_stat.get() += cs_time;
+            }
+            output
+        };
+
+        // Ablation only: no timestamps and no usage charge, so FC-PQ ranks
+        // fast-path users wrongly once contention appears.
+        #[cfg(feature = "fcpq_fast_path_notime")]
+        let output = (self.delegate)(data, input);
+
+        // Single writer: a plain load+store, no locked RMW.
+        #[cfg(feature = "fcpq_fast_path_stat")]
+        node.fast_path_hits
+            .store(node.fast_path_hits.load(Relaxed) + 1, Relaxed);
+
+        self.release_combiner();
+        output
+    }
+
+    /// Fast-path hits of the calling thread; `None` before its first `lock`.
+    /// Per-thread like `get_combine_time`; always 0 without a fast-path
+    /// feature.
+    #[cfg(feature = "fcpq_fast_path_stat")]
+    pub fn get_fast_path_hits(&self) -> Option<u64> {
+        // SAFETY: a shared reference to a stable ThreadLocal node, as held by
+        // combiners; the counter is atomic.
+        self.local_node
+            .get()
+            .map(|node| unsafe { &*node.get() }.fast_path_hits.load(Relaxed))
+    }
+
+    /// Fast-path hits summed over every thread that has called `lock`. Each
+    /// counter has one writer, so the sum is exact once those calls have
+    /// returned and their threads are joined; concurrently it is a snapshot.
+    #[cfg(feature = "fcpq_fast_path_stat")]
+    pub fn fast_path_hits(&self) -> u64
+    where
+        I: Sync,
+    {
+        // SAFETY: as in get_fast_path_hits.
+        self.local_node
+            .iter()
+            .map(|node| unsafe { &*node.get() }.fast_path_hits.load(Relaxed))
+            .sum()
     }
 
     fn combine(&self) {
@@ -326,18 +480,49 @@ where
         // initializes its payload, after taking the previous completed result;
         // release below publishes the new input without borrowing &mut Node.
         let node = unsafe { &*node.get() };
+
+        // Plan D1: try the lock before publishing, and bypass the PQ only if
+        // the gate finds nothing else pending. The request is published only
+        // after the gate fails. The node may still be enrolled from an
+        // earlier call; a combiner that holds it serves any published request
+        // and may then deactivate the node, so a gate after publication could
+        // pass and run the request twice. `first_try` hands this CAS to the
+        // loop's first iteration.
+        #[cfg(any(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime"))]
+        let mut first_try = if !self.combiner_lock.try_lock() {
+            Some(false)
+        } else if unsafe { self.fast_path_gate(node) } {
+            // SAFETY: lock held, gate passed, `data` not yet published.
+            return unsafe { self.run_fast_path(node, data) };
+        } else if node.active.load(Acquire) {
+            // Still enrolled from an earlier call, so the push below is a
+            // no-op: publish and combine while still holding the lock.
+            Some(true)
+        } else {
+            // Enrolling may spin on a full ring, which only a lock holder
+            // drains: never enroll while holding the combiner lock.
+            self.release_combiner();
+            None
+        };
+
         unsafe { node.data.get().write(MaybeUninit::new(data)) };
         node.complete.store(false, Release);
 
         'outer: loop {
             self.push_if_unactive(node);
 
-            if self.combiner_lock.try_lock() {
+            #[cfg(any(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime"))]
+            let acquired = match first_try.take() {
+                Some(acquired) => acquired,
+                None => self.combiner_lock.try_lock(),
+            };
+            #[cfg(not(any(feature = "fcpq_fast_path", feature = "fcpq_fast_path_notime")))]
+            let acquired = self.combiner_lock.try_lock();
+
+            if acquired {
                 self.combine();
 
-                unsafe {
-                    self.combiner_lock.unlock();
-                }
+                self.release_combiner();
 
                 if node.complete.load(Acquire) {
                     break 'outer;
@@ -370,6 +555,94 @@ where
             self.local_node
                 .get()
                 .map(|x| *(*x.get()).combiner_time_stat.get())
+        }
+    }
+}
+
+// Plan D4: a fast-path request is charged exactly what a one-node combine pass
+// charges, so these expectations are shared by the baseline and every timed
+// build; only fcpq_fast_path_notime (fairness-incorrect by design) differs.
+#[cfg(test)]
+mod accounting_tests {
+    use std::{cmp::Reverse, collections::BinaryHeap, sync::Barrier, thread};
+
+    use super::*;
+    use crate::spin_lock::RawSpinLock;
+
+    type Add = fn(&mut u64, u64) -> u64;
+    type Lock = FCPQ<u64, u64, BinaryHeap<Reverse<UsageNode<'static, u64>>>, Add, RawSpinLock>;
+
+    const TIMED: bool = !cfg!(feature = "fcpq_fast_path_notime");
+    const REQUESTS: u64 = if cfg!(miri) { 16 } else { 1_000 };
+
+    fn add(counter: &mut u64, input: u64) -> u64 {
+        *counter += input;
+        *counter
+    }
+
+    /// (total_usage, total_served); the caller ensures no call is in flight.
+    fn totals(lock: &Lock) -> (u64, u64) {
+        // SAFETY: quiescent lock, so no combiner accesses the totals.
+        unsafe { (*lock.total_usage.get(), *lock.total_served.get()) }
+    }
+
+    /// The calling thread's stored usage. Alone, its node ends every request
+    /// inactive (fast path, or served and deactivated in the same pass), so
+    /// `node.usage` is authoritative.
+    fn own_usage(lock: &Lock) -> u64 {
+        // SAFETY: shared access to this thread's stable node.
+        unsafe { &*lock.local_node.get().unwrap().get() }
+            .usage
+            .load_acquire()
+    }
+
+    #[test]
+    fn solo_requests_charge_usage_and_totals() {
+        let lock = Lock::new(0, add);
+        for expected in 1..=REQUESTS {
+            assert_eq!(lock.lock(1), expected);
+        }
+        let (total_usage, total_served) = totals(&lock);
+        if TIMED {
+            assert_eq!(total_served, REQUESTS);
+            assert!(total_usage > 0);
+            assert_eq!(own_usage(&lock), total_usage);
+        } else {
+            assert_eq!((total_usage, total_served, own_usage(&lock)), (0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn newcomer_starts_at_running_average() {
+        let lock = Lock::new(0, add);
+        let barrier = Barrier::new(2);
+        let (before, newcomer, after) = thread::scope(|scope| {
+            // The first thread stays alive while the newcomer (this thread)
+            // runs: thread_local recycles an exited thread's slot, which would
+            // hand the newcomer that thread's node and usage.
+            scope.spawn(|| {
+                for _ in 0..REQUESTS {
+                    lock.lock(1);
+                }
+                barrier.wait();
+                barrier.wait();
+            });
+            barrier.wait();
+            let before = totals(&lock);
+            let response = lock.lock(1);
+            let newcomer = own_usage(&lock);
+            let after = totals(&lock);
+            barrier.wait();
+            assert_eq!(response, REQUESTS + 1);
+            (before, newcomer, after)
+        });
+        let ((usage_before, served_before), (usage_after, served_after)) = (before, after);
+        if TIMED {
+            assert_eq!(served_after, served_before + 1);
+            let cs_time = usage_after - usage_before;
+            assert_eq!(newcomer, usage_before / served_before + cs_time);
+        } else {
+            assert_eq!((usage_after, served_after, newcomer), (0, 0, 0));
         }
     }
 }
