@@ -13,6 +13,8 @@
   #text(size: 11pt)[Draft]
 ]
 
+#include "sections/abstract.typ"
+
 #include "sections/introduction.typ"
 
 #bibliography("refs.bib", style: "association-for-computing-machinery")
