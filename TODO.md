@@ -75,9 +75,15 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   `crates/libdlock/src/dlock2/fc_pq/lock.rs`; reuse the
   `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
 
-- [ ] **(b) Trim FC-PQ per-request tax.**
+- [~] **(b) Trim FC-PQ per-request tax.**
   Sample `__rdtscp` every k requests; bound heap arity.
   Target: FC-PQ/FC >= 0.95 at 1 worker.
+  *(In progress: [plan](plan/2026-09-27/e0b-fcpq-fast-path.md). The
+  uncontended fast path (try-lock first, bypass the PQ when nothing else is
+  pending) and the cached thread id are implemented as default-off `libdlock`
+  features `fcpq_fast_path`, `fcpq_fast_path_notime`, `fcpq_cached_tid` and
+  `fcpq_fast_path_stat`, with stress and enrollment-window tests. Benchmark
+  ablation pending; k-sampling and heap arity are not started.)*
 
 - [ ] **(c) Obtain and validate the real CFL (Park/Eom, PPoPP'24).**
   Replace `cfl_local` as the CFL comparison.

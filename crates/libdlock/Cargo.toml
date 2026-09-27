@@ -7,6 +7,17 @@ edition = "2021"
 [features]
 default = ["combiner_stat"]
 combiner_stat = []
+# E0(b) FC-PQ fast-path ablation, all default-off
+# (plan/2026-09-27/e0b-fcpq-fast-path.md, dlock2/README.md).
+# D6: cache the enrolling thread's id in the node.
+fcpq_cached_tid = []
+# D1+D2+D4: serve an uncontended request directly under the combiner lock.
+fcpq_fast_path = []
+# Fast path without timestamps or usage charge (fairness-incorrect; ablation
+# only). Mutually exclusive with fcpq_fast_path.
+fcpq_fast_path_notime = []
+# Per-thread fast-path hit counter: FCPQ::get_fast_path_hits/fast_path_hits.
+fcpq_fast_path_stat = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

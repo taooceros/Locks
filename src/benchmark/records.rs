@@ -47,6 +47,9 @@ pub struct Records {
     pub waiter_latency: Vec<u64>,
     pub hold_time: u64,
     pub combine_time: Option<u64>,
+    /// Acquisitions including warmup; denominator of the FC-PQ fast-path hit rate.
+    #[cfg(feature = "fcpq_fast_path_stat")]
+    pub all_acquire: u64,
     pub jfi: f64,
     pub normalized_share: f64,
     pub locktype: String,

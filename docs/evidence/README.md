@@ -13,6 +13,7 @@ This directory indexes the completed experiments that bear on the thesis: fairne
 | Heterogeneous clients | `experiment/heterogeneous-clients@d9f1abc` | driver `integration/upscaledb/heterogeneous_clients.py`; raw `.worktree/heterogeneous-trials-20260925-01/analysis/summary.txt` (no committed report; figures in `experiment/multitable-other-locks@3f770d7:docs/reports/fairness-campaign/report.html`) | 126 primary + 126 profile | shared batch8 FC->FC-PQ profile Jain 0.579->0.628, reader share 7.3%->11.5%, USCL 0.908; shared pure read FC-PQ/FC throughput 0.397x. |
 | redb 1/64 | `experiment/redb-fair-transactions@e96f5f9` | driver `integration/redb_transactions.py`; raw `.worktree/redb-campaign-20260925-04/analysis/summary.json` (no committed report; figures in `experiment/multitable-other-locks@3f770d7:docs/reports/fairness-campaign/report.html`) | 180 | Immediate FC->FC-PQ Jain 0.891->0.992, small-txn share 32.6%->45.4%, small-txn throughput 1.500x, total records 0.832x, small-txn p99 bucket 2.097->8.389 ms; MCS Jain 0.907. |
 | LogP model checks | `research/logp-analysis@555ad76` | `analysis/logp/README.md`; raw `.worktree/logp/verification.json` | 8 | Abstract fairness/performance separation; not hardware evidence. |
+| E0(b) FC-PQ fast-path ablation | `e0b/fcpq-fast-path` (jj change `ouppsvtn`, PR #48) | `docs/evidence/e0b-fast-path-ablation/RESULTS.md`; raw per-trial `~/Locks-artifacts/e0b-fcpq-fast-path/raw/trials.csv` (ignored `.worktree/e0b/raw/` in the workspace), arrows `.worktree/e0b/` | 453 FC/FC-PQ paired trials (trimmed matrix; missing cells in §6) | counter 1W tiny CS FC-PQ/FC 0.528 baseline -> 1.123 `fcpq_fast_path` (tax +64.7 ns -> -8.1 ns; cached_tid 12.7 ns, PQ bypass 72.5 ns, timestamps 21.2 ns). 32W zero non-CS -1.5 to -3.4% at cs 1, flat at cs 1000. 1:8 service Jain unchanged for fast_path (8W 0.892 vs 0.893, 32W 0.931 vs 0.931); notime 0.839. Regression 8W b-mid -5 to -8% at 11% hit rate; fp+cached_tid d-het 8W unresolved. |
 
 ## Reading rules
 
@@ -27,4 +28,4 @@ This directory indexes the completed experiments that bear on the thesis: fairne
 - No cache-migration measurement (no HITM/LLC counters) in any study; locality claims are inference.
 - CFL-local is an unverified proxy with cross-handle global accounting, not Park/Eom's CFL artifact.
 - DLock2 waiters spin only, never park (see finding 002); CPU-s and oversubscription numbers reflect that policy.
-- FC-PQ carries a constant per-request tax of 13-28% over FC at 1 worker.
+- FC-PQ carries a constant per-request tax of 13-28% over FC at 1 worker (counter microbenchmark on this machine: +65 ns/request, ratio 0.53 at tiny CS). The E0(b) `fcpq_fast_path` build removes it (ratio 1.12), but it is not yet default; see `e0b-fast-path-ablation/RESULTS.md` §8.
