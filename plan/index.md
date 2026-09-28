@@ -22,6 +22,17 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
   - Scope: FC-PQ only (`crates/libdlock/src/dlock2/fc_pq/`); target
     FC-PQ/FC >= 0.95 at 1 worker
 
+### redb write path: service-time fairness rerun (2026-09-28)
+
+- [redb internal-lock rerun](./2026-09-28/redb-internal-rerun.md)
+  - Status: implemented and smoke-verified (workspace `redb-internal`): service
+    time per client, `None` primary, 1/2/4/8-client sweep, `uscl` variant,
+    FC-PQ with `fcpq_fast_path`; gate 64/64, 165 upstream tests, 336-cell smoke,
+    168-cell perf cache-counter cohort and 504-cell formal matrix (0 failures);
+    absolute tx/s at 4-8 clients frequency-confounded (turbo vs base per core)
+  - Scope: `integration/redb/**`
+- [redb perf-02: clock-normalised counters](./2026-09-28/redb-perf-02-clock.md) — done: ref_tsc + per-client clock; FC/FC-PQ two levels = clock; perf overhead ≈ 1 %; fixed 3.0 GHz rerun: FC-PQ/U-SCL 2.4-3.4× → 0.92-1.27×; S2 (C6 off) open
+
 ### Theoretical analysis (formal version of the thesis)
 
 - [Publication Analysis Plan](./2026-09-23/logp-publication-analysis.md)
@@ -51,6 +62,11 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## By Date
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
+
+### 2026-09-28
+
+- [redb internal-lock rerun](./2026-09-28/redb-internal-rerun.md)
+- [redb perf-02 clock normalisation](./2026-09-28/redb-perf-02-clock.md)
 
 ### 2026-09-27
 
