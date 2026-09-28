@@ -578,7 +578,12 @@ mod fc_pq_fast_path {
         }
         state.tickets += 1;
         request.ticket = state.tickets;
-        let seen = &mut state.seen[request.worker][request.sequence];
+        // Rows grow on demand for workers of unbounded length (thread_churn).
+        let row = &mut state.seen[request.worker];
+        if row.len() <= request.sequence {
+            row.resize(request.sequence + 1, 0);
+        }
+        let seen = &mut row[request.sequence];
         *seen += 1;
         request.executions = *seen;
         state.executions[request.worker].fetch_add(1, Relaxed);
@@ -812,6 +817,120 @@ mod fc_pq_fast_path {
         assert_eq!(executions[0].load(Relaxed), REQUESTS);
     }
 
+    const CHURN_ROUNDS: usize = if cfg!(miri) { 3 } else { 2_000 };
+    const CHURN_MAX_REQUESTS: usize = 40;
+    const CHURN_THINK_SPINS: usize = if cfg!(miri) { 10 } else { 200 };
+
+    /// Sets the flag when dropped, so a failing test does not leave its
+    /// hammers spinning under the rest of the suite.
+    struct StopOnDrop(Arc<AtomicBool>);
+
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Relaxed);
+        }
+    }
+
+    /// Two lock instances. Long-lived hammers alternate between them while
+    /// waves of short-lived threads each send 1..=40 requests to one lock
+    /// and exit right after their last response, so thread_local hands
+    /// nearly every churn thread (and each final probe thread) an exited
+    /// thread's node, with its usage and hammer-served history. The node is
+    /// normally already deactivated by then: a combiner that serves a node
+    /// retires it in the same pass. Spinning threads alive at once never
+    /// exceed the available parallelism (one CPU: no hammers); the per-queue
+    /// tests are serial so they do not add up.
+    fn thread_churn<PQ: Queue>() {
+        let cpus = thread::available_parallelism().map_or(1, |n| n.get());
+        let hammers = (cpus / 2).min(4);
+        let batch = (cpus - hammers).clamp(1, 6);
+        // Worker ids: hammers, then churn threads, then one probe per lock.
+        let probe = hammers + CHURN_ROUNDS * batch;
+        let locks: Arc<[_; 2]> =
+            Arc::new([(); 2].map(|_| new_lock::<PQ>(probe + 1, CHURN_MAX_REQUESTS)));
+        let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
+
+        let hammer_handles: Vec<_> = (0..hammers)
+            .map(|worker| {
+                let (locks, stop) = (locks.clone(), stop.0.clone());
+                thread::spawn(move || {
+                    let mut tickets = [Vec::new(), Vec::new()];
+                    let mut next = worker;
+                    while !stop.load(Relaxed) {
+                        let l = next % 2;
+                        tickets[l].push(issue(&locks[l].0, worker, tickets[l].len()));
+                        next += 1;
+                    }
+                    tickets
+                })
+            })
+            .collect();
+
+        // tickets[l][worker]: tickets returned to `worker` by lock `l`.
+        let mut tickets = [vec![Vec::new(); probe + 1], vec![Vec::new(); probe + 1]];
+        for round in 0..CHURN_ROUNDS {
+            let wave: Vec<_> = (0..batch)
+                .map(|k| {
+                    let locks = locks.clone();
+                    let worker = hammers + round * batch + k;
+                    let l = (round + k) % 2;
+                    let requests = 1 + (round * 7 + k * 3) % CHURN_MAX_REQUESTS;
+                    let think = if k % 2 == 0 { CHURN_THINK_SPINS } else { 0 };
+                    let handle = thread::spawn(move || {
+                        (0..requests)
+                            .map(|sequence| {
+                                (0..think).for_each(|_| spin_loop());
+                                issue(&locks[l].0, worker, sequence)
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                    (l, worker, handle)
+                })
+                .collect();
+            for (l, worker, handle) in wave {
+                tickets[l][worker] = handle.join().expect("churn thread panicked");
+            }
+        }
+        drop(stop);
+        for (worker, handle) in hammer_handles.into_iter().enumerate() {
+            let [t0, t1] = handle.join().expect("hammer panicked");
+            (tickets[0][worker], tickets[1][worker]) = (t0, t1);
+        }
+
+        for l in 0..2 {
+            let total: usize = tickets[l].iter().map(Vec::len).sum();
+            // All issuers have exited, so a fresh thread may reuse one's node;
+            // its combine pass would run any request still enrolled.
+            let probe_ticket = {
+                let locks = locks.clone();
+                thread::spawn(move || issue(&locks[l].0, probe, 0))
+                    .join()
+                    .expect("probe panicked")
+            };
+            assert_eq!(
+                probe_ticket,
+                total as u64 + 1,
+                "lock {l}: executions without a response",
+            );
+            tickets[l][probe].push(probe_ticket);
+            let executions = &locks[l].1;
+            for (worker, worker_tickets) in tickets[l].iter().enumerate() {
+                assert_eq!(
+                    executions[worker].load(Relaxed),
+                    worker_tickets.len(),
+                    "lock {l}, worker {worker}: executions != requests",
+                );
+            }
+            let mut all: Vec<u64> = tickets[l].concat();
+            all.sort_unstable();
+            assert_eq!(
+                all,
+                (1..=total as u64 + 1).collect::<Vec<_>>(),
+                "lock {l}: missing or duplicated execution",
+            );
+        }
+    }
+
     macro_rules! per_queue {
         ($name:ident, $queue:ty) => {
             mod $name {
@@ -831,6 +950,12 @@ mod fc_pq_fast_path {
                 #[test]
                 fn single_thread_hits() {
                     super::single_thread_hits::<$queue>();
+                }
+
+                #[test]
+                #[serial_test::serial]
+                fn thread_churn() {
+                    panic_after(Duration::from_secs(120), super::thread_churn::<$queue>);
                 }
             }
         };

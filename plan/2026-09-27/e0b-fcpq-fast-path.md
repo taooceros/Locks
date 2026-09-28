@@ -288,3 +288,34 @@ Verification (2026-09-27, shared host; `uptime` load averages 4-80):
   all passed. The exception was one `fcpq_cached_tid` run, where
   `dlock2_unit_test::fc_sl::threads_{4,8}` (FCSL, not FC-PQ) timed out at
   120 s. The next two runs of that combination passed (01:06, load 40-60).
+
+## Thread-churn test (2026-09-28, change on top of the PR #48 head)
+
+`dlock2_unit_test::fc_pq_fast_path::{btree,bheap}::thread_churn`, ported from
+an audit throwaway, runs in every build. Two FC-PQ instances and up to 4
+long-lived hammers alternate between the locks. Meanwhile 2000 waves of up to
+6 short-lived threads send 1..=40 requests each to one lock and exit
+immediately after the last response. After the waves, a fresh thread probes
+each lock. The test checks per-call response identity and `executions == 1`,
+per-lock per-worker execution counts, and per-lock tickets 1..=N (the probe
+included). It spawns at most `available_parallelism` spinning threads (with
+one CPU, no hammers) and is `#[serial_test::serial]`, so the two queues never
+overlap. `State::seen` rows now grow on demand so that the hammers can run
+unbounded.
+
+- Coverage: a throwaway probe (made `local_node` visible and read the slot
+  before the first request) showed that 11988 of 12000 churn threads per test
+  got an exited thread's recycled node, with and without `fcpq_fast_path`.
+  None found that node still active. A combiner deactivates a served node in
+  the same pass, before the next thread spawns. The test therefore covers
+  slot reuse of a retired node carrying usage. It does not cover reuse of a
+  still-enrolled node, which would require a pass to end at the 64-pop limit
+  or stall with that node buffered.
+- Mutations, each reverted: calling the delegate twice in `run_fast_path`
+  (`fcpq_fast_path`) failed with "executed 2 times". Skipping every 1000th
+  combine execution (default features) failed with "executed 0 times".
+- Runtime and repeat runs (`taskset -c 48-63`, `timeout 120`, load < 2): 20/20
+  pass with default features and 20/20 with `fcpq_fast_path`, about 1.0 s of
+  wall time per `cargo test ... thread_churn` (both queues). The full
+  `cargo test -p libdlock --release --features fcpq_fast_path --lib` gave
+  157 passed and 3 ignored in 10.05 s.
