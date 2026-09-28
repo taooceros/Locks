@@ -5,6 +5,218 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-28 — Cross-runtime baseline: tokio locks
+
+### Setup
+
+New crate `crates/coro_tokio_baseline`, binary `tokio-bench`: this study's
+workload on tokio 1.53.1's multi-thread runtime (`worker_threads = W`, worker
+thread i pinned to logical CPU i = one per physical core; every JSON records
+`pinned_cpus = 0..W-1`, `runtime_threads = W`), default runtime settings.
+Same workload code as `coro-bench` (copied, not re-derived): BTreeMap insert
+over key space 65 536 from the same per-client xorshift stream, light CS 1 000
+TSC cycles + insert, heavy 8×, sustained 64 clients / 4 000-cycle parallel
+work, bursty 16 clients / 32 000, W bystanders spinning 1 000 cycles then
+`tokio::task::yield_now()`, 200 ms warm-up, 2 s window, rdtscp, same
+histogram/quantiles, Jain over per-client service cycles. Tasks are spawned
+from the main thread (tokio has no `spawn_on`). Locks: `tokio-mutex`
+(`tokio::sync::Mutex`), `tokio-mutex-unconstrained` (same, each client loop
+wrapped in `tokio::task::unconstrained`, which removes tokio's coop budget:
+128 units per poll, one consumed per completed `tokio::sync::Mutex` acquire,
+so an available lock can never be refused with a forced `Pending`),
+`async-lock` (`async_lock::Mutex` 3.4.2), `std-mutex` and `parking-lot`
+(0.12.5), both locked and waited on inside the task. `tokio-bench --sanity`
+(map len = total ops, unique keys): PASS for all five.
+
+Matrix: 5 locks × W {8, 16} × {sustained, bursty} × 3 repeats = 60 runs
+(`results/tokio-<lock>-w<W>-h8-<sus|bur>-r<i>.json`), then the existing
+`target/release/coro-bench` (mtime 09:25:54 UTC, sha256 `95eb5757…`, not
+rebuilt) for `dispatch`, `dispatch-home`, `ces-k64-home`, `fc-remote`,
+`fcpq-h16-home` in the same cells, balance 31, 3 repeats = 60 runs
+(`results/xrt-<label>-w<W>-h8-b31-<sus|bur>-r<i>.json`). Sequential, repeats
+outermost, unix 1790627987–1790628742, holding
+`~/.cache/locks-experiments/measurement.lock`, 20 s idle after every
+std-mutex / parking-lot run (caveat 7). Driver:
+`crates/coro_tokio_baseline/scripts/run_xrt.sh`; table:
+`python3 scripts/summarize_tokio.py results`. Superseded sets:
+`results/xrt-v1-redb-overlap.tar.zst` (run without the lock while another
+job measured on CPUs 16–23), `results/xrt-v2-turbo-carryover.tar.zst` (no
+cooldown; caveat 7).
+
+### Results (medians [min, max], n = 3)
+
+| workers | contention | runtime | variant | n | throughput (Mops/s) | thr / tokio-mutex | service Jain | light run p50 / p99 (µs) | heavy run p50 / p99 (µs) | starved clients |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 8 | sus | tokio | tokio-mutex | 3 | 0.241 [0.241, 0.242] | 1.00 | 0.663 [0.662, 0.663] | 253.2 [253.2, 253.2] / 268.1 [253.2, 268.1] | 253.2 [253.2, 253.2] / 268.1 [253.2, 268.1] | 0 |
+| 8 | sus | tokio | tokio-mutex-unconstrained | 3 | 0.239 [0.239, 0.239] | 0.99 | 0.665 [0.664, 0.665] | 253.2 [253.2, 253.2] / 268.1 [268.1, 268.1] | 253.2 [253.2, 253.2] / 268.1 [268.1, 268.1] | 0 |
+| 8 | sus | tokio | async-lock | 3 | 0.177 [0.177, 0.239] | 0.73 | 0.016 [0.016, 0.661] | 253.2 / 268.1 | 3.7 [3.7, 253.2] / 3.7 [3.7, 268.1] | 63 [0, 63] |
+| 8 | sus | tokio | std-mutex | 3 | 0.204 [0.203, 0.230] | 0.85 | 0.055 [0.047, 0.057] | 42.8 [33.5, 42.8] / 417.0 [268.1, 476.6] | 5.4 [5.4, 5.6] / 253.2 [201.1, 297.9] | 56 |
+| 8 | sus | tokio | parking-lot | 3 | 0.140 [0.138, 0.142] | 0.58 | 0.048 [0.048, 0.049] | 57.7 [31.6, 119.1] / 3217.0 [2978.7, 3336.1] | 5.4 [5.4, 5.8] / 655.3 [655.3, 685.1] | 56 |
+| 8 | sus | coro | dispatch | 3 | 0.218 [0.217, 0.218] | 0.90 | 0.659 [0.659, 0.659] | 283.0 [283.0, 283.0] / 297.9 [297.9, 297.9] | 283.0 [283.0, 283.0] / 297.9 [297.9, 297.9] | 0 |
+| 8 | sus | coro | dispatch-home | 3 | 0.253 [0.253, 0.253] | 1.05 | 0.669 [0.669, 0.669] | 238.3 [238.3, 238.3] / 253.2 [253.2, 253.2] | 238.3 [238.3, 238.3] / 253.2 [253.2, 253.2] | 0 |
+| 8 | sus | coro | ces-k64-home | 3 | 0.381 [0.380, 0.381] | 1.58 | 0.659 [0.659, 0.659] | 163.8 [163.8, 163.8] / 171.3 [171.3, 178.7] | 163.8 [163.8, 163.8] / 171.3 [171.3, 171.3] | 0 |
+| 8 | sus | coro | fc-remote | 3 | 0.387 [0.387, 0.388] | 1.61 | 0.653 [0.653, 0.653] | 156.4 [156.4, 156.4] / 171.3 [171.3, 171.3] | 156.4 [156.4, 156.4] / 171.3 [171.3, 171.3] | 0 |
+| 8 | sus | coro | fcpq-h16-home | 3 | 0.571 [0.569, 0.571] | 2.37 | 0.930 [0.930, 0.930] | 63.3 [63.3, 67.0] / 148.9 [148.9, 148.9] | 238.3 [238.3, 253.2] / 342.5 [342.5, 342.5] | 0 |
+| 8 | bur | tokio | tokio-mutex | 3 | 0.073 [0.073, 0.073] | 1.00 | 0.668 [0.668, 0.669] | 201.1 [201.1, 201.1] / 201.1 [201.1, 201.1] | 201.1 [201.1, 201.1] / 201.1 [201.1, 201.1] | 0 |
+| 8 | bur | tokio | tokio-mutex-unconstrained | 3 | 0.073 [0.073, 0.073] | 1.00 | 0.669 [0.669, 0.670] | 201.1 [201.1, 201.1] / 201.1 [201.1, 201.1] | 201.1 [201.1, 201.1] / 201.1 [201.1, 201.1] | 0 |
+| 8 | bur | tokio | async-lock | 3 | 0.054 [0.054, 0.054] | 0.75 | 0.062 | – / – | 3.7 [3.7, 3.7] / 3.7 [3.7, 3.7] | 15 |
+| 8 | bur | tokio | std-mutex | 3 | 0.366 [0.365, 0.384] | 5.02 | 0.255 [0.253, 0.256] | 5.6 [5.6, 6.1] / 46.5 [39.1, 48.4] | 4.4 [4.4, 4.4] / 21.4 [18.6, 23.3] | 8 |
+| 8 | bur | tokio | parking-lot | 3 | 0.357 [0.356, 0.359] | 4.90 | 0.250 [0.250, 0.250] | 5.6 [5.6, 5.6] / 55.9 [54.0, 55.9] | 4.7 [4.7, 4.7] / 26.1 [26.1, 26.1] | 8 |
+| 8 | bur | coro | dispatch | 3 | 0.071 [0.071, 0.071] | 0.97 | 0.674 [0.674, 0.674] | 208.5 [208.5, 208.5] / 238.3 [238.3, 238.3] | 208.5 [208.5, 208.5] / 238.3 [238.3, 238.3] | 0 |
+| 8 | bur | coro | dispatch-home | 3 | 0.147 [0.146, 0.150] | 2.01 | 0.669 [0.669, 0.670] | 93.1 [89.4, 93.1] / 126.6 [126.6, 126.6] | 93.1 [89.4, 93.1] / 126.6 [126.6, 126.6] | 0 |
+| 8 | bur | coro | ces-k64-home | 3 | 0.317 [0.314, 0.318] | 4.36 | 0.678 [0.677, 0.679] | 39.1 [39.1, 39.1] / 59.6 [59.6, 59.6] | 39.1 [39.1, 39.1] / 59.6 [59.6, 59.6] | 0 |
+| 8 | bur | coro | fc-remote | 3 | 0.307 [0.307, 0.308] | 4.22 | 0.655 [0.655, 0.656] | 39.1 [39.1, 39.1] / 55.9 [55.9, 55.9] | 39.1 [39.1, 39.1] / 55.9 [55.9, 55.9] | 0 |
+| 8 | bur | coro | fcpq-h16-home | 3 | 0.365 [0.365, 0.366] | 5.01 | 0.685 [0.685, 0.686] | 21.4 [21.4, 21.4] / 67.0 [67.0, 67.0] | 29.8 [29.8, 29.8] / 78.2 [74.5, 78.2] | 0 |
+| 16 | sus | tokio | tokio-mutex | 3 | 0.232 [0.231, 0.233] | 1.00 | 0.666 [0.665, 0.668] | 268.1 [268.1, 268.1] / 268.1 [268.1, 283.0] | 268.1 [268.1, 268.1] / 268.1 [268.1, 283.0] | 0 |
+| 16 | sus | tokio | tokio-mutex-unconstrained | 3 | 0.231 [0.230, 0.231] | 0.99 | 0.667 [0.667, 0.667] | 268.1 [268.1, 268.1] / 283.0 [283.0, 283.0] | 268.1 [268.1, 268.1] / 283.0 [283.0, 283.0] | 0 |
+| 16 | sus | tokio | async-lock | 3 | 0.176 [0.176, 0.176] | 0.76 | 0.016 | – / – | 3.7 [3.7, 3.7] / 3.7 [3.7, 3.7] | 63 |
+| 16 | sus | tokio | std-mutex | 3 | 0.167 [0.166, 0.167] | 0.72 | 0.234 [0.234, 0.234] | 2.0 [1.9, 2.0] / 1310.6 [1310.6, 1370.2] | 5.1 [5.1, 5.1] / 1608.5 [1608.5, 1608.5] | 48 |
+| 16 | sus | tokio | parking-lot | 3 | 0.108 [0.108, 0.114] | 0.46 | 0.197 [0.181, 0.198] | 89.4 [63.3, 89.4] / 1489.4 [1429.8, 1548.9] | 8.4 [8.4, 8.4] / 1251.1 [1131.9, 1251.1] | 48 |
+| 16 | sus | coro | dispatch | 3 | 0.214 [0.214, 0.215] | 0.92 | 0.663 [0.663, 0.663] | 283.0 [283.0, 283.0] / 297.9 [297.9, 297.9] | 283.0 [283.0, 283.0] / 297.9 [297.9, 297.9] | 0 |
+| 16 | sus | coro | dispatch-home | 3 | 0.239 [0.239, 0.241] | 1.03 | 0.674 [0.673, 0.674] | 253.2 [253.2, 253.2] / 268.1 [268.1, 268.1] | 253.2 [253.2, 253.2] / 268.1 [268.1, 268.1] | 0 |
+| 16 | sus | coro | ces-k64-home | 3 | 0.372 [0.372, 0.372] | 1.60 | 0.661 [0.661, 0.662] | 163.8 [163.8, 163.8] / 178.7 [178.7, 178.7] | 163.8 [163.8, 163.8] / 178.7 [178.7, 178.7] | 0 |
+| 16 | sus | coro | fc-remote | 3 | 0.378 [0.378, 0.379] | 1.63 | 0.659 [0.659, 0.660] | 163.8 [163.8, 163.8] / 178.7 [171.3, 178.7] | 163.8 [163.8, 163.8] / 178.7 [178.7, 178.7] | 0 |
+| 16 | sus | coro | fcpq-h16-home | 3 | 0.547 [0.545, 0.549] | 2.36 | 0.933 [0.932, 0.934] | 70.7 [70.7, 70.7] / 141.5 [141.5, 141.5] | 253.2 [253.2, 253.2] / 342.5 [342.5, 342.5] | 0 |
+| 16 | bur | tokio | tokio-mutex | 3 | 0.072 [0.072, 0.072] | 1.00 | 0.672 [0.671, 0.674] | 201.1 [201.1, 201.1] / 208.5 [208.5, 208.5] | 201.1 [201.1, 201.1] / 208.5 [208.5, 208.5] | 0 |
+| 16 | bur | tokio | tokio-mutex-unconstrained | 3 | 0.072 [0.072, 0.072] | 1.00 | 0.672 [0.672, 0.672] | 201.1 [201.1, 201.1] / 208.5 [208.5, 208.5] | 201.1 [201.1, 201.1] / 208.5 [208.5, 208.5] | 0 |
+| 16 | bur | tokio | async-lock | 3 | 0.054 [0.054, 0.054] | 0.75 | 0.062 | – / – | 3.7 [3.7, 3.7] / 3.7 [3.7, 4.0] | 15 |
+| 16 | bur | tokio | std-mutex | 3 | 0.195 [0.172, 0.228] | 2.70 | 0.782 [0.767, 0.807] | 5.6 [5.4, 5.8] / 625.5 [357.4, 834.0] | 5.8 [5.8, 7.2] / 625.5 [342.6, 744.7] | 0 |
+| 16 | bur | tokio | parking-lot | 3 | 0.125 [0.122, 0.154] | 1.73 | 0.774 [0.692, 0.775] | 39.1 [29.8, 63.3] / 1131.9 [744.7, 1191.5] | 8.8 [8.4, 8.8] / 1012.8 [685.1, 1012.8] | 0 |
+| 16 | bur | coro | dispatch | 3 | 0.071 [0.071, 0.071] | 0.98 | 0.679 [0.679, 0.679] | 208.5 [208.5, 208.5] / 238.3 [238.3, 238.3] | 208.5 [208.5, 208.5] / 238.3 [238.3, 238.3] | 0 |
+| 16 | bur | coro | dispatch-home | 3 | 0.172 [0.161, 0.172] | 2.39 | 0.673 [0.672, 0.673] | 74.5 [74.5, 78.2] / 111.7 [111.7, 126.6] | 74.5 [74.5, 78.2] / 111.7 [111.7, 126.6] | 0 |
+| 16 | bur | coro | ces-k64-home | 3 | 0.350 [0.349, 0.350] | 4.85 | 0.663 [0.663, 0.663] | 29.8 [29.8, 29.8] / 44.7 [44.7, 44.7] | 29.8 [29.8, 29.8] / 44.7 [44.7, 44.7] | 0 |
+| 16 | bur | coro | fc-remote | 3 | 0.358 [0.357, 0.358] | 4.97 | 0.662 [0.662, 0.662] | 28.9 [28.9, 28.9] / 50.3 [50.3, 52.1] | 28.9 [28.9, 28.9] / 50.3 [48.4, 50.3] | 0 |
+| 16 | bur | coro | fcpq-h16-home | 3 | 0.392 [0.392, 0.392] | 5.44 | 0.726 [0.724, 0.727] | 15.8 [15.8, 15.8] / 54.0 [54.0, 54.0] | 33.5 [33.5, 33.5] / 67.0 [67.0, 70.7] | 0 |
+
+Ratios to `std-mutex` (medians): `ces-k64-home` / `fc-remote` /
+`fcpq-h16-home` = 1.86 / 1.90 / 2.79 (w8 sus), 0.87 / 0.84 / 1.00 (w8 bur;
+fcpq-h16-home inside std-mutex's spread), 2.23 / 2.27 / 3.28 (w16 sus),
+1.80 / 1.84 / 2.01 (w16 bur). std-mutex and parking-lot starve all W
+bystanders in every run; every other row starves none, except async-lock
+w8 bur r2 (1) and w8 sus r3 (2) (`starved_bystanders`, censored at 2.196 s).
+
+### Side check: tokio's LIFO slot (not part of the matrix)
+
+`Builder::disable_lifo_slot()` needs `--cfg tokio_unstable`, so this used a
+throwaway copy of `tokio-bench` built with that flag (its LIFO-on runs are
+0.96–1.00× the release binary's medians), same window (unix
+1790628744–1790628853), LIFO on vs off in that build, n = 3. JSONs, patch
+and probe scripts for this section and caveats 2 and 7:
+`results/xrt-side-lifo.tar.zst`.
+
+| workers | contention | lock | LIFO slot | throughput (Mops/s) | service Jain | starved clients | bystander p99 (µs) |
+|---|---|---|---|---|---|---|---|
+| 8 | sus | tokio-mutex | on | 0.231 [0.230, 0.242] | 0.675 [0.662, 0.677] | 0 | 18.6 [17.7, 19.5] |
+| 8 | sus | tokio-mutex | off | 0.250 [0.243, 0.251] | 0.689 [0.688, 0.693] | 0 | 18.6 [18.6, 19.5] |
+| 8 | sus | async-lock | on | 0.176 [0.176, 0.403] | 0.016 | 63 | 2.2 [2.0, 2.2] |
+| 8 | sus | async-lock | off | 0.237 [0.233, 0.241] | 0.695 [0.690, 0.697] | 0 | 19.5 [18.6, 19.5] |
+| 8 | bur | tokio-mutex | on | 0.072 [0.072, 0.073] | 0.679 [0.668, 0.680] | 0 | 1.5 [1.3, 1.6] |
+| 8 | bur | tokio-mutex | off | 0.263 [0.261, 0.265] | 0.676 [0.675, 0.679] | 0 | 44.7 [42.8, 44.7] |
+| 8 | bur | async-lock | on | 0.072 [0.054, 0.072] | 0.665 [0.062, 0.667] | 0 [0, 15] | 1.0 [1.0, 2.3] |
+| 8 | bur | async-lock | off | 0.250 [0.249, 0.253] | 0.682 [0.678, 0.683] | 0 | 42.8 [42.8, 44.7] |
+| 16 | sus | tokio-mutex | on | 0.229 [0.229, 0.232] | 0.671 [0.666, 0.673] | 0 | 17.7 [6.5, 18.6] |
+| 16 | sus | tokio-mutex | off | 0.248 [0.245, 0.253] | 0.687 [0.687, 0.691] | 0 | 24.2 [23.3, 24.2] |
+| 16 | sus | async-lock | on | 0.176 | 0.016 | 63 | 5.4 |
+| 16 | sus | async-lock | off | 0.234 [0.232, 0.244] | 0.703 [0.692, 0.704] | 0 | 25.1 [23.3, 25.1] |
+| 16 | bur | tokio-mutex | on | 0.072 | 0.671 [0.671, 0.672] | 0 | 4.2 |
+| 16 | bur | tokio-mutex | off | 0.248 [0.246, 0.251] | 0.693 [0.690, 0.693] | 0 | 46.5 |
+| 16 | bur | async-lock | on | 0.054 [0.054, 0.072] | 0.062 [0.062, 0.675] | 15 [0, 15] | 5.4 [4.2, 6.3] |
+| 16 | bur | async-lock | off | 0.237 [0.235, 0.244] | 0.702 [0.699, 0.704] | 0 | 46.5 |
+
+Across the matrix and this check, async-lock collapsed to a single client
+in 20 of 24 LIFO-on runs and 0 of 12 LIFO-off runs. With the same build's
+unstable metrics (w8, n = 1 per cell): `budget_forced_yield_count` = 0 in all
+eight runs (tokio-mutex and -unconstrained, LIFO on and off); steals per
+worker per window 4.4–16 k with the slot on, 127–340 k with it off.
+
+### Caveats
+
+1. **tokio LIFO slot.** A wake issued on a worker goes into that worker's
+   LIFO slot, polled after the current poll returns (at most 3 per tick,
+   inside the parent poll's coop budget) and never stolen. Mutex handoff and
+   async-lock notify wakes therefore land on the unlocker's worker, like coro
+   `dispatch` default placement (back of the unlocker's FIFO queue), not
+   `home`. [INFERENCE, supported by the side check] the new owner waits for
+   the unlocker's poll to end, i.e. behind its parallel work: disabling the
+   slot lifts tokio-mutex 3.4–3.7× bursty and 1.08× sustained, and ends the
+   async-lock collapse (its notified waiter is never polled, so the 0.5 ms
+   starvation handoff never fires, and the releaser re-takes the free lock
+   after its own synchronous parallel work).
+2. **Coop budget.** Only `tokio::sync::Mutex`'s acquire consumes budget
+   (async-lock, std, parking_lot and `yield_now` do not), and no forced
+   yield occurred in any diagnostic run, so `unconstrained` has nothing to
+   remove here: 1.00× bursty, 0.99× at w16 sus inside the spread, 0.99× at w8
+   sus outside it (0.239 vs 0.241 [0.241, 0.242]; 0.233–0.237 vs 0.241–0.242
+   in an 8-repeat probe), mechanism of that 1–3 % not identified.
+3. **No balancing steal.** tokio never steals from a busy peer; the coro
+   cells here run balance 31 (a busy worker takes half of a random peer's
+   queue every 31 polls).
+4. **Different steal semantics.** A tokio worker steals half of a random
+   peer's run queue (never its LIFO slot) whenever its own slot and queue are
+   empty, and `yield_now` parks the task in a defer list that does not count
+   as work (woken at the next maintenance tick, every 61 polls, or after a
+   failed steal). A worker holding only yielded bystanders therefore steals,
+   whereas in the coro executor bystanders are always runnable and
+   steal-when-idle never fires (the standing limitation of this study, which
+   still applies to the coro rows). Hence bystander delay (`bystander_latency`
+   in the tokio JSON: yield → next poll) is not comparable to coro's
+   schedule→poll metric and is compared only within tokio above. True parks
+   (`tokio_workers[].parks`, summed over workers) stay ≤ 13 per run except
+   async-lock w8 sus r3 (285 693).
+5. **A blocking mutex holds the worker.** A waiting std / parking_lot client
+   blocks its OS thread, and a client whose `lock()` returned never yields
+   (the loop's only await is the lock). The first W clients polled keep the W
+   workers for the whole run: starved clients = clients − W (56 / 48
+   sustained, 8 / 0 bursty) plus all W bystanders. Those rows measure W
+   threads on a futex / parking_lot mutex, not a 64- or 16-client service;
+   ratios against them are not like-for-like.
+6. **One await per iteration.** [INFERENCE, untested] a service that awaits
+   I/O between critical sections would return the worker to the scheduler,
+   removing caveat 5 and probably the async-lock collapse.
+7. **Turbo carry-over after blocking-lock runs (machine).** For 5–15 s after
+   a std-mutex / parking-lot run, CPUs 0–7 report 2.2 GHz instead of 3.69 GHz
+   (`scaling_cur_freq`, intel_cpufreq + schedutil); the next runs' non-spin
+   CS work (insert) takes ~940 instead of ~440 TSC cycles and tokio-mutex w8
+   sus drops to 0.19 Mops/s. 15 s idle removes it, 5 s does not; the matrix
+   idles 20 s after each such run. Spins are TSC-timed, so frequency moves
+   only non-spin work; earlier coro matrices had no blocking-lock runs.
+   Cause not identified.
+8. Initial placement differs: tokio takes every task from its injection
+   queue; coro spawns client i on worker i mod W. Absolute numbers compare
+   executors as well as locks; coro `dispatch` at 0.90–0.98× tokio-mutex is
+   the executor anchor.
+
+### Verdict
+
+Of the off-the-shelf tokio locks only `tokio::sync::Mutex` serves every
+client, and it lands where coro's FIFO mutex does (8 workers: 0.241 Mops/s
+sustained, coro `dispatch` 0.90× / `dispatch-home` 1.05×; 0.073 bursty,
+`dispatch` 0.97×), so the coro executor is not a weak baseline; the coop
+budget never forced a yield, and lifting it moves throughput by 0–1 %.
+Relative to tokio-mutex, `async-lock` is 0.73–0.76× in every cell because one
+client takes the lock for the whole run in 11 of 12 runs (63 / 15 starved),
+while `std-mutex` (w8: 0.85× sustained, 5.02× bursty) and `parking-lot`
+(0.58×, 4.90×) are really W pinned threads that starve every client beyond
+the W holding a worker, and every bystander. Against this field
+`ces-k64-home`, `fc-remote` and `fcpq-h16-home` run 1.58 / 1.61 / 2.37×
+tokio-mutex sustained and 4.36 / 4.22 / 5.01× bursty at 8 workers (1.60–2.36×
+and 4.85–5.44× at 16) with no starved task and FIFO-level service Jain
+(0.653–0.678 against tokio-mutex's 0.663–0.672), except `fcpq-h16-home`
+(0.930 / 0.933 sustained, 0.726 at w16 bursty; its ops ratio counts cheap
+light ops, phase 3). They beat std-mutex 1.80–3.28× in
+three cells (w8 / w16 sustained, where it serves 8 / 16 of 64 clients, and
+w16 bursty, where it serves all 16) and lose to it only at w8 bursty, where
+it runs just 8 of the 16 clients (`ces-k64-home` 0.87×, `fc-remote` 0.84×,
+`fcpq-h16-home` inside its spread). The bursty 4–5× over tokio-mutex is
+mostly tokio's LIFO slot rather than the lock: with the slot disabled
+(unstable build) tokio-mutex reaches 0.263 / 0.248 Mops/s bursty at 8 / 16
+workers (`ces-k64-home` 1.21 / 1.41× ahead, all three variants 1.2–1.6×) and
+0.250 / 0.248 sustained (`ces-k64-home` / `fc-remote` 1.50–1.55×). What
+survives either tokio configuration is a 1.5–1.6× sustained margin for
+`ces-k64-home` / `fc-remote`, fcpq-h16-home's service fairness, and a bursty
+margin of 1.2–1.6×, not 4–5×, once the handoff wake can leave the unlocker's
+worker.
+
 ## 2026-09-28 — Phase 3: mitigations (H-D), wake placement, H-C revisited
 
 ### One-line verdicts

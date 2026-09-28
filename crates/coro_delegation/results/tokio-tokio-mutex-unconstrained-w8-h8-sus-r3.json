@@ -1,0 +1,939 @@
+{
+  "runtime": "tokio",
+  "lock": "tokio-mutex-unconstrained",
+  "config": {
+    "workers": 8,
+    "clients": 64,
+    "bystanders": 8,
+    "heavy_ratio": 8,
+    "light_cs_cycles": 1000,
+    "parallel_work_cycles": 4000,
+    "bystander_work_cycles": 1000,
+    "key_space": 65536,
+    "duration_ms": 2000,
+    "warmup_ms": 200,
+    "seed": 42,
+    "unique_keys": false
+  },
+  "timestamp": "unix:1790628597",
+  "tsc_hz": 2200164169.661694,
+  "measured_secs": 2.000112695,
+  "total_ops": 478641,
+  "throughput_ops_per_s": 239307.0156479358,
+  "service_jain": 0.6647489987052656,
+  "clients": [
+    {
+      "id": 0,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10664202,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584122.0885145073,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 984802
+      }
+    },
+    {
+      "id": 1,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62924028,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584143.6031555021,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1034736
+      }
+    },
+    {
+      "id": 2,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10730616,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584103.8753844097,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1020792
+      }
+    },
+    {
+      "id": 3,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62940688,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584142.7102553818,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 884230
+      }
+    },
+    {
+      "id": 4,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10665192,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584107.3868164193,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 878726
+      }
+    },
+    {
+      "id": 5,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62885852,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584122.3364535972,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 917130
+      }
+    },
+    {
+      "id": 6,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10661674,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584130.1267718641,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 945622
+      }
+    },
+    {
+      "id": 7,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62957748,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584144.4749933137,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 958226
+      }
+    },
+    {
+      "id": 8,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10665502,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584126.6717475598,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1014576
+      }
+    },
+    {
+      "id": 9,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62971876,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584117.3926995588,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1036726
+      }
+    },
+    {
+      "id": 10,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10624766,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584116.2270357,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 999456
+      }
+    },
+    {
+      "id": 11,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62951220,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584149.8882203503,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1058854
+      }
+    },
+    {
+      "id": 12,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10685142,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584091.9069394304,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1006388
+      }
+    },
+    {
+      "id": 13,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62989238,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584158.2251637919,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 960430
+      }
+    },
+    {
+      "id": 14,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10726024,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584079.3103356063,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 873182
+      }
+    },
+    {
+      "id": 15,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62999168,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584146.9769991976,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 906090
+      }
+    },
+    {
+      "id": 16,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10646080,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584043.3575822413,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 934828
+      }
+    },
+    {
+      "id": 17,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62980646,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584121.4515309533,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 980682
+      }
+    },
+    {
+      "id": 18,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10728422,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584080.680572269,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1005840
+      }
+    },
+    {
+      "id": 19,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62951070,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584118.3150153764,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1026160
+      }
+    },
+    {
+      "id": 20,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10693082,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584107.298301912,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1042652
+      }
+    },
+    {
+      "id": 21,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62996180,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584139.2199491911,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1000160
+      }
+    },
+    {
+      "id": 22,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10593108,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584135.8066586442,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 968706
+      }
+    },
+    {
+      "id": 23,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62985238,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584102.5399117529,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 910960
+      }
+    },
+    {
+      "id": 24,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10648308,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584101.7726664883,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 889146
+      }
+    },
+    {
+      "id": 25,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62978496,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584138.9605562241,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1019792
+      }
+    },
+    {
+      "id": 26,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10736066,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584131.6015510095,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 941418
+      }
+    },
+    {
+      "id": 27,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62954794,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584191.1867896777,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 938132
+      }
+    },
+    {
+      "id": 28,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10640628,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584096.7332531087,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 870578
+      }
+    },
+    {
+      "id": 29,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62924990,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584097.1845413212,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 894258
+      }
+    },
+    {
+      "id": 30,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10606038,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584119.5568333779,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 920386
+      }
+    },
+    {
+      "id": 31,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62930844,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584169.9430328965,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 913478
+      }
+    },
+    {
+      "id": 32,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10760212,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584130.1556565927,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 929068
+      }
+    },
+    {
+      "id": 33,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62925896,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584127.2075421235,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 938844
+      }
+    },
+    {
+      "id": 34,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10705824,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584090.7772131586,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 952412
+      }
+    },
+    {
+      "id": 35,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62940238,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584101.2364268521,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 966872
+      }
+    },
+    {
+      "id": 36,
+      "class": "light",
+      "ops": 7478,
+      "service_cycles": 10619354,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584118.8299010431,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 971712
+      }
+    },
+    {
+      "id": 37,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62984802,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584133.7261665998,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1021520
+      }
+    },
+    {
+      "id": 38,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10705838,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584103.0445246691,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1053312
+      }
+    },
+    {
+      "id": 39,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62937088,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584122.6990239337,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 947006
+      }
+    },
+    {
+      "id": 40,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10738308,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584137.5363016446,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 885992
+      }
+    },
+    {
+      "id": 41,
+      "class": "heavy",
+      "ops": 7478,
+      "service_cycles": 62952948,
+      "run_latency": {
+        "count": 7478,
+        "mean": 584118.0026745119,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 881916
+      }
+    },
+    {
+      "id": 42,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10642332,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584112.7765744083,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1032392
+      }
+    },
+    {
+      "id": 43,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62990628,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584132.0681909346,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1047974
+      }
+    },
+    {
+      "id": 44,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10633652,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584101.9422382672,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1022320
+      }
+    },
+    {
+      "id": 45,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62928550,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584128.8383473726,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1011648
+      }
+    },
+    {
+      "id": 46,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10628264,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584112.2449525337,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 991652
+      }
+    },
+    {
+      "id": 47,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62966338,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584135.0362347907,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1011090
+      }
+    },
+    {
+      "id": 48,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10653152,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584129.6724160984,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1020120
+      }
+    },
+    {
+      "id": 49,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62924790,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584133.8037170745,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1051200
+      }
+    },
+    {
+      "id": 50,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10676638,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584086.5420510763,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 989620
+      }
+    },
+    {
+      "id": 51,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62965186,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584127.1311672684,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 952978
+      }
+    },
+    {
+      "id": 52,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10640986,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584172.0705976735,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 931314
+      }
+    },
+    {
+      "id": 53,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62955026,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584134.811873245,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1037632
+      }
+    },
+    {
+      "id": 54,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10640528,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584119.4552747693,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 948192
+      }
+    },
+    {
+      "id": 55,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62952636,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584147.0586976869,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 935804
+      }
+    },
+    {
+      "id": 56,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10645320,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584133.5574274636,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 981454
+      }
+    },
+    {
+      "id": 57,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62889852,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584121.2801176627,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 902716
+      }
+    },
+    {
+      "id": 58,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10641116,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584135.355528814,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 873084
+      }
+    },
+    {
+      "id": 59,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62945162,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584147.5499398315,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 877054
+      }
+    },
+    {
+      "id": 60,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10721598,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584120.8616125151,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 867880
+      }
+    },
+    {
+      "id": 61,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 63016786,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584107.9264607568,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 917412
+      }
+    },
+    {
+      "id": 62,
+      "class": "light",
+      "ops": 7479,
+      "service_cycles": 10655244,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584156.6206712127,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 896164
+      }
+    },
+    {
+      "id": 63,
+      "class": "heavy",
+      "ops": 7479,
+      "service_cycles": 62915574,
+      "run_latency": {
+        "count": 7479,
+        "mean": 584117.7494317422,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 865796
+      }
+    }
+  ],
+  "classes": {
+    "heavy": {
+      "clients": 32,
+      "ops": 239320,
+      "service_cycles": 2014513576,
+      "run_latency": {
+        "count": 239320,
+        "mean": 584132.5168644493,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1058854
+      }
+    },
+    "light": {
+      "clients": 32,
+      "ops": 239321,
+      "service_cycles": 341423216,
+      "run_latency": {
+        "count": 239321,
+        "mean": 584114.2453942613,
+        "p50": 557056,
+        "p99": 589824,
+        "max": 1053312
+      }
+    }
+  },
+  "starved_clients": 0,
+  "bystander_latency": {
+    "count": 10349746,
+    "mean": 2315.7027167623246,
+    "p50": 1728,
+    "p99": 34816,
+    "max": 566642
+  },
+  "starved_bystanders": 0,
+  "coop_unconstrained_clients": true,
+  "pinned_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "runtime_threads": 8,
+  "tokio_workers": [
+    {
+      "worker": 0,
+      "parks": 1
+    },
+    {
+      "worker": 1,
+      "parks": 1
+    },
+    {
+      "worker": 2,
+      "parks": 1
+    },
+    {
+      "worker": 3,
+      "parks": 1
+    },
+    {
+      "worker": 4,
+      "parks": 1
+    },
+    {
+      "worker": 5,
+      "parks": 0
+    },
+    {
+      "worker": 6,
+      "parks": 1
+    },
+    {
+      "worker": 7,
+      "parks": 1
+    }
+  ]
+}
