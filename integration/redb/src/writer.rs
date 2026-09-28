@@ -1,11 +1,17 @@
-//! The six write variants. Every variant performs the same narrow request:
+//! The seven write variants. Every variant performs the same narrow request:
 //! 1..=64 new `u64 -> u64` records in one table, one durability mode, begin ->
 //! inserts -> commit (explicit abort on a duplicate key).
 //!
 //! - `native`: upstream redb 3.1.0 public API, this file's `native_write`.
 //! - `refactored`: patched redb's shared body under redb's own tracker lock.
-//! - `bridge_mutex`/`mcs`/`fc`/`fc_pq`: patched redb's shared body submitted
-//!   through `Bridge`; the lock backend is redb's write-serialisation mechanism.
+//! - `bridge_mutex`/`mcs`/`uscl`/`fc`/`fc_pq`: patched redb's shared body
+//!   submitted through `Bridge`; the lock backend is redb's write-serialisation
+//!   mechanism.
+//!
+//! Service time (`service_time` feature): TSC ticks from `begin` returning to
+//! commit/abort returning, read with `rdtscp` on the thread that runs the body
+//! and returned to the requester with the outcome. Patched variants measure it
+//! inside redb's shared body; `native` measures the identical span here.
 use std::fmt;
 
 use redb::TableDefinition;
@@ -21,6 +27,7 @@ pub enum Variant {
     Refactored,
     BridgeMutex,
     Mcs,
+    Uscl,
     Fc,
     FcPq,
 }
@@ -32,6 +39,7 @@ impl Variant {
             "refactored" => Self::Refactored,
             "bridge_mutex" => Self::BridgeMutex,
             "mcs" => Self::Mcs,
+            "uscl" => Self::Uscl,
             "fc" => Self::Fc,
             "fc_pq" => Self::FcPq,
             _ => return Err(format!("unknown variant: {name}")),
@@ -48,6 +56,7 @@ impl Variant {
             Self::Refactored => "refactored",
             Self::BridgeMutex => "bridge_mutex",
             Self::Mcs => "mcs",
+            Self::Uscl => "uscl",
             Self::Fc => "fc",
             Self::FcPq => "fc_pq",
         }
@@ -81,13 +90,34 @@ impl fmt::Display for WriteError {
     }
 }
 
-/// Transaction ID of the committed write when the variant exposes it (patched
-/// variants); `None` for upstream native redb.
-pub type WriteResult = Result<Option<u64>, WriteError>;
+/// A completed write: the committed transaction ID when the variant exposes it
+/// (patched variants; `None` for upstream native redb) and the body's service
+/// time in TSC ticks (0 without the `service_time` feature).
+#[derive(Clone, Copy, Debug)]
+pub struct Written {
+    pub transaction_id: Option<u64>,
+    pub service_tsc: u64,
+}
+
+pub type WriteResult = Result<Written, WriteError>;
 
 #[cfg(feature = "native")]
 fn other<E: fmt::Display>(error: E) -> WriteError {
     WriteError::Other(error.to_string())
+}
+
+#[cfg(all(feature = "native", feature = "service_time"))]
+#[inline(always)]
+fn service_clock() -> u64 {
+    let mut aux = 0_u32;
+    // SAFETY: rdtscp only writes `aux`; this harness targets x86_64.
+    unsafe { std::arch::x86_64::__rdtscp(&mut aux) }
+}
+
+#[cfg(all(feature = "native", not(feature = "service_time")))]
+#[inline(always)]
+fn service_clock() -> u64 {
+    0
 }
 
 #[cfg(feature = "native")]
@@ -107,14 +137,30 @@ impl<'db> Writer<'db> {
         if records.is_empty() || records.len() > MAX_RECORDS_PER_REQUEST {
             return Err(WriteError::Rejected("record count outside 1..=64".into()));
         }
-        native_write(self.db, records, durability).map(|()| None)
+        // Same service span as patched redb's body: begin returned -> commit/abort returned.
+        let txn = self.db.begin_write().map_err(other)?;
+        let admitted = service_clock();
+        let outcome = native_write(txn, records, durability);
+        let service_tsc = service_clock().saturating_sub(admitted);
+        outcome.map(|()| Written {
+            transaction_id: None,
+            service_tsc,
+        })
+    }
+
+    /// FC-PQ fast-path hits; native has no FC-PQ.
+    pub fn fast_path_hits(&self) -> Option<u64> {
+        None
     }
 }
 
 /// Upstream-API sequence identical to patched redb's fixed-insert body.
 #[cfg(feature = "native")]
-fn native_write(db: &Database, records: &[(u64, u64)], durability: Durability) -> Result<(), WriteError> {
-    let mut txn = db.begin_write().map_err(other)?;
+fn native_write(
+    mut txn: redb::WriteTransaction,
+    records: &[(u64, u64)],
+    durability: Durability,
+) -> Result<(), WriteError> {
     txn.set_durability(durability).map_err(other)?;
     {
         let mut table = txn.open_table(TABLE).map_err(other)?;
@@ -137,9 +183,10 @@ pub use patched::remote_executions;
 
 #[cfg(feature = "patched")]
 mod patched {
-    use std::cell::Cell;
+    use std::cell::{Cell, UnsafeCell};
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
+    use std::mem::MaybeUninit;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::PoisonError;
 
@@ -149,13 +196,17 @@ mod patched {
     use libdlock::dlock2::spinlock::DLock2Wrapper;
     use libdlock::dlock2::DLock2;
     use libdlock::spin_lock::RawSpinLock;
+    use libdlock::{
+        fairlock_acquire, fairlock_bridge_destroy, fairlock_bridge_init, fairlock_release,
+        fairlock_t, fairlock_thread_register,
+    };
     use redb::dlock_private::{
         DelegatedCall, DelegatedWriteGate, FixedInsert, FixedInsertError, FixedInsertTarget,
         RawDelegatedCall,
     };
     use redb::{Database, Durability};
 
-    use super::{Variant, WriteError, WriteResult, TABLE};
+    use super::{Variant, WriteError, WriteResult, Written, TABLE};
 
     pub enum Writer<'db> {
         Refactored(FixedInsertTarget<'db>),
@@ -181,19 +232,33 @@ mod patched {
 
         pub fn write(&self, records: &[(u64, u64)], durability: Durability) -> WriteResult {
             let request = FixedInsert { records, durability };
-            let outcome = match self {
+            let served = match self {
                 Self::Refactored(target) => target.execute_native(&request),
                 Self::Delegated { gate, bridge } => {
                     gate.execute(&request, |call| bridge.submit(call))
                 }
             };
-            outcome.map(Some).map_err(|error| match error {
-                FixedInsertError::Rejected(reason) => WriteError::Rejected(reason.into()),
-                FixedInsertError::DuplicateKey(key) => WriteError::Duplicate(key),
-                #[cfg(feature = "test_hooks")]
-                FixedInsertError::Injected => WriteError::Injected,
-                other => WriteError::Other(other.to_string()),
-            })
+            let service_tsc = served.service_tsc;
+            served.outcome
+                .map(|id| Written { transaction_id: Some(id), service_tsc })
+                .map_err(|error| match error {
+                    FixedInsertError::Rejected(reason) => WriteError::Rejected(reason.into()),
+                    FixedInsertError::DuplicateKey(key) => WriteError::Duplicate(key),
+                    #[cfg(feature = "test_hooks")]
+                    FixedInsertError::Injected => WriteError::Injected,
+                    other => WriteError::Other(other.to_string()),
+                })
+        }
+
+        /// FC-PQ fast-path hits of the calling thread's requests (all of them,
+        /// not only those credited to the timed window); `None` for other
+        /// variants, before the thread's first request, or without
+        /// `fcpq_fast_path_stat`.
+        pub fn fast_path_hits(&self) -> Option<u64> {
+            match self {
+                Self::Delegated { bridge, .. } => bridge.fast_path_hits(),
+                Self::Refactored(_) => None,
+            }
         }
     }
 
@@ -233,18 +298,68 @@ mod patched {
     type PqLock =
         FCPQ<(), Request, BinaryHeap<Reverse<UsageNode<'static, Request>>>, FnDelegate, RawSpinLock>;
 
+    /// U-SCL (fairlock), as in crates/upscaledb-bridge: the C lock treats
+    /// `&lock->qnext` as an embedded queue node and keeps per-thread state in
+    /// pthread TLS, so it lives at a stable boxed address and is initialised in
+    /// bridge mode (TLS destructor, owner pointer). The body runs on the
+    /// requester. U-SCL's own waiting (futex queue, nanosleep ban) is part of the
+    /// algorithm and is left as upstream implements it.
+    struct UsclLock(Box<UnsafeCell<MaybeUninit<fairlock_t>>>);
+
+    // SAFETY: the C implementation synchronises every access to the lock
+    // object; the Box keeps its address stable for the bridge's lifetime.
+    unsafe impl Send for UsclLock {}
+    unsafe impl Sync for UsclLock {}
+
+    impl UsclLock {
+        fn new() -> Self {
+            let storage = Box::new(UnsafeCell::new(MaybeUninit::<fairlock_t>::uninit()));
+            if unsafe { fairlock_bridge_init(storage.get().cast()) } != 0 {
+                std::process::abort();
+            }
+            Self(storage)
+        }
+
+        fn ptr(&self) -> *mut fairlock_t {
+            self.0.get().cast()
+        }
+
+        fn run(&self, request: Request) -> Request {
+            // SAFETY: initialised in `new`; registration is idempotent per
+            // live thread and key. Equal weights, independent of nice.
+            unsafe {
+                fairlock_thread_register(self.ptr(), 1024);
+                fairlock_acquire(self.ptr());
+            }
+            let request = delegate(&mut (), request);
+            unsafe { fairlock_release(self.ptr()) };
+            request
+        }
+    }
+
+    impl Drop for UsclLock {
+        fn drop(&mut self) {
+            // Every submitting thread has been joined (pthread_join), so its
+            // TLS destructor has already run; this thread's entry is freed here.
+            if unsafe { fairlock_bridge_destroy(self.ptr()) } != 0 {
+                std::process::abort();
+            }
+        }
+    }
+
     enum Backend {
         // Same primitive type as redb's tracker lock, owned by the bridge: the
         // tracker's own Mutex cannot be borrowed because commit re-enters it.
         Mutex(std::sync::Mutex<()>),
         Mcs(McsLock),
+        Uscl(UsclLock),
         Fc(FcLock),
         FcPq(PqLock),
     }
 
-    /// Synchronous submission bridge shared by `bridge_mutex`, `mcs`, `fc`, `fc_pq`.
-    /// Mutex and MCS run the body on the requesting thread; FC/FC-PQ may run it
-    /// on a combiner. Nested submissions are refused (the call is dropped unrun,
+    /// Synchronous submission bridge shared by `bridge_mutex`, `mcs`, `uscl`,
+    /// `fc`, `fc_pq`. Mutex, MCS and U-SCL run the body on the requesting
+    /// thread; FC/FC-PQ may run it on a combiner. Nested submissions are refused (the call is dropped unrun,
     /// so the gate reports `NotExecuted`); any panic in a backend aborts.
     pub struct Bridge {
         backend: Backend,
@@ -284,6 +399,7 @@ mod patched {
             let backend = match variant {
                 Variant::BridgeMutex => Backend::Mutex(std::sync::Mutex::new(())),
                 Variant::Mcs => Backend::Mcs(McsLock::new((), delegate)),
+                Variant::Uscl => Backend::Uscl(UsclLock::new()),
                 Variant::Fc => Backend::Fc(FcLock::new((), delegate)),
                 Variant::FcPq => Backend::FcPq(PqLock::new((), delegate)),
                 Variant::Native | Variant::Refactored => unreachable!("not a bridge variant"),
@@ -308,12 +424,21 @@ mod patched {
                     delegate(&mut (), request)
                 }
                 Backend::Mcs(lock) => lock.lock(request),
+                Backend::Uscl(lock) => lock.run(request),
                 Backend::Fc(lock) => lock.lock(request),
                 Backend::FcPq(lock) => lock.lock(request),
             }))
             .unwrap_or_else(|_| std::process::abort());
             if returned.call.is_some() {
                 std::process::abort();
+            }
+        }
+
+        fn fast_path_hits(&self) -> Option<u64> {
+            match &self.backend {
+                #[cfg(feature = "fcpq_fast_path_stat")]
+                Backend::FcPq(lock) => lock.get_fast_path_hits(),
+                _ => None,
             }
         }
     }

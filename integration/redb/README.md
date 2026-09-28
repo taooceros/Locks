@@ -1,10 +1,12 @@
 # redb: delegation locks inside the write path
 
-This experiment patches redb 3.1.0 so that a delegation lock (Mutex, MCS, FC,
+This experiment patches redb 3.1.0 so that a lock (Mutex, MCS, U-SCL, FC,
 FC-PQ) **is** redb's write-serialisation mechanism, following the UpScaleDB
 pattern in [../upscaledb/](../upscaledb/README.md): one extracted write body,
 native/refactored/bridge controls, a pinned source with numbered patches, a
-real-database correctness gate and the existing fresh-process runner.
+real-database correctness gate and the existing fresh-process runner. Fairness
+is measured as **service-time share** (Jain over per-client time inside the
+write body), next to the transaction-count Jain.
 
 It replaces the earlier harness that wrapped whole transactions of unmodified
 redb in external locks. In that design redb's own single-writer lock still
@@ -48,10 +50,10 @@ writer admission differs:
 - **refactored**: `FixedInsertTarget::execute_native` runs the body; its begin
   step is the unchanged public `begin_write`, i.e. redb's original tracker
   `Mutex<State>` + `live_write_transaction_available` Condvar.
-- **delegated** (`bridge_mutex`, `mcs`, `fc`, `fc_pq`): `DelegatedWriteGate::execute`
+- **delegated** (`bridge_mutex`, `mcs`, `uscl`, `fc`, `fc_pq`): `DelegatedWriteGate::execute`
   validates the request on the caller, then hands the *same* body to the lock
-  through a synchronous submit closure. Mutex and MCS run it on the requesting
-  thread; FC and FC-PQ may run it on a combiner.
+  through a synchronous submit closure. Mutex, MCS and U-SCL run it on the
+  requesting thread; FC and FC-PQ may run it on a combiner.
 
 The critical section is therefore the whole transaction, **including commit I/O**.
 Anything outside this shape (empty, >64 records, other types or tables, closures)
@@ -87,11 +89,14 @@ dependency `.worktree/redb-src/redb-3.1.0` (generated, ignored):
 | Patch | Files | Change |
 |---|---|---|
 | `patches/0001-delegated-writer-admission.patch` | `transaction_tracker.rs`, `db.rs`, `transactions.rs` | Delegated mode (enter/exit), delegated start/end writer slot with assertion, delegated `TransactionGuard`, `Database::begin_delegated_write` (a copy of `begin_write` with delegated admission), transaction-ID accessor |
-| `patches/0002-fixed-insert-write-body.patch` | new `dlock_private.rs`, `lib.rs`, `Cargo.toml` | The shared body, request validation, `FixedInsertTarget`, `DelegatedWriteGate`, `DelegatedCall`, and the `dlock_test_hooks` feature (correctness probes only) |
+| `patches/0002-fixed-insert-write-body.patch` | new `dlock_private.rs`, `lib.rs`, `Cargo.toml` | The shared body, request validation, `FixedInsertTarget`, `DelegatedWriteGate`, `DelegatedCall`, the body's service-time span (`Served`, feature `dlock_service_time`) and the `dlock_test_hooks` feature (correctness probes only) |
 
 `build.json` records the crate SHA-256 and origin, upstream and patched tree
-hashes, each patch hash, harness/libdlock source hashes, `rustc -vV`, git state
-and each binary's SHA-256. An existing patched tree that differs from a fresh
+hashes, each patch hash, harness/libdlock source hashes, `rustc -vV`, git state,
+each binary's SHA-256 and its features three ways: the harness features passed to
+Cargo, the libdlock/redb features Cargo resolved (`cargo metadata`), and the
+features the binary reports (`--build-info`); the build stops if the last two
+disagree with the request. An existing patched tree that differs from a fresh
 application stops the build.
 
 ## Variants
@@ -102,11 +107,14 @@ application stops the build.
 | `refactored` | `redb-patched` | Shared body under redb's original Mutex/Condvar |
 | `bridge_mutex` | `redb-patched` | Shared body via the bridge, `std::sync::Mutex` (redb's primitive type; the tracker's own mutex cannot be borrowed because commit re-enters it) |
 | `mcs` | `redb-patched` | Shared body via the bridge, libdlock MCS, on the requester |
+| `uscl` | `redb-patched` | Shared body via the bridge, U-SCL (`c/u-scl` fairlock in bridge mode, equal weights), on the requester |
 | `fc` | `redb-patched` | Shared body via the bridge, libdlock FC, possibly on a combiner |
-| `fc_pq` | `redb-patched` | Shared body via the bridge, libdlock FC-PQ, possibly on a combiner |
+| `fc_pq` | `redb-patched` | Shared body via the bridge, libdlock FC-PQ built with the E0(b) `fcpq_fast_path`, possibly on a combiner |
 
 `redb-test_hooks` (patched redb with `dlock_test_hooks`) is used only by the
-correctness gate and is never timed.
+correctness gate and is never timed. Every binary is built with the harness
+features `service_time` and, for the patched ones, `fcpq_fast_path` and
+`fcpq_fast_path_stat` (forwarded to libdlock by `Cargo.toml`).
 
 | File | Purpose |
 |---|---|
@@ -116,6 +124,166 @@ correctness gate and is never timed.
 | `run.py` | Prepare/smoke/formal fresh-process runner and offline analysis |
 | `src/writer.rs` | Variants and the bridge (`Bridge`, the only code that touches libdlock) |
 | `src/main.rs`, `src/selftest.rs` | Timed workload and self-test cases |
+
+U-SCL follows `crates/upscaledb-bridge`: the fairlock lives at a stable boxed
+address, is initialised in bridge mode, every thread registers once with weight
+1024, and the lock is destroyed only after every submitting thread has been
+joined. Its waiting is upstream U-SCL's own (futex queue hand-off, `nanosleep`
+while banned, `sched_yield` after 20 spins). MCS, FC and FC-PQ waiters spin; `native`, `refactored` and `bridge_mutex` block on redb's Mutex/Condvar or `std::sync::Mutex` (futex). Its slice is
+`FAIRLOCK_GRANULARITY` (2 × 2400 × 1000 cycles, ≈ 2.2 ms at this host's 2.2 GHz
+TSC).
+
+## Service time and fairness metrics
+
+The body reads the TSC with `rdtscp` once `begin` has returned (admission is
+complete) and again once commit or abort has returned, **on whichever thread runs
+it**: the combiner for FC/FC-PQ, the requester for refactored, Mutex, MCS and
+U-SCL. The difference travels back with the outcome (`Served::service_tsc`) to
+the requester, which is charged. `native` measures the identical span around the
+same public-API calls in the harness. The span therefore excludes every
+admission wait, the bridge and lock code, and `WriteTransaction` construction
+inside `begin`, for all seven variants alike; it includes commit I/O.
+
+Per cell the analysis reports:
+
+- `service_jain`: Jain over per-client service ticks credited to the 2 s window
+  (the same requests as the transaction counts);
+- `worker_service_share` per client and `long_service_share` (the K-record half's
+  share; 0.5 is equal service);
+- `tx_jain` (transaction counts), `service_utilization` (Σ service / window; ≤ 1
+  because bodies are serialised);
+- `fast_path_hit_rate` for `fc_pq`: `FCPQ::get_fast_path_hits` summed over the
+  clients' threads / all their requests (`fcpq_fast_path_stat`, E0(b)'s
+  +0.2 ns counter).
+
+**Always on, no separate profile build.** The primary binaries carry the
+instrumentation. `build.py --uninstrumented` builds binaries without
+`service_time` and `fcpq_fast_path_stat` (fast path kept) for the overhead check
+only; `run.py` and the gate refuse them. Measured on one smoke cell
+(`fc_pq`, `all1`, None, 8 clients, CPUs 16-23, 8 ABAB pairs of 2 s runs,
+2026-09-28): instrumented 33,464 tx/s [29,836, 34,091] vs uninstrumented
+33,691 [33,377, 34,308]; paired ratio median 0.988 [0.894, 0.995], lower in 8/8
+pairs. The ≈1 % cost is below the smoke's repeat spread but consistent; two
+`rdtscp` per ≈30 µs request predict ≈0.1 %, so the rest is probably code layout
+[INFERENCE]. Every variant carries the same two reads per request.
+
+## Clients and cohorts
+
+A cell with c clients runs c saturated requesters, pinned one per CPU on the
+first c prepared CPUs, and the trial process is restricted to exactly those CPUs
+(`taskset`), so there are never more client threads than CPUs (no
+oversubscription). The sweep is
+c ∈ {1, 2, 4, 8} (only counts ≤ the prepared CPU set run).
+
+| Cohort | 1 client | 2 clients | 4 clients | 8 clients |
+|---|---|---|---|---|
+| `all1` | 1 × 1 record | 2 × 1 | 4 × 1 | 8 × 1 |
+| `half1_half8` | one client alternating 1, 8, 1, 8, … | 1 + 8 | 2 × 1 + 2 × 8 | 4 × 1 + 4 × 8 |
+| `half1_half64` | one client alternating 1, 64, 1, 64, … | 1 + 64 | 2 × 1 + 2 × 64 | 4 × 1 + 4 × 64 |
+
+Half the requests carry 1 record and half K in every half cohort. At 1 client
+there is no contention and every per-client Jain index is 1 by definition; the
+cell is the uncontended reference for the same request mix and shows FC-PQ's fast
+path. `long_service_share` and the short/long splits exist only when every client
+has one request size (not for the 1-client mixed cell).
+
+## Durability regimes
+
+**`None` is the primary regime**: the critical section is the B-tree and commit
+work without fsync, so lock algorithms and serving order are visible.
+**`Immediate` is a control**: every request holds the lock across an fsync,
+which dominates and dilutes lock differences. The runner, analysis tables and
+plots list `None` first.
+
+## Cache-counter profile cohort
+
+A separate profile cohort (`run.py --perf`) runs every cell under `perf stat` for
+the whole process: None; `all1` and `half1_half64`; 1, 2, 4 and 8 clients; seven
+variants; three repetitions = 168 cells. Timed cells (`--smoke`, `--run`) never
+run perf. The same binaries are used. perf starts with counters disabled
+(`--delay=-1 --control fifo:…`); with `REDB_PERF_CONTROL` set, the harness enables
+them once every client is ready and disables them after all are joined, so
+database creation, verification and close/reopen are not counted. Counters are
+user mode only (`perf_event_paranoid` = 2 here) and process totals: perf stat
+cannot attribute a launched command's threads separately. The combiner's work is
+therefore not separated from the waiters' spinning.
+
+| Name | Event | Meaning |
+|---|---|---|
+| `hitm_loads` | `mem_load_l3_hit_retired.xsnp_fwd` | retired loads served by a HitM snoop from another core on the socket |
+| `hitm_supplied` | `core_snoop_response.i_fwd_m` | modified lines this core gave up to an invalidating snoop (loads and RFOs) |
+| `l2_miss_loads` | `mem_load_retired.l2_miss` | retired loads that missed L2 |
+| `l2_miss_all` | `l2_rqsts.miss` | all L2 misses (demand, RFO, prefetch) |
+| `llc_miss` | `longest_lat_cache.miss` | LLC misses |
+| `instructions`, `cycles` | `instructions:u` (fixed counter 0), `cycles:u` | spinning waiters included |
+| `ref_cycles` | `cpu_clk_unhalted.ref_tsc:u` (0x0300, fixed counter 2) | unhalted user cycles at the TSC rate |
+
+Counter placement, checked with perf 7.2.5 on this Sapphire Rapids host: 8
+general-purpose counters per logical CPU. `cycles:u` occupies one of them (8
+general-purpose events plus `cycles:u` multiplex, plus `instructions:u` do not;
+fixed counter 1 is presumably held by the NMI watchdog). perf 7.2.5 resolves the
+name `ref-cycles` to the programmable `cpu_clk_unhalted.ref_tsc_p` (0x013c), so
+the runner names the fixed-counter event explicitly. Six general-purpose plus two
+fixed events leave two counters spare. perf's running fraction is recorded per
+event and cell (`perf_running`), and a cell with any event below 100 % running is
+failed (the raw result is kept).
+
+**Clock.** `ref_tsc` ticks at the TSC rate: 25 MHz crystal × 176/2 = 2.200 GHz
+(CPUID 0x15, recorded in the manifest; each cell's measured
+`tsc_ticks_per_ns` is used). `effective_ghz` = cycles / ref_cycles × TSC rate:
+the mean clock of all threads, weighted by their unhalted user time.
+`ref_busy_cpus` = ref_cycles / (TSC ticks of the window): the number of CPUs busy
+in user mode (≈ c for spinning locks, minus the combiner's or holder's kernel
+time). `tx_s_at_ref` = window tx/s × reference / `effective_ghz` scales throughput
+to the reference clock: F under a fixed-clock setup (S1/S2, below), the TSC rate
+under S0. It assumes the serial path runs at the process mean clock and all of
+its time scales with the clock (kernel and memory time do not, so this
+over-corrects fast cells). perf-02 (S0) called this field `tx_s_at_tsc`.
+`effective_ghz` is process-wide over all inherited threads; for FC/FC-PQ it is
+not the combiner's clock when waiters run at other clocks.
+
+**Per-client clock.** perf stat cannot split a launched command's threads
+(`--per-thread` needs `-p`/`-t`) and CPU-wide events need `perf_event_paranoid`
+≤ 0, so the runner samples each client CPU's `cpuinfo_avg_freq` (the kernel's
+APERF/MPERF over the last 4 ms tick) every 50 ms and `/proc/stat` every 200 ms,
+from a thread of the runner on the cell's CPUs, in **every** cell (timed and
+perf; the perf-02 overhead run measured no cost, E1/E0 = 1.001). A clock
+sample counts if its CPU was ≥ 50 % busy in the enclosing 200 ms interval (an
+idle CPU reports a stale or requested value). A client's clock is the mean of its
+accepted samples; a cell is **mixed** if the clocks of the clients with ≥ 8
+samples differ by more than 1.25× (base 2.2 GHz vs turbo ≥ 3.0 GHz is ≥ 1.36).
+Fewer than two such clients (1-client cells, most Mutex/Condvar cells) is
+undecidable, not mixed. This is a heuristic: it covers the whole child process,
+not only the client phase. In an off-socket check the sampler's mean agreed with
+perf's `effective_ghz` within 1-2 %.
+
+**Power setups.** `--prepare-only` requires `--power-setup`; the manifest
+records `intel_pstate` (status, `no_turbo`), every cpufreq policy's governor
+and min/max, and per run CPU its cpufreq settings and cpuidle states (name,
+disable flag, exit latency). The runner has no root; the operator sets the state.
+
+| Setup | Governor, min/max on every policy | Turbo | C6 on run CPUs |
+|---|---|---|---|
+| `S0` | `schedutil`, cpuinfo range (0.8-3.9 GHz) | on | enabled |
+| `S1` | `performance`, min = max = F (`--fixed-ghz`, default 3.0) | on (`no_turbo` = 0) | enabled |
+| `S2` | as S1 | on | disabled |
+
+Preparation and every `--smoke`/`--run`/`--perf` refuse a host that differs, and
+each cell re-checks after it runs; a change fails the cell. Under S1/S2 a cell
+whose clock (perf `effective_ghz`, else the sampler's client mean) is outside
+F ± 2 % is flagged `clock_off_target` (kept in the raw rows, counted in the
+tables, excluded from `*_not_flagged`). Above base the chip holds F only while
+power and thermal budget allow, so `--sustain-probe --power-setup S1 --fixed-ghz
+F --cpus …` spins every CPU (one `perf stat` per CPU) and reports each CPU's
+effective clock, to choose the highest F that holds. `--check-power` prints the
+mismatches. `--variants` restricts a prepared root to a subset.
+
+`--analyze-perf` writes `analysis-perf/summary.{json,md}` with every counter per
+committed transaction and per record, and a clock table (effective and client
+clocks, spread, mixed and off-target counts, `ref_busy_cpus`, cycles/tx, `tx_s_at_ref`). Counting
+covers every request committed while it was enabled, including those draining
+after the 2 s window, so the normaliser is
+`completed_transactions`/`completed_records`, not the window counts.
 
 ## Workflow
 
@@ -130,17 +298,24 @@ flock --exclusive "$MEASUREMENT_LOCK" prlimit --core=0 \
   python3 -m integration.redb.correctness --build-dir "$BUILD" --output-dir "$BUILD/correctness-01"
 ```
 
-The gate runs every case as a fresh process on a fresh database: exact contents
-after every request with close/reopen; shape rejections; duplicate-key abort and
-the lock being released after aborts and injected errors; transaction-ID order,
-including across gate entry/exit; one gate per database and public `begin_write`
-waiting for it; persistent and ephemeral savepoints across the write phase;
-16-writer/2-reader stress separately for `Immediate` and `None` (exact contents,
-reopen, reads completed during writes, contiguous IDs, in-body occupancy of at
-most one, FC/FC-PQ bodies observed on combiners and Mutex/MCS never); reads
-proceeding while a writer is paused inside the lock with a second writer blocked;
-and SIGABRT fail-stop for a panic inside a delegated body. Test-hook children
-intentionally abort. Raw records stay under the output directory.
+The gate runs every case as a fresh process on a fresh database, for all seven
+variants: exact contents after every request with close/reopen; shape
+rejections; duplicate-key abort and the lock being released after aborts and
+injected errors; transaction-ID order, including across gate entry/exit; one gate
+per database and public `begin_write` waiting for it; persistent and ephemeral
+savepoints across the write phase; 16-writer/2-reader stress separately for
+`Immediate` and `None` (exact contents, reopen, reads completed during writes,
+contiguous IDs, in-body occupancy of at most one, FC/FC-PQ bodies observed on
+combiners and refactored/Mutex/MCS/U-SCL bodies never); reads proceeding while a
+writer is paused inside the lock with a second writer blocked; and SIGABRT
+fail-stop for a panic inside a delegated body. Service charging is checked in
+every stress case: each committed body is charged nonzero service to its
+requester, the charged total never exceeds the stress phase's wall ticks (bodies
+serialised, nothing double-charged), and in the test-hook binary it equals the
+total measured on the executing threads. A lone FC-PQ requester must take the
+fast path on all 90 `contents` requests. Test-hook children intentionally abort.
+Raw records stay under the output directory. The gate refuses an
+`--uninstrumented` build.
 
 Upstream redb's own tests also run against the patched tree (on a copy, since
 its dev-dependencies are downloaded and its `Cargo.lock` must not change):
@@ -150,24 +325,35 @@ its dev-dependencies are downloaded and its `Cargo.lock` must not change):
 ```sh
 export CPUS=16,17,18,19,20,21,22,23 NUMA_NODE=0 RUN=.worktree/redb-smoke-01
 flock --shared "$MEASUREMENT_LOCK" taskset -c "$CPUS" python3 -m integration.redb.run \
-  --prepare-only --build-dir "$BUILD" --output-root "$RUN" --cpus "$CPUS" --numa-node "$NUMA_NODE"
+  --prepare-only --build-dir "$BUILD" --output-root "$RUN" --cpus "$CPUS" --numa-node "$NUMA_NODE" \
+  --power-setup S0   # or: --power-setup S1 --fixed-ghz 3.0
 flock --exclusive "$MEASUREMENT_LOCK" taskset -c "$CPUS" python3 -m integration.redb.run --smoke --output-root "$RUN"
 flock --shared "$MEASUREMENT_LOCK" python3 -m integration.redb.run --analyze-smoke --output-root "$RUN"
 ```
 
-Preparation re-verifies `build.json`, snapshots `redb-native`/`redb-patched`,
-and freezes source/patch/binary hashes, CPU topology rows, the `numactl --show`
-policy and filesystem. Smoke runs 72 timed 2-second cells (six variants, `all1`
-and `half1_half64`, both durabilities, three repetitions, randomized order), each
-a fresh process with exact-content verification and close/reopen. Its analysis
-(`analysis-smoke/summary.json`) includes `refactored_vs_native`: per cohort and
-durability, the median tx/s ratio against the larger relative repeat range of the
-two variants. Smoke is a setup and control check, not a performance result.
+Preparation re-verifies `build.json` (instrumented, FC-PQ with
+`fcpq_fast_path`), snapshots `redb-native`/`redb-patched`, and freezes
+source/patch/binary hashes and features, the client sweep, CPU topology rows,
+the `numactl --show` policy and filesystem. Smoke runs 336 timed 2-second cells
+(seven variants × {`all1`, `half1_half64`} × clients {1, 2, 4, 8} × both
+durabilities × three repetitions, variants in randomized order), each a fresh
+process with exact-content verification and close/reopen; it took 12 min on
+2026-09-28 (2.16 s per cell). Its analysis (`analysis-smoke/summary.json`,
+plus `summary.md` and `throughput.png`) lists `None` first and includes
+`table` (median [min, max] per durability × cohort × clients × variant) and
+`refactored_vs_native`: per durability, cohort and client count, the median
+tx/s ratio against the larger relative repeat range of the two variants. Smoke
+is a setup and control check, not a performance result.
 
-The formal matrix (six variants × three cohorts × two durabilities × three
-repetitions = 108 cells) runs only when explicitly requested:
+The formal matrix (seven variants × {`all1` at 1, 2, 4, 8 clients;
+`half1_half8` and `half1_half64` at 1, 2, 4, 8} × two durabilities × three
+repetitions = 504 cells, ≈ 18 min at the smoke's 2.16 s per cell) and the
+168-cell perf cohort run only when explicitly requested, on the same prepared
+root:
 
 ```sh
+flock --exclusive "$MEASUREMENT_LOCK" taskset -c "$CPUS" python3 -m integration.redb.run --perf --output-root "$RUN"
+flock --shared "$MEASUREMENT_LOCK" python3 -m integration.redb.run --analyze-perf --output-root "$RUN"
 flock --exclusive "$MEASUREMENT_LOCK" taskset -c "$CPUS" python3 -m integration.redb.run --run --output-root "$RUN"
 flock --shared "$MEASUREMENT_LOCK" python3 -m integration.redb.run --analyze-only --output-root "$RUN"
 ```
@@ -184,11 +370,23 @@ million records per worker and a 512 MiB database file.
   write, multi-table writes or caller closures; no multi-request batching.
 - **Reads outside the lock.** `begin_read` is not delegated or measured; reader
   interference with commit (e.g. freed-page retention) is upstream behaviour.
-- **Commit I/O inside the critical section.** Under `Immediate` each request holds
-  the lock across fsync, so lock-algorithm differences are diluted; `None` is a
-  different durability regime, not a durable-commit claim. Close/reopen is not a
-  power-loss test.
+- **Commit I/O inside the critical section.** Under `Immediate` (the control)
+  each request holds the lock across fsync, so lock-algorithm differences are
+  diluted. `None`, the primary regime, is not a durable-commit claim.
+  Close/reopen is not a power-loss test.
 - While a gate exists, public `begin_write` blocks; a thread that holds the gate
   and calls `begin_write` deadlocks, as a second `begin_write` would upstream.
-- No profile (service-time instrumentation) build is included in this cutover.
-- Eight pinned clients per trial; synthetic key streams, not a production trace.
+- **CPU frequency.** Under S0 (`schedutil`, turbo), a busy pinned core runs at
+  base 2.2 GHz or at 3.0-3.9 GHz, per core, and can change within a process.
+  Cores whose clients sleep (U-SCL, rotating Mutex/Condvar hand-off) run at
+  0.8-1.1 GHz. Throughput is ≈ proportional to the clock (log-log slope
+  0.89-1.10; [perf-02](../../plan/2026-09-28/redb-perf-02-clock.md)). Every
+  cell now records the clock. S1/S2 pin it, but only as far as the power
+  budget allows (see the off-target flag).
+- The service span starts after `begin` returns, so `WriteTransaction`
+  construction (inside the critical section) is not charged, identically for
+  every variant. Service is TSC ticks, not CPU time: a U-SCL holder that sleeps
+  or a body waiting on I/O is still in service.
+- One to eight pinned clients per trial (one per CPU, never more client threads
+  than CPUs; MCS/FC/FC-PQ spin, the Mutex/Condvar controls block, U-SCL may
+  yield or sleep); synthetic key streams, not a production trace.
