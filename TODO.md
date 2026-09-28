@@ -84,6 +84,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   features `fcpq_fast_path`, `fcpq_fast_path_notime`, `fcpq_cached_tid` and
   `fcpq_fast_path_stat`, with stress and enrollment-window tests. Benchmark
   ablation pending; k-sampling and heap arity are not started.)*
+  - [x] FC-PQ thread-churn stress test (thread_local slot reuse, two instances; 2026-09-28, see plan).
 
 - [ ] **(c) Obtain and validate the real CFL (Park/Eom, PPoPP'24).**
   Replace `cfl_local` as the CFL comparison.
