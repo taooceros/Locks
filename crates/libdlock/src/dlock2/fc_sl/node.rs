@@ -1,14 +1,22 @@
-use std::{cell::SyncUnsafeCell, mem::MaybeUninit, sync::atomic::AtomicBool};
+use std::{
+    cell::SyncUnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicU64},
+};
 
 use crossbeam::utils::CachePadded;
 
 pub struct Node<T> {
-    pub usage: u64,
+    /// Accumulated CS time. Written by the owner (newcomer initialisation in
+    /// `push_node`) and by combiners; atomic because a combiner may still hold
+    /// a stale queue entry for this node while the owner re-enrolls.
+    pub usage: AtomicU64,
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
     #[cfg(feature = "combiner_stat")]
-    pub combiner_time_stat: u64,
+    // Written/read only by this node's ThreadLocal owner; combiners hold &Node.
+    pub combiner_time_stat: SyncUnsafeCell<u64>,
 }
 
 impl<T> Node<T> {
@@ -17,12 +25,12 @@ impl<T> Node<T> {
         T: Send,
     {
         Node {
-            usage: 0,
+            usage: AtomicU64::new(0),
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             #[cfg(feature = "combiner_stat")]
-            combiner_time_stat: 0,
+            combiner_time_stat: SyncUnsafeCell::new(0),
         }
     }
 }
