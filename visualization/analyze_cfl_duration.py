@@ -10,14 +10,16 @@ import os
 import pyarrow.ipc as ipc
 import statistics
 
-BASE_DIR = "/home/hongtao/Locks/visualization/output"
+from workspace_paths import resolve_output_dir
+
+BASE_DIR = resolve_output_dir()
 LOCKS = ["CFL", "FC_PQ_BHeap"]
 DURATIONS = [5, 15, 30, 60]
 
 
 def load_arrow(lock_dir, filename):
     """Load Arrow IPC file, return list of (thread_num, loop_count, jfi, trial) rows."""
-    path = os.path.join(BASE_DIR, lock_dir, f"{filename}.arrow")
+    path = os.path.join(str(BASE_DIR), lock_dir, f"{filename}.arrow")
     if not os.path.exists(path):
         return None
     with open(path, "rb") as f:
@@ -82,8 +84,12 @@ def main():
     for lock in LOCKS:
         print(f"## {lock}")
         print()
-        print(f"| Duration | Trial 1 | Trial 2 | Trial 3 | Trial 4 | Trial 5 | Mean | Std | Min |")
-        print(f"|----------|---------|---------|---------|---------|---------|------|-----|-----|")
+        print(
+            f"| Duration | Trial 1 | Trial 2 | Trial 3 | Trial 4 | Trial 5 | Mean | Std | Min |"
+        )
+        print(
+            f"|----------|---------|---------|---------|---------|---------|------|-----|-----|"
+        )
 
         for dur in DURATIONS:
             filename = f"cfl-duration-sweep-{dur}s"
@@ -91,7 +97,9 @@ def main():
             jfis = extract_jfi_per_trial(rows)
 
             if not jfis:
-                print(f"| {dur:>3}s     | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>4} | {'N/A':>3} | {'N/A':>3} |")
+                print(
+                    f"| {dur:>3}s     | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>4} | {'N/A':>3} | {'N/A':>3} |"
+                )
                 continue
 
             # Pad to 5 trials
@@ -104,7 +112,9 @@ def main():
             std_jfi = statistics.stdev(valid) if len(valid) > 1 else 0.0
             min_jfi = min(valid) if valid else float("nan")
 
-            print(f"| {dur:>3}s     | {trial_strs[0]:>7} | {trial_strs[1]:>7} | {trial_strs[2]:>7} | {trial_strs[3]:>7} | {trial_strs[4]:>7} | {mean_jfi:.4f} | {std_jfi:.4f} | {min_jfi:.4f} |")
+            print(
+                f"| {dur:>3}s     | {trial_strs[0]:>7} | {trial_strs[1]:>7} | {trial_strs[2]:>7} | {trial_strs[3]:>7} | {trial_strs[4]:>7} | {mean_jfi:.4f} | {std_jfi:.4f} | {min_jfi:.4f} |"
+            )
 
         print()
 
@@ -123,17 +133,21 @@ def main():
             tputs = extract_throughput_per_trial(rows)
 
             if not tputs:
-                print(f"| {dur:>3}s     | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>6} |")
+                print(
+                    f"| {dur:>3}s     | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>7} | {'N/A':>6} |"
+                )
                 continue
 
             while len(tputs) < 5:
                 tputs.append(float("nan"))
 
-            trial_strs = [f"{t/1e6:.1f}" if t == t else "N/A" for t in tputs[:5]]
+            trial_strs = [f"{t / 1e6:.1f}" if t == t else "N/A" for t in tputs[:5]]
             valid = [t for t in tputs[:5] if t == t]
             mean_t = statistics.mean(valid) if valid else float("nan")
 
-            print(f"| {dur:>3}s     | {trial_strs[0]:>7} | {trial_strs[1]:>7} | {trial_strs[2]:>7} | {trial_strs[3]:>7} | {trial_strs[4]:>7} | {mean_t/1e6:.1f}M |")
+            print(
+                f"| {dur:>3}s     | {trial_strs[0]:>7} | {trial_strs[1]:>7} | {trial_strs[2]:>7} | {trial_strs[3]:>7} | {trial_strs[4]:>7} | {mean_t / 1e6:.1f}M |"
+            )
 
         print()
 

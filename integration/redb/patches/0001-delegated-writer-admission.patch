@@ -1,0 +1,249 @@
+diff --git a/src/db.rs b/src/db.rs
+index 276a16a..c361da1 100644
+--- a/src/db.rs
++++ b/src/db.rs
+@@ -236,6 +236,9 @@ pub(crate) struct TransactionGuard {
+     transaction_tracker: Option<Arc<TransactionTracker>>,
+     transaction_id: Option<TransactionId>,
+     write_transaction: bool,
++    // Locks integration: released through the delegated writer slot, never
++    // through the tracker's Mutex/Condvar writer lock.
++    delegated_write: bool,
+ }
+ 
+ impl TransactionGuard {
+@@ -247,6 +250,7 @@ impl TransactionGuard {
+             transaction_tracker: Some(tracker),
+             transaction_id: Some(transaction_id),
+             write_transaction: false,
++            delegated_write: false,
+         }
+     }
+ 
+@@ -258,6 +262,21 @@ impl TransactionGuard {
+             transaction_tracker: Some(tracker),
+             transaction_id: Some(transaction_id),
+             write_transaction: true,
++            delegated_write: false,
++        }
++    }
++
++    // Locks integration: guard for a write transaction admitted by the
++    // external delegation lock. Created and dropped on the executing thread.
++    pub(crate) fn new_delegated_write(
++        transaction_id: TransactionId,
++        tracker: Arc<TransactionTracker>,
++    ) -> Self {
++        Self {
++            transaction_tracker: Some(tracker),
++            transaction_id: Some(transaction_id),
++            write_transaction: true,
++            delegated_write: true,
+         }
+     }
+ 
+@@ -267,6 +286,7 @@ impl TransactionGuard {
+             transaction_tracker: None,
+             transaction_id: None,
+             write_transaction: false,
++            delegated_write: false,
+         }
+     }
+ 
+@@ -285,7 +305,12 @@ impl Drop for TransactionGuard {
+             return;
+         }
+         if let Some(transaction_id) = self.transaction_id {
+-            if self.write_transaction {
++            if self.write_transaction && self.delegated_write {
++                self.transaction_tracker
++                    .as_ref()
++                    .unwrap()
++                    .end_delegated_write_transaction(transaction_id);
++            } else if self.write_transaction {
+                 self.transaction_tracker
+                     .as_ref()
+                     .unwrap()
+@@ -1007,6 +1032,30 @@ impl Database {
+             .map_err(|e| e.into())
+     }
+ 
++    // Locks integration: begin_write for the delegated path. Identical to
++    // begin_write except that admission is the external delegation lock: the
++    // tracker's Mutex/Condvar writer lock is not taken. Only reachable from the
++    // private fixed-insert body while delegated-writer mode is active.
++    pub(crate) fn begin_delegated_write(&self) -> Result<WriteTransaction, TransactionError> {
++        // Fail early if there has been an I/O error -- nothing can be committed in that case
++        self.mem.check_io_errors()?;
++        let guard = TransactionGuard::new_delegated_write(
++            self.transaction_tracker.start_delegated_write_transaction(),
++            self.transaction_tracker.clone(),
++        );
++        WriteTransaction::new(guard, self.transaction_tracker.clone(), self.mem.clone())
++            .map_err(|e| e.into())
++    }
++
++    // Locks integration: see TransactionTracker::enter_delegated_mode.
++    pub(crate) fn enter_delegated_write_mode(&self) -> bool {
++        self.transaction_tracker.enter_delegated_mode()
++    }
++
++    pub(crate) fn exit_delegated_write_mode(&self) {
++        self.transaction_tracker.exit_delegated_mode();
++    }
++
+     fn ensure_allocator_state_table_and_trim(&self) -> Result<(), Error> {
+         // Make a new quick-repair commit to update the allocator state table
+         #[cfg(feature = "logging")]
+diff --git a/src/transaction_tracker.rs b/src/transaction_tracker.rs
+index 8c0841b..6375c13 100644
+--- a/src/transaction_tracker.rs
++++ b/src/transaction_tracker.rs
+@@ -7,8 +7,17 @@ use std::collections::btree_map::BTreeMap;
+ use std::collections::{BTreeSet, HashMap};
+ use std::mem;
+ use std::mem::size_of;
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+ use std::sync::{Condvar, Mutex};
+ 
++// Locks integration: while delegated-writer mode is active, the tracker's own
++// writer slot is occupied by this sentinel for the whole mode lifetime, so the
++// public begin_write path waits on the unchanged Condvar instead of racing the
++// delegated path. Allocated transaction IDs never reach u64::MAX.
++const DELEGATED_MODE_SLOT: TransactionId = TransactionId(u64::MAX);
++// Allocated transaction IDs are always >= 1 (`increment` returns the new value).
++const NO_DELEGATED_WRITER: u64 = 0;
++
+ #[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Debug)]
+ pub(crate) struct TransactionId(u64);
+ 
+@@ -94,6 +103,13 @@ struct State {
+ pub(crate) struct TransactionTracker {
+     state: Mutex<State>,
+     live_write_transaction_available: Condvar,
++    // Locks integration: delegated-writer admission state. Per-request
++    // accesses happen only inside the external delegation lock's critical
++    // section; they never take `state` or wait on the Condvar. Atomics make the
++    // one-live-writer assertion meaningful even if that lock were broken.
++    delegated_mode: AtomicBool,
++    delegated_last_transaction_id: AtomicU64,
++    delegated_live_write_transaction: AtomicU64,
+ }
+ 
+ impl TransactionTracker {
+@@ -109,6 +125,9 @@ impl TransactionTracker {
+                 unprocessed_freed_non_durable_commits: Default::default(),
+             }),
+             live_write_transaction_available: Condvar::new(),
++            delegated_mode: AtomicBool::new(false),
++            delegated_last_transaction_id: AtomicU64::new(0),
++            delegated_live_write_transaction: AtomicU64::new(NO_DELEGATED_WRITER),
+         }
+     }
+ 
+@@ -133,6 +152,88 @@ impl TransactionTracker {
+         self.live_write_transaction_available.notify_one();
+     }
+ 
++    // Locks integration: occupy the tracker's writer slot once, exactly as a
++    // public writer would (waiting on the unchanged Condvar), and hand
++    // transaction-ID allocation to the delegated path. Returns false if
++    // delegated mode is already active (a second gate would wait forever).
++    pub(crate) fn enter_delegated_mode(&self) -> bool {
++        let mut state = self.state.lock().unwrap();
++        if state.live_write_transaction == Some(DELEGATED_MODE_SLOT) {
++            return false;
++        }
++        while state.live_write_transaction.is_some() {
++            state = self.live_write_transaction_available.wait(state).unwrap();
++        }
++        assert!(!self.delegated_mode.load(AtomicOrdering::Acquire));
++        state.live_write_transaction = Some(DELEGATED_MODE_SLOT);
++        self.delegated_last_transaction_id
++            .store(state.next_transaction_id.raw_id(), AtomicOrdering::Relaxed);
++        self.delegated_live_write_transaction
++            .store(NO_DELEGATED_WRITER, AtomicOrdering::Relaxed);
++        self.delegated_mode.store(true, AtomicOrdering::Release);
++        true
++    }
++
++    // Locks integration: return ID allocation to the tracker and release its
++    // writer slot. Requires every delegated writer to have ended.
++    pub(crate) fn exit_delegated_mode(&self) {
++        let mut state = self.state.lock().unwrap();
++        assert_eq!(state.live_write_transaction, Some(DELEGATED_MODE_SLOT));
++        assert_eq!(
++            self.delegated_live_write_transaction
++                .load(AtomicOrdering::Acquire),
++            NO_DELEGATED_WRITER,
++            "delegated writer still live when leaving delegated mode"
++        );
++        assert!(self.delegated_mode.swap(false, AtomicOrdering::AcqRel));
++        let last = TransactionId(
++            self.delegated_last_transaction_id
++                .load(AtomicOrdering::Relaxed),
++        );
++        assert!(last >= state.next_transaction_id);
++        state.next_transaction_id = last;
++        state.live_write_transaction = None;
++        self.live_write_transaction_available.notify_one();
++    }
++
++    // Locks integration: delegated counterpart of start_write_transaction.
++    // Called only by the delegated write body inside the external delegation
++    // lock. Allocates the next ID in the same order as the tracker would and
++    // asserts that no other delegated writer is live.
++    pub(crate) fn start_delegated_write_transaction(&self) -> TransactionId {
++        assert!(
++            self.delegated_mode.load(AtomicOrdering::Acquire),
++            "delegated write transaction outside delegated mode"
++        );
++        let transaction_id = TransactionId(
++            self.delegated_last_transaction_id
++                .fetch_add(1, AtomicOrdering::Relaxed)
++                + 1,
++        );
++        #[cfg(feature = "logging")]
++        debug!("Beginning delegated write transaction id={transaction_id:?}");
++        if self
++            .delegated_live_write_transaction
++            .compare_exchange(
++                NO_DELEGATED_WRITER,
++                transaction_id.raw_id(),
++                AtomicOrdering::AcqRel,
++                AtomicOrdering::Acquire,
++            )
++            .is_err()
++        {
++            panic!("two live delegated writers: the delegation lock did not serialize writers");
++        }
++        transaction_id
++    }
++
++    pub(crate) fn end_delegated_write_transaction(&self, id: TransactionId) {
++        let previous = self
++            .delegated_live_write_transaction
++            .swap(NO_DELEGATED_WRITER, AtomicOrdering::AcqRel);
++        assert_eq!(previous, id.raw_id(), "delegated writer slot mismatch");
++    }
++
+     pub(crate) fn clear_pending_non_durable_commits(&self) {
+         let mut state = self.state.lock().unwrap();
+         let ids = mem::take(&mut state.pending_non_durable_commits);
+diff --git a/src/transactions.rs b/src/transactions.rs
+index 1150a63..3ea7c3f 100644
+--- a/src/transactions.rs
++++ b/src/transactions.rs
+@@ -812,6 +812,12 @@ impl WriteTransaction {
+         self.shrink_policy = shrink_policy;
+     }
+ 
++    // Locks integration: lets the private fixed-insert body report the
++    // allocated ID so the correctness gate can check transaction-ID order.
++    pub(crate) fn dlock_transaction_id(&self) -> u64 {
++        self.transaction_id.raw_id()
++    }
++
+     pub(crate) fn pending_free_pages(&self) -> Result<bool> {
+         let mut system_tables = self.system_tables.lock().unwrap();
+         if system_tables

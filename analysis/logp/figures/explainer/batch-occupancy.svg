@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="610" viewBox="0 0 800 610" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">Batch occupancy counts actual completions, including empty passes</title>
+  <desc id="desc">A conceptual three-pass trace completes four, zero, and two requests: N equals six, E equals three, and b equals N divided by E equals two completions per pass. All passes incur overhead, including the empty pass. The sum of their shared costs is spread across six completions. An attempt budget is not a completion count. b is a ratio of totals, can be fractional or below one, and does not guarantee k completions in each pass. The audited FC-PQ limit of 64 counts queue pops, not completions.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#526575"/></marker></defs>
+  <rect width="800" height="610" fill="white"/>
+  <text x="30" y="43" font-size="28" font-weight="bold" fill="#18323D">A pass budget is not a completed batch</text>
+  <text x="30" y="78" font-size="20" fill="#526575">Conceptual trace · count what actually finishes</text>
+  <g fill="#F1F5F7" stroke="#526575" stroke-width="2"><rect x="30" y="106" width="230" height="217" rx="10"/><rect x="285" y="106" width="230" height="217" rx="10"/><rect x="540" y="106" width="230" height="217" rx="10"/></g>
+  <g font-size="23" font-weight="bold" fill="#18323D" text-anchor="middle"><text x="145" y="143">Pass 1</text><text x="400" y="143">Pass 2</text><text x="655" y="143">Pass 3</text></g>
+  <g fill="#167D8D"><rect x="47" y="166" width="43" height="44" rx="4"/><rect x="97" y="166" width="43" height="44" rx="4"/><rect x="147" y="166" width="43" height="44" rx="4"/><rect x="197" y="166" width="43" height="44" rx="4"/><rect x="600" y="166" width="43" height="44" rx="4"/><rect x="667" y="166" width="43" height="44" rx="4"/></g>
+  <g font-size="23" fill="white" text-anchor="middle"><text x="68" y="196">1</text><text x="118" y="196">2</text><text x="168" y="196">3</text><text x="218" y="196">4</text><text x="621" y="196">5</text><text x="688" y="196">6</text></g>
+  <text x="400" y="197" text-anchor="middle" font-size="25" fill="#526575">No completion</text>
+  <g font-size="21" fill="#18323D" text-anchor="middle"><text x="145" y="244">4 completed</text><text x="400" y="244">0 completed</text><text x="655" y="244">2 completed</text></g>
+  <g fill="#7057A3"><rect x="44" y="265" width="202" height="42" rx="5"/><rect x="299" y="265" width="202" height="42" rx="5"/><rect x="554" y="265" width="202" height="42" rx="5"/></g>
+  <g font-size="20" fill="white" text-anchor="middle"><text x="145" y="293">Pass overhead</text><text x="400" y="293">Pass overhead</text><text x="655" y="293">Pass overhead</text></g>
+  <path d="M145 325 V348 H655 V325 M400 348 V369" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="400" y="401" text-anchor="middle" font-size="29" font-weight="bold" fill="#18323D">N = 6     E = 3     b = N / E = 2</text>
+  <text x="400" y="437" text-anchor="middle" font-size="22" fill="#7057A3">Shared cost per completion = all three pass costs / 6</text>
+  <rect x="30" y="462" width="740" height="63" rx="8" fill="#F1F5F7"/>
+  <text x="400" y="488" text-anchor="middle" font-size="20" fill="#18323D"><tspan x="400">b is a ratio of totals: it can be fractional or below 1.</tspan><tspan x="400" dy="27">It does not promise k completions in every pass.</tspan></text>
+  <text x="30" y="558" font-size="20" fill="#526575"><tspan x="30">Keep empty passes in the denominator and their costs in the bill.</tspan><tspan x="30" dy="29">Audited FC-PQ: the 64 limit counts pops, not completions.</tspan></text>
+</svg>

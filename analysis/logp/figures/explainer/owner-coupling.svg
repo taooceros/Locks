@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="590" viewBox="0 0 800 590" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">Selecting a caller also selects an executing core</title>
+  <desc id="desc">Conceptual caller-execution example, not an actual CFL trace. Step one selects client A, which executes on its fixed core 0. Step two selects client B, which executes on its fixed core 1. Both cores are drawn within one socket: NUMA-aware placement can mitigate movement without making distinct cores the same executor. The single protected working set is accessed by both steps. State may transfer between cores, depending on reuse and topology; no compulsory transfer or cache-residency guarantee is asserted. No delegation is shown.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L9 4.5L0 9Z" fill="#18323D"/></marker>
+    <marker id="soft-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L9 4.5L0 9Z" fill="#526575"/></marker>
+  </defs>
+  <rect width="800" height="590" fill="white"/>
+  <text x="32" y="43" font-size="28" font-weight="700" fill="#18323D">A service choice is also a core choice</text>
+  <text x="32" y="77" font-size="20" fill="#526575">Caller execution · two successive selections</text>
+  <rect x="75" y="105" width="260" height="65" rx="12" fill="#167D8D"/>
+  <rect x="465" y="105" width="260" height="65" rx="12" fill="#C86D35"/>
+  <text x="205" y="145" text-anchor="middle" font-size="25" font-weight="700" fill="white">1. Select client A</text>
+  <text x="595" y="145" text-anchor="middle" font-size="25" font-weight="700" fill="white">2. Select client B</text>
+  <rect x="34" y="225" width="732" height="158" rx="16" fill="#F1F5F7" stroke="#526575" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <path d="M205 174V243" fill="none" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M595 174V243" fill="none" stroke="#18323D" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="222" y="205" font-size="20" fill="#18323D">A executes</text>
+  <text x="612" y="205" font-size="20" fill="#18323D">B executes</text>
+  <rect x="95" y="248" width="220" height="76" rx="10" fill="white" stroke="#167D8D" stroke-width="3"/>
+  <rect x="485" y="248" width="220" height="76" rx="10" fill="white" stroke="#C86D35" stroke-width="3"/>
+  <text x="205" y="279" text-anchor="middle" font-size="24" font-weight="700" fill="#167D8D">Core 0</text>
+  <text x="205" y="308" text-anchor="middle" font-size="20" fill="#18323D">A's caller core</text>
+  <text x="595" y="279" text-anchor="middle" font-size="24" font-weight="700" fill="#C86D35">Core 1</text>
+  <text x="595" y="308" text-anchor="middle" font-size="20" fill="#18323D">B's caller core</text>
+  <path d="M324 277H475" stroke="#526575" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#soft-arrow)"/>
+  <text x="400" y="257" text-anchor="middle" font-size="20" fill="#526575">may transfer</text>
+  <text x="400" y="349" text-anchor="middle" font-size="20" fill="#526575">Same socket shown; still two different cores</text>
+  <path d="M95 286H60V426H248 M552 426H740V286H705" fill="none" stroke="#526575" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="89" y="419" font-size="20" fill="#526575">step 1</text>
+  <text x="640" y="419" font-size="20" fill="#526575">step 2</text>
+  <rect x="215" y="398" width="370" height="70" rx="10" fill="#F1F5F7" stroke="#18323D" stroke-width="2"/>
+  <text x="400" y="426" text-anchor="middle" font-size="22" font-weight="700" fill="#18323D">One protected working set</text>
+  <text x="400" y="452" text-anchor="middle" font-size="20" fill="#526575">may move as the core changes</text>
+  <rect x="24" y="493" width="752" height="77" rx="10" fill="#F1F5F7"/>
+  <text x="42" y="522" font-size="20" fill="#18323D"><tspan x="42">CFL uses NUMA-aware placement to mitigate movement.</tspan><tspan x="42" dy="28">Movement depends on reuse and topology; not an actual CFL trace.</tspan></text>
+</svg>

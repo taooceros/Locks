@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="650" viewBox="0 0 800 650" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">A usage-ordered combiner cycle</title>
+  <desc id="desc">Conceptual teaching algorithm, not a certified current Rust contract. Clients publish requests across the boundary. Under exclusive combiner access a sequential queue contains visible requests ordered by recorded usage. The combiner picks a minimum, executes the delegate on protected state, charges service, and publishes the result. It may continue or end the batch and release. Admission, accounting, and batch boundaries are obligations.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526575"/></marker></defs>
+  <rect width="800" height="650" fill="white"/>
+  <text x="30" y="42" font-size="28" font-weight="bold" fill="#18323D">Schedule requests; retain execution</text>
+  <text x="30" y="75" font-size="20" fill="#526575">Conceptual algorithm · not a certified Rust contract</text>
+  <rect x="195" y="96" width="580" height="463" rx="12" fill="#F1F5F7" stroke="#526575" stroke-width="2"/>
+  <text x="218" y="127" font-size="22" font-weight="bold" fill="#18323D">Exclusive combiner access</text>
+  <rect x="220" y="150" width="530" height="76" rx="8" fill="white" stroke="#7057A3" stroke-width="2"/>
+  <text x="485" y="180" text-anchor="middle" font-size="22" fill="#7057A3"><tspan x="485">Visible, usage-ordered queue</tspan><tspan x="485" dy="29" font-size="20">Sequential: recorded usage is the key</tspan></text>
+  <rect x="22" y="155" width="137" height="71" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <text x="90" y="185" text-anchor="middle" font-size="21" fill="#167D8D"><tspan x="90">Client</tspan><tspan x="90" dy="28">request</tspan></text>
+  <path d="M159 190 H217" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="30" y="140" font-size="20" fill="#526575">1 Publish</text>
+  <path d="M340 226 V268" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="220" y="272" width="235" height="78" rx="8" fill="white" stroke="#7057A3" stroke-width="2"/>
+  <text x="337" y="303" text-anchor="middle" font-size="22" fill="#7057A3"><tspan x="337">2 Pick minimum</tspan><tspan x="337" dy="29" font-size="20">recorded usage</tspan></text>
+  <path d="M455 311 H501" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="505" y="272" width="245" height="78" rx="8" fill="#18323D"/>
+  <text x="627" y="303" text-anchor="middle" font-size="22" fill="white"><tspan x="627">3 Execute delegate</tspan><tspan x="627" dy="29" font-size="20">on protected state</tspan></text>
+  <path d="M627 350 V402" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="505" y="406" width="245" height="70" rx="8" fill="white" stroke="#7057A3" stroke-width="2"/>
+  <text x="627" y="448" text-anchor="middle" font-size="22" fill="#7057A3">4 Charge service</text>
+  <path d="M505 441 H459" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="220" y="406" width="235" height="70" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <text x="337" y="448" text-anchor="middle" font-size="22" fill="#167D8D">5 Publish result</text>
+  <path d="M337 406 V354" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="350" y="384" font-size="20" fill="#526575">continue</text>
+  <rect x="22" y="302" width="137" height="74" rx="8" fill="white" stroke="#167D8D" stroke-width="2"/>
+  <text x="90" y="333" text-anchor="middle" font-size="21" fill="#167D8D"><tspan x="90">Client</tspan><tspan x="90" dy="28">result</tspan></text>
+  <path d="M220 441 H90 V380" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="28" y="481" font-size="20" fill="#526575">Result traffic</text>
+  <path d="M337 476 V517 H490" fill="none" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="505" y="525" font-size="21" fill="#18323D">End batch → release</text>
+  <text x="30" y="596" font-size="21" fill="#18323D"><tspan x="30">Obligations: admission and visibility, service accounting,</tspan><tspan x="30" dy="30">and a justified batch boundary—not just a minimum picker.</tspan></text>
+</svg>

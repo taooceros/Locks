@@ -23,7 +23,7 @@ pub struct GlobalOpts {
     pub threads: Vec<usize>,
     #[arg(global = true, num_args(0..), value_delimiter = ',', value_terminator("."), long, short, default_values_t = [available_parallelism().unwrap().get()].to_vec())]
     pub cpus: Vec<usize>,
-    #[arg(global = true, long, short, default_value = "visualization/output")]
+    #[arg(global = true, long, short, default_value = ".worktree/output")]
     pub output_path: String,
     #[arg(global = true, long, short)]
     pub stat_response_time: bool,

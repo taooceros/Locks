@@ -1,7 +1,7 @@
 use std::{
-    fs::{self, DirBuilder, Permissions},
+    fs::{self, Permissions},
     iter::repeat,
-    os::unix::{fs::DirBuilderExt, prelude::PermissionsExt},
+    os::unix::prelude::PermissionsExt,
     path::Path,
 };
 
@@ -50,10 +50,7 @@ fn main() {
     let output_path = Path::new(app.global_opts.output_path.as_str());
 
     if !output_path.exists() {
-        DirBuilder::new()
-            .mode(0o777)
-            .create(output_path)
-            .expect("Failed to create output dir");
+        fs::create_dir_all(output_path).expect("Failed to create output dir");
     }
 
     fs::set_permissions(output_path, Permissions::from_mode(0o777)).unwrap();

@@ -6,7 +6,7 @@ report generators are optional; they are not additional setup steps.
 | Start here | Purpose |
 |---|---|
 | [UpScaleDB](upscaledb/README.md) | Original single-operation bodies with alternative synchronization |
-| [redb](redb/README.md) | Complete transactions using the unmodified redb library |
+| [redb](redb/README.md) | Patched redb whose write path is serialised by the delegation lock |
 
 ```text
 integration/
@@ -16,7 +16,7 @@ integration/
 │   ├── experiments/   Optional scaling, hypothesis and boundary studies
 │   ├── reports/       Offline analysis and report generation
 │   └── tests/         Python build/provenance/topology tests
-└── redb/              Transaction workload, pinned Cargo workspace and runner
+└── redb/              Numbered redb patches, build, correctness gate, workload and runner
 ```
 
 Each directory has its own README. Run Python tools **from the repository root**

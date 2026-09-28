@@ -1,0 +1,399 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 74eb267..4d95a71 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -30,6 +30,8 @@ repository = "https://github.com/cberner/redb"
+ 
+ [features]
+ cache_metrics = []
++# Locks integration: correctness-gate probes inside the private write body.
++dlock_test_hooks = []
+ logging = ["dep:log"]
+ 
+ [lib]
+diff --git a/src/dlock_private.rs b/src/dlock_private.rs
+new file mode 100644
+index 0000000..7ae6dfe
+--- /dev/null
++++ b/src/dlock_private.rs
+@@ -0,0 +1,366 @@
++//! Locks integration: private, deliberately narrow write path. NOT a redb public API.
++//!
++//! `fixed_insert_body` is the single write-operation body: begin, a fixed number of
++//! `u64 -> u64` inserts into one pre-existing table, then commit (or abort on a
++//! duplicate key or error). Both entry points call exactly this body:
++//!
++//! - [`FixedInsertTarget::execute_native`] admits the writer through redb's original
++//!   `TransactionTracker` Mutex/Condvar writer lock (the `refactored` control).
++//! - [`DelegatedWriteGate::execute`] hands the same body to an external delegation
++//!   lock through a synchronous submit closure. The body may run on another thread
++//!   (an FC/FC-PQ combiner). It never takes the tracker's writer lock; the gate
++//!   occupies the tracker's writer slot for its lifetime and the body allocates
++//!   transaction IDs from the delegated slot inside the delegation lock.
++//!
++//! Every transaction and guard object is created and dropped inside the body, on the
++//! executing thread. Only the plain request (a borrowed slice of pairs plus one
++//! durability mode) and the plain outcome cross threads. A panic inside a delegated
++//! body aborts the process; it never unwinds across the combiner.
++
++use crate::{
++    CommitError, Database, Durability, Error, ReadableDatabase, SetDurabilityError,
++    StorageError, TableDefinition, TableError, TransactionError,
++};
++use std::fmt;
++use std::marker::PhantomData;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++
++/// Largest supported record count per request. Larger requests are rejected.
++pub const MAX_RECORDS_PER_REQUEST: usize = 64;
++
++/// One narrow write request: `records.len()` inserts (1..=64) of new `u64` keys,
++/// committed with exactly one durability mode.
++#[derive(Clone, Copy, Debug)]
++pub struct FixedInsert<'a> {
++    pub records: &'a [(u64, u64)],
++    pub durability: Durability,
++}
++
++#[derive(Debug)]
++#[non_exhaustive]
++pub enum FixedInsertError {
++    /// Outside the supported shape. Nothing was submitted and no lock was taken.
++    Rejected(&'static str),
++    /// The key already existed; the transaction was explicitly aborted.
++    DuplicateKey(u64),
++    /// A redb error. Before commit the transaction was aborted on drop.
++    Database(Error),
++    /// The submit closure returned without running the delegated call.
++    NotExecuted,
++    /// Test-hook build only: injected error after the inserts, before commit.
++    #[cfg(feature = "dlock_test_hooks")]
++    Injected,
++}
++
++impl fmt::Display for FixedInsertError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Rejected(reason) => write!(f, "rejected fixed-insert request: {reason}"),
++            Self::DuplicateKey(key) => write!(f, "duplicate key {key}; transaction aborted"),
++            Self::Database(error) => write!(f, "{error}"),
++            Self::NotExecuted => write!(f, "delegated call was not executed by the bridge"),
++            #[cfg(feature = "dlock_test_hooks")]
++            Self::Injected => write!(f, "injected test error; transaction aborted"),
++        }
++    }
++}
++
++impl std::error::Error for FixedInsertError {}
++
++macro_rules! database_error {
++    ($($source:ty),*) => {$(
++        impl From<$source> for FixedInsertError {
++            fn from(error: $source) -> Self {
++                Self::Database(error.into())
++            }
++        }
++    )*};
++}
++database_error!(
++    StorageError,
++    TableError,
++    TransactionError,
++    SetDurabilityError,
++    CommitError
++);
++
++fn validate(request: &FixedInsert<'_>) -> Result<(), FixedInsertError> {
++    if request.records.is_empty() {
++        return Err(FixedInsertError::Rejected("a request needs at least one record"));
++    }
++    if request.records.len() > MAX_RECORDS_PER_REQUEST {
++        return Err(FixedInsertError::Rejected(
++            "a request may carry at most MAX_RECORDS_PER_REQUEST records",
++        ));
++    }
++    match request.durability {
++        Durability::Immediate | Durability::None => Ok(()),
++    }
++}
++
++/// The one database and one pre-existing `u64 -> u64` table the body writes.
++#[derive(Clone, Copy)]
++pub struct FixedInsertTarget<'db> {
++    db: &'db Database,
++    table: TableDefinition<'static, u64, u64>,
++}
++
++impl<'db> FixedInsertTarget<'db> {
++    /// Requires the table to exist already with `u64 -> u64` types; the body never
++    /// creates or deletes tables.
++    pub fn new(
++        db: &'db Database,
++        table: TableDefinition<'static, u64, u64>,
++    ) -> Result<Self, FixedInsertError> {
++        let read = db.begin_read()?;
++        read.open_table(table)?;
++        Ok(Self { db, table })
++    }
++
++    /// `refactored` control: the shared body under redb's original tracker
++    /// Mutex/Condvar writer lock, on the calling thread. Returns the transaction ID.
++    pub fn execute_native(&self, request: &FixedInsert<'_>) -> Result<u64, FixedInsertError> {
++        validate(request)?;
++        fixed_insert_body(self, request, Admission::Tracker)
++    }
++}
++
++enum Admission {
++    Tracker,
++    Delegated,
++}
++
++fn fixed_insert_body(
++    target: &FixedInsertTarget<'_>,
++    request: &FixedInsert<'_>,
++    admission: Admission,
++) -> Result<u64, FixedInsertError> {
++    let mut txn = match admission {
++        Admission::Tracker => target.db.begin_write()?,
++        Admission::Delegated => target.db.begin_delegated_write()?,
++    };
++    let transaction_id = txn.dlock_transaction_id();
++    #[cfg(feature = "dlock_test_hooks")]
++    let occupancy = test_hooks::Occupancy::enter();
++    txn.set_durability(request.durability)?;
++    {
++        let mut table = txn.open_table(target.table)?;
++        for &(key, value) in request.records {
++            if table.insert(key, value)?.is_some() {
++                drop(table);
++                #[cfg(feature = "dlock_test_hooks")]
++                drop(occupancy);
++                txn.abort()?;
++                return Err(FixedInsertError::DuplicateKey(key));
++            }
++        }
++    }
++    #[cfg(feature = "dlock_test_hooks")]
++    {
++        test_hooks::before_commit()?;
++        drop(occupancy);
++    }
++    txn.commit()?;
++    Ok(transaction_id)
++}
++
++/// Delegated-writer mode for one database. While the gate is alive, the external
++/// delegation lock is the write-serialisation mechanism: public `begin_write`
++/// callers wait (on the unchanged tracker Condvar) until the gate is dropped.
++/// Read transactions are unaffected and never pass through the gate.
++pub struct DelegatedWriteGate<'db> {
++    target: FixedInsertTarget<'db>,
++}
++
++impl<'db> DelegatedWriteGate<'db> {
++    /// Waits for any live public writer, then occupies the tracker's writer slot.
++    /// Rejects a second gate on the same database.
++    pub fn enter(target: FixedInsertTarget<'db>) -> Result<Self, FixedInsertError> {
++        if !target.db.enter_delegated_write_mode() {
++            return Err(FixedInsertError::Rejected(
++                "delegated write mode already active",
++            ));
++        }
++        Ok(Self { target })
++    }
++
++    /// Validates the request on the calling thread, then calls `submit` exactly once.
++    /// `submit` must serialise every call it runs against every other call on this
++    /// gate (that is the delegation lock) and may run `DelegatedCall::run` on any
++    /// thread before returning. A call that is dropped unrun yields `NotExecuted`.
++    pub fn execute<S>(
++        &self,
++        request: &FixedInsert<'_>,
++        submit: S,
++    ) -> Result<u64, FixedInsertError>
++    where
++        S: FnOnce(DelegatedCall<'_>),
++    {
++        validate(request)?;
++        let mut context = CallContext {
++            target: &self.target,
++            request,
++            outcome: None,
++        };
++        submit(DelegatedCall {
++            context: std::ptr::from_mut(&mut context).cast(),
++            _borrow: PhantomData,
++        });
++        context.outcome.unwrap_or(Err(FixedInsertError::NotExecuted))
++    }
++}
++
++impl Drop for DelegatedWriteGate<'_> {
++    fn drop(&mut self) {
++        self.target.db.exit_delegated_write_mode();
++    }
++}
++
++struct CallContext<'t, 'r> {
++    target: &'t FixedInsertTarget<'t>,
++    request: &'r FixedInsert<'r>,
++    outcome: Option<Result<u64, FixedInsertError>>,
++}
++
++/// One pending delegated body, borrowed from a blocked requester.
++pub struct DelegatedCall<'a> {
++    context: *mut (),
++    _borrow: PhantomData<&'a mut ()>,
++}
++
++// SAFETY: the context holds shared references to a Sync target/request and an
++// outcome slot of Send data; the requester is blocked in `execute` for 'a.
++unsafe impl Send for DelegatedCall<'_> {}
++
++impl DelegatedCall<'_> {
++    /// Runs the body on the current thread. A panic aborts the process.
++    pub fn run(self) {
++        // SAFETY: the borrow lifetime keeps the context alive and exclusive.
++        unsafe { invoke(self.context) }
++    }
++
++    /// Erases the borrow so a lock that requires `'static` requests can carry it.
++    ///
++    /// # Safety
++    /// The returned call must be run or dropped before the `submit` closure that
++    /// received this call returns, and must be run at most once.
++    pub unsafe fn into_raw(self) -> RawDelegatedCall {
++        RawDelegatedCall {
++            context: self.context,
++        }
++    }
++}
++
++/// Lifetime-erased [`DelegatedCall`]; see [`DelegatedCall::into_raw`].
++pub struct RawDelegatedCall {
++    context: *mut (),
++}
++
++// SAFETY: see DelegatedCall. Shared references only observe the pointer value.
++unsafe impl Send for RawDelegatedCall {}
++unsafe impl Sync for RawDelegatedCall {}
++
++impl fmt::Debug for RawDelegatedCall {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RawDelegatedCall").finish_non_exhaustive()
++    }
++}
++
++impl RawDelegatedCall {
++    /// # Safety
++    /// Only within the contract of [`DelegatedCall::into_raw`].
++    pub unsafe fn run(self) {
++        unsafe { invoke(self.context) }
++    }
++}
++
++unsafe fn invoke(context: *mut ()) {
++    let context = unsafe { &mut *context.cast::<CallContext<'_, '_>>() };
++    let outcome = catch_unwind(AssertUnwindSafe(|| {
++        fixed_insert_body(context.target, context.request, Admission::Delegated)
++    }));
++    match outcome {
++        Ok(outcome) => context.outcome = Some(outcome),
++        // The combiner, its lock and possibly a live transaction are poisoned.
++        Err(_) => std::process::abort(),
++    }
++}
++
++/// Test-hook build only (`dlock_test_hooks`): process-global probes inside the body.
++#[cfg(feature = "dlock_test_hooks")]
++pub mod test_hooks {
++    use super::FixedInsertError;
++    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++
++    static PAUSE: AtomicBool = AtomicBool::new(false);
++    static PAUSED: AtomicBool = AtomicBool::new(false);
++    static FAIL_NEXT: AtomicBool = AtomicBool::new(false);
++    static PANIC_NEXT: AtomicBool = AtomicBool::new(false);
++    static OCCUPANCY: AtomicU64 = AtomicU64::new(0);
++    static MAX_OCCUPANCY: AtomicU64 = AtomicU64::new(0);
++
++    /// The next body pauses after its inserts, before commit, while it is the
++    /// live writer, until `release_pause`.
++    pub fn arm_pause() {
++        PAUSED.store(false, Ordering::SeqCst);
++        PAUSE.store(true, Ordering::SeqCst);
++    }
++
++    pub fn is_paused() -> bool {
++        PAUSED.load(Ordering::SeqCst)
++    }
++
++    pub fn release_pause() {
++        PAUSE.store(false, Ordering::SeqCst);
++    }
++
++    /// The next body returns `Injected` after its inserts (abort on drop).
++    pub fn fail_next() {
++        FAIL_NEXT.store(true, Ordering::SeqCst);
++    }
++
++    /// The next body panics after its inserts.
++    pub fn panic_next() {
++        PANIC_NEXT.store(true, Ordering::SeqCst);
++    }
++
++    /// Largest number of bodies observed between begin and commit at once.
++    pub fn max_occupancy() -> u64 {
++        MAX_OCCUPANCY.load(Ordering::SeqCst)
++    }
++
++    pub(super) struct Occupancy;
++
++    impl Occupancy {
++        pub(super) fn enter() -> Self {
++            let now = OCCUPANCY.fetch_add(1, Ordering::SeqCst) + 1;
++            MAX_OCCUPANCY.fetch_max(now, Ordering::SeqCst);
++            Self
++        }
++    }
++
++    impl Drop for Occupancy {
++        fn drop(&mut self) {
++            OCCUPANCY.fetch_sub(1, Ordering::SeqCst);
++        }
++    }
++
++    pub(super) fn before_commit() -> Result<(), FixedInsertError> {
++        if PAUSE.swap(false, Ordering::SeqCst) {
++            PAUSED.store(true, Ordering::SeqCst);
++            PAUSE.store(true, Ordering::SeqCst);
++            while PAUSE.load(Ordering::SeqCst) {
++                std::thread::yield_now();
++            }
++            PAUSED.store(false, Ordering::SeqCst);
++        }
++        if FAIL_NEXT.swap(false, Ordering::SeqCst) {
++            return Err(FixedInsertError::Injected);
++        }
++        assert!(
++            !PANIC_NEXT.swap(false, Ordering::SeqCst),
++            "injected panic inside the fixed-insert body"
++        );
++        Ok(())
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index fd3d9c2..498aec6 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -89,6 +89,9 @@ pub type Result<T = (), E = StorageError> = std::result::Result<T, E>;
+ pub mod backends;
+ mod complex_types;
+ mod db;
++// Locks integration: private narrow write path; not part of redb's public API.
++#[doc(hidden)]
++pub mod dlock_private;
+ mod error;
+ mod legacy_tuple_types;
+ mod multimap_table;

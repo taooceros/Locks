@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="560" viewBox="0 0 720 560" role="img" aria-labelledby="title description">
+  <title id="title">Same service order, different execution placement</title>
+  <desc id="description">Conceptual comparison of four equal-cost service steps A, B, A, B, not a measured trace or an actual CFL schedule. Clients A and B are pinned to distinct cores 0 and 1. In caller execution, executing cores alternate 0, 1, 0, 1; repeated teal state symbols and dashed arrows denote potential movement of the same repeatedly written protected working set, not four copies. In delegation, one executor E serves the same steps in one batch. E can be a caller combiner; no dedicated extra core is required. One teal symbol denotes the opportunity to retain protected state while serving different clients. Request and result communication still crosses the executor boundary, and other data movement remains possible. Neither cache-level residency nor cross-socket movement is assumed or guaranteed. Horizontal positions denote service order, not elapsed time.</desc>
+  <defs>
+    <marker id="state-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#167D8D" stroke-width="2"/>
+    </marker>
+    <marker id="message-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#7057A3" stroke-width="2"/>
+    </marker>
+  </defs>
+  <rect width="720" height="560" fill="#FFFFFF"/>
+  <g font-family="DejaVu Sans, sans-serif" fill="#172B3A">
+    <text x="24" y="32" font-size="27" font-weight="700">Same service order, different executors</text>
+    <text x="24" y="63" font-size="22" fill="#526575">One possible order · four equal-cost steps</text>
+
+    <rect x="18" y="82" width="684" height="210" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="34" y="115" font-size="26" font-weight="700">Caller execution</text>
+    <g fill="#F7F5FA" stroke="#7057A3" stroke-width="2">
+      <rect x="34" y="132" width="142" height="113" rx="7"/>
+      <rect x="204" y="132" width="142" height="113" rx="7"/>
+      <rect x="374" y="132" width="142" height="113" rx="7"/>
+      <rect x="544" y="132" width="142" height="113" rx="7"/>
+    </g>
+    <g font-size="23" text-anchor="middle">
+      <text x="105" y="159">core 0</text>
+      <text x="275" y="159">core 1</text>
+      <text x="445" y="159">core 0</text>
+      <text x="615" y="159">core 1</text>
+    </g>
+    <g stroke-width="2">
+      <rect x="49" y="171" width="112" height="35" rx="5" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="219" y="171" width="112" height="35" rx="5" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="389" y="171" width="112" height="35" rx="5" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="559" y="171" width="112" height="35" rx="5" fill="#FFF2E5" stroke="#B65D13"/>
+    </g>
+    <g font-size="23" text-anchor="middle" font-weight="700">
+      <text x="105" y="196" fill="#2563A6">serve A</text>
+      <text x="275" y="196" fill="#B65D13">serve B</text>
+      <text x="445" y="196" fill="#2563A6">serve A</text>
+      <text x="615" y="196" fill="#B65D13">serve B</text>
+    </g>
+    <g fill="#E7F4F5" stroke="#167D8D" stroke-width="2">
+      <rect x="85" y="216" width="40" height="20" rx="3"/>
+      <path d="M 91 223 H 119 M 91 229 H 119"/>
+      <rect x="255" y="216" width="40" height="20" rx="3"/>
+      <path d="M 261 223 H 289 M 261 229 H 289"/>
+      <rect x="425" y="216" width="40" height="20" rx="3"/>
+      <path d="M 431 223 H 459 M 431 229 H 459"/>
+      <rect x="595" y="216" width="40" height="20" rx="3"/>
+      <path d="M 601 223 H 629 M 601 229 H 629"/>
+    </g>
+    <g fill="none" stroke="#167D8D" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#state-arrow)">
+      <path d="M 130 226 H 247"/>
+      <path d="M 300 226 H 417"/>
+      <path d="M 470 226 H 587"/>
+    </g>
+    <text x="34" y="276" font-size="22" fill="#167D8D">Repeated writes: protected state may move</text>
+
+    <text x="34" y="328" font-size="26" font-weight="700">Delegation: one batch</text>
+    <rect x="18" y="344" width="684" height="137" rx="10" fill="#F7F5FA" stroke="#7057A3" stroke-width="2.5"/>
+    <text x="34" y="375" font-size="23" fill="#7057A3" font-weight="700">Executor E · may be a caller combiner</text>
+    <g stroke-width="2">
+      <rect x="49" y="391" width="112" height="35" rx="5" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="219" y="391" width="112" height="35" rx="5" fill="#FFF2E5" stroke="#B65D13"/>
+      <rect x="389" y="391" width="112" height="35" rx="5" fill="#EAF2FB" stroke="#2563A6"/>
+      <rect x="559" y="391" width="112" height="35" rx="5" fill="#FFF2E5" stroke="#B65D13"/>
+    </g>
+    <g font-size="23" text-anchor="middle" font-weight="700">
+      <text x="105" y="416" fill="#2563A6">serve A</text>
+      <text x="275" y="416" fill="#B65D13">serve B</text>
+      <text x="445" y="416" fill="#2563A6">serve A</text>
+      <text x="615" y="416" fill="#B65D13">serve B</text>
+    </g>
+    <g fill="#E7F4F5" stroke="#167D8D" stroke-width="2">
+      <rect x="49" y="445" width="40" height="20" rx="3"/>
+      <path d="M 55 452 H 83 M 55 458 H 83"/>
+    </g>
+    <text x="103" y="463" font-size="22" fill="#167D8D">Protected state can stay across these steps</text>
+    <g fill="none" stroke="#7057A3" stroke-width="2.5" marker-end="url(#message-arrow)">
+      <path d="M 349 521 V 484"/>
+      <path d="M 385 484 V 521"/>
+    </g>
+    <text x="24" y="514" font-size="22">A / core 0, B / core 1</text>
+    <text x="413" y="514" font-size="22" fill="#7057A3">requests / results</text>
+    <text x="24" y="548" font-size="22" fill="#526575">Communication and other data movement remain.</text>
+  </g>
+</svg>

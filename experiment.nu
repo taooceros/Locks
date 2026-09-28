@@ -22,7 +22,7 @@
 #   group_delegation_vs_shfl      # Delegation vs ShflLock head-to-head
 #   group_factor_analysis         # Factor analysis: FC-PQ overhead decomposition
 #
-# See docs/EXPERIMENT_PLAN.md for detailed experiment specs.
+# See README.md (research plan) and docs/archive/EXPERIMENT_PLAN.md (historical spec).
 
 cargo build --release
 
@@ -53,6 +53,7 @@ let latency_duration = 5
 let trials = 3
 
 let dlock2 = "target/release/dlock"
+let profiles_dir = ".worktree/profiles"
 
 # ─── Smoke test (~2 min) ────────────────────────────────────────────
 # Quick sanity check: 2 configs, short duration, few threads, few locks.
@@ -242,7 +243,7 @@ def group_combiner [] {
 
 def group_perf [] {
     print "=== Phase 3: perf stat Cache Miss Validation ==="
-    mkdir profiles
+    mkdir $profiles_dir
 
     let perf_events = "L1-dcache-load-misses,L1-dcache-loads,LLC-load-misses,LLC-loads,LLC-store-misses,dTLB-load-misses,cpu-migrations,instructions,cycles,branch-misses"
 
@@ -251,8 +252,8 @@ def group_perf [] {
         (perf stat -e $perf_events
             $dlock2 d-lock2 -t 32 -l $lock counter-proportional
             --cs 1000,3000 --non-cs 0 -d 15
-            out> $"profiles/tradeoff-($lock).txt"
-            err> $"profiles/tradeoff-($lock).stats")
+            out> $"($profiles_dir)/tradeoff-($lock).txt"
+            err> $"($profiles_dir)/tradeoff-($lock).stats")
     }
 }
 

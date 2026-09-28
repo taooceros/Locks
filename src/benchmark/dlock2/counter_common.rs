@@ -106,7 +106,7 @@ pub fn write_cdf_csv(path: &Path, sorted: &[u64], max_points: usize) {
 }
 
 /// Print response time percentiles and export CDF CSVs for a set of records.
-/// `folder` is the output directory for this lock (e.g. `visualization/output/FC`).
+/// `folder` is the output directory for this lock (e.g. `.worktree/output/FC`).
 pub fn report_response_times(folder: &Path, file_name: &str, records: &[Records]) {
     let mut all_combiner: Vec<u64> = records
         .iter()

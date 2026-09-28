@@ -5,12 +5,17 @@ import pyarrow.ipc as ipc
 from collections import defaultdict
 import os
 
-BASE_DIR = "/home/hongtao/Locks/visualization/output"
+from workspace_paths import resolve_output_dir
+
+BASE_DIR = resolve_output_dir()
 
 LOCKS = [
     ("C_AQS", "C_AQS (Linux kernel MCS/AQS spinlock)"),
     ("FC", "FC (Flat Combining, unfair delegation)"),
-    ("FC_PQ_BHeap", "FC_PQ_BHeap (Flat Combining with Priority Queue, fair delegation)"),
+    (
+        "FC_PQ_BHeap",
+        "FC_PQ_BHeap (Flat Combining with Priority Queue, fair delegation)",
+    ),
     ("MCS", "MCS (MCS queue lock)"),
 ]
 
@@ -18,7 +23,7 @@ FILENAME = "counter cs [1000, 3000] noncs [0].arrow"
 
 
 def read_and_print(lock_dir: str, lock_label: str):
-    filepath = os.path.join(BASE_DIR, lock_dir, FILENAME)
+    filepath = os.path.join(str(BASE_DIR), lock_dir, FILENAME)
     if not os.path.exists(filepath):
         print(f"## {lock_label}\n")
         print(f"**File not found:** `{filepath}`\n")

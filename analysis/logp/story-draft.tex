@@ -1,0 +1,346 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[margin=0.72in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,array}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[hidelinks,breaklinks]{hyperref}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{balance}
+\graphicspath{{../../.worktree/logp/figures/}}
+\usepackage[section]{placeins}
+\setlength{\columnsep}{0.25in}
+\setlength{\emergencystretch}{1em}
+\raggedbottom
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newtheorem{proposition}{Proposition}
+\newtheorem{theorem}[proposition]{Theorem}
+\newcommand{\src}[1]{\nolinkurl{#1}}
+\newcommand{\draftslot}[2]{%
+  \typeout{DRAFT-SLOT: #1}%
+  \par\smallskip{\raggedright\noindent\textbf{[PLACEHOLDER: #1]}\par}\nopagebreak[4]
+  \noindent{\small #2}\par\smallskip}
+\newcommand{\placeholderfigure}[3]{%
+  \typeout{DRAFT-SLOT: #1}%
+  \begin{figure}[t]\centering
+  \fbox{\begin{minipage}{0.91\columnwidth}\raggedright
+  \textbf{[PLACEHOLDER: #1]}\par\smallskip
+  \small #2\par\medskip\textit{No measurements supplied.}
+  \end{minipage}}
+  \caption{#3}\label{fig:#1}\end{figure}}
+\title{Fair Service, Local Execution:\\Usage-Fair Delegation Locks}
+\author{Working paper draft}
+\date{}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Shared locks schedule a scarce resource: serialized execution on protected
+state. Usage-aware locks such as CFL distribute that resource by scheduling
+lock owners. Yet selecting an owner also selects the core that executes its
+work, potentially moving protected state between cores. Which costs belong
+to fair service allocation, and which follow from this execution choice?
+We develop a framework that separates the service contract from communication
+and execution costs, then connects them through the executor sequence.
+The analysis motivates usage-fair delegation: schedule requests by accumulated
+service while retaining execution on a combiner. FC-PQ provides a concrete
+design, and a compact cost model identifies when it can outperform CFL:
+saved handoff costs must cover request scheduling and amortized combining
+costs. Empirical results and implementation-refinement evidence remain
+explicitly unfilled.
+\end{abstract}
+
+\section{Introduction}
+Shared indexes, queues, and other mutable structures expose a familiar
+multicore bottleneck: several clients compete for work that must execute
+serially. A lock protects that work, but its policy also determines how the
+serialized capacity is divided. Equal turns are not equal service. If one
+client's update takes three times as long as another's lookup, alternating
+them gives the updater three-quarters of the protected execution time.
+High aggregate throughput can therefore coexist with unequal service.
+Figure~\ref{fig:serviceallocation} makes the distinction visible: operation
+counts and accumulated service answer different questions.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\columnwidth]{service-allocation.pdf}
+\caption{Equal turns versus service-aware allocation. Width encodes
+illustrative useful service, not measured wall time. The lower row balances
+totals over the shown window, not every prefix. The operation mixes differ:
+this is an allocation example, not a throughput comparison.}
+\label{fig:serviceallocation}
+\end{figure}
+
+Usage-aware locks address this allocation problem by accounting for service,
+rather than relying only on acquisition order. SCL exposes how lock usage
+can subvert CPU scheduling goals and controls lock opportunity~\cite{scl}.
+CFL treats lock occupation as a schedulable resource, combining usage
+accounting, group support, and NUMA-aware owner selection~\cite{cfl}.
+These designs establish that access to a lock is a resource to schedule,
+not merely a sequence of turns.
+
+For caller-executed usage-fair locks, however, improving owner selection leaves
+an architectural constraint: the chosen owner also executes the next critical
+section. Serving a different client on another core can therefore move the
+protected state as well as change who receives service. CFL reduces movement
+through NUMA-aware scheduling, but same-socket handoff is still different
+from retaining one executor. This is not evidence that fairness necessarily
+hurts throughput---CFL reports improvements. It instead raises a question:
+\emph{which costs are required to distribute service fairly, and which arise
+from tying service allocation to execution placement?}
+
+We develop a framework that separates the service contract from communication
+and execution costs, then connects them through the executor sequence. It
+explains when a bounded service gap constrains consecutive caller execution.
+This motivates a different execution arrangement: \emph{delegation}, where
+a combiner executes requests on behalf of clients. A new client can receive
+service without requiring execution to change cores. We use FC-PQ to make
+this choice concrete and derive when its request, accounting, and batching costs
+are smaller than the handoff costs it avoids. The result is a conditional
+performance comparison with CFL and explicit requirements for the design,
+not a claim that fair scheduling or delegation is free.
+
+\draftslot{MOTIVATION-RESULT}{Insert one application or controlled workload
+showing heterogeneous service and the allocation problem. Compare CFL and
+FC-PQ using matched work and resources, with per-client service alongside
+performance; no motivating measurement has yet been supplied.}
+
+\section{An analysis framework}
+\label{sec:storyframework}
+We describe a lock through two sequences: the clients whose requests receive
+service and the cores that execute those requests. A workload supplies
+operations, arrivals, placement, and protected/request footprints. The
+protocol determines publication, selection, execution, completion, and return.
+Keeping these events distinct lets us ask two independent questions before
+connecting their answers.
+
+\subsection{Service contract}
+\label{sec:storyfairness}
+Our target is equal protected-service allocation among equal-weight clients,
+not equal operation counts. Consider a fixed group selectable at every
+decision, starting with equal cumulative-service credits that never reset.
+If increments are nonnegative and each is at most $C_{\max}$, selecting a
+minimum-credit client keeps the spread of credits at most $C_{\max}$ after
+every operation. Serving a minimum can raise it by at most one largest
+operation; the other credits do not change. Appendix~\ref{app:fairness}
+gives the general proof. No communication cost or execution placement enters
+this argument.
+
+The contract has to name its service metric and eligible clients. A timer
+including request handling does not automatically measure useful protected
+work; a pending invocation is not necessarily visible to selection. Admission,
+resubmission, and accounting therefore need explicit rules. This contract is
+a requirement on a scheduler, not yet a guarantee about FC-PQ or a wall-clock
+response bound.
+
+\subsection{Execution cost}
+Performance analysis takes the service policy and executor sequence as inputs,
+without assuming fairness. We adapt LogP's separation of communication
+latency, processor overhead, and communication rate to coherent shared
+memory~\cite{logp,coherence}. Publication and notification may overlap useful
+execution; protected-state movement and scheduler work can instead delay the
+next operation. Cached polling is not one network message per load.
+
+We account separately for useful work, request traffic, scheduling, state
+movement, and batch administration. Dependencies determine which delays
+overlap; resource demand can limit rate even when latency is hidden. Only
+exposed, non-overlapping costs enter the serialized execution path. Completion
+also differs from caller return when an executor continues combining.
+Section~\ref{sec:storycost} applies this accounting; Appendix~\ref{app:costs}
+gives its detailed mapping.
+
+\subsection{Connecting service to execution}
+A service contract restricts permissible service sequences. An execution
+architecture determines which executor sequences can realize them. For two
+continuously backlogged clients on distinct fixed cores, equal positive
+service increments, no credit resets, and a gap bounded after each operation
+limit consecutive services to one client. With caller execution, this also
+limits consecutive execution on one core (Appendix~\ref{app:residency}).
+This is a restricted mechanism, not an impossibility theorem for all fair locks.
+
+The design implication is to avoid making each required change in service
+recipient a required change in executor. This does not remove the cost of
+fair scheduling. It identifies which movement can be avoided, which costs
+remain, and what a candidate solution must make cheap enough to compensate.
+
+\section{Design from the analysis}
+\label{sec:storyidea}
+The framework suggests placing service selection at a retained executor,
+rather than using it to transfer execution to each selected client. A
+delegation-style lock provides this arrangement: clients submit operations,
+and a combiner executes them and returns their results. Different clients
+can receive service while the protected state is accessed by the same core.
+Figure~\ref{fig:execution} shows the architectural choice.
+
+Flat combining and queue-based combining already exploit this execution
+locality~\cite{fc,cc}. TCLocks makes delegation available through ordinary
+locking interfaces~\cite{tclocks}, and SCL already suggests usage-fair scheduling
+of delegated requests~\cite{scl}. Our question is what service contract this
+arrangement supports and when its remaining costs are worth paying, not
+whether fairness and delegation can be combined at all.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{execution-placement.pdf}
+\caption{Same equal-cost service order, different executor sequences.
+Each column is a service step, not a different physical core. Teal symbols
+denote the same protected working set. This is a schematic, not a CFL trace
+or a cache-residency guarantee. Request/result communication remains.}
+\label{fig:execution}
+\end{figure}
+
+\paragraph{FC-PQ as a concrete design.}
+\label{sec:storylock}
+FC-PQ places a usage-ordered priority queue behind flat combining. Clients
+publish operations; the combiner selects by recorded usage, executes the
+delegate, charges its service, and publishes the result. The queue is
+sequential under combiner ownership. This existing design makes the framework's
+separation concrete.
+
+Three design responsibilities follow from the analysis. \emph{Accounting}
+must charge the stated service, rather than an unexplained timer interval.
+\emph{Admission} must expose pending requests and assign new or returning
+clients a justified credit baseline. \emph{Batch control} must amortize
+execution costs while limiting how long an executor caller continues after
+its own result is ready. Service fairness alone does not solve return latency.
+
+Under exclusive combiner access, switching clients within a batch introduces
+no necessary protected-state transfer to another executing core. This does
+not guarantee L1 residency: operations can evict one another's data, payloads
+can be large, and later batches can use another combiner. The cost analysis
+must decide whether the retained execution is worth the remaining overhead.
+
+Our source audit also prevents an unconditional implementation guarantee.
+Admission, visibility, and measurement obligations remain unresolved
+(Appendix~\ref{app:implementation}); the configured limit of 64 counts queue
+pops, not completed requests.
+
+\section{When does delegation pay?}
+\label{sec:storycost}
+Compare the same completed operation mix, hardware budget, and warm useful
+work. For sustained contention with no uncovered idle time, approximate the
+mean cost per completion as
+\begin{equation}
+\begin{aligned}
+ t_{\mathrm{CFL}} &\simeq c+h+m,\\
+ t_{\mathrm{PQ}} &\simeq c+d+\frac{a}{b}.
+\end{aligned}
+\label{eq:storycosts}
+\end{equation}
+Here $c$ is the common warm operation cost. CFL pays exposed protocol and
+policy cost $h$, plus actual protected-state movement $m$, per completion.
+FC-PQ pays per-request communication, selection, and accounting cost $d$.
+Its mean pass cost $a$ includes administration and any protected-state or
+scheduler-state reacquisition when the combiner changes; $b$ is the actual
+number of completions per pass, averaged as a ratio of totals.
+
+Only non-overlapping costs on the serialized execution path are added.
+CFL's $m$ reflects its actual locality policy, including same-socket handoffs
+and local reuse; it is not a cross-socket charge imposed on every operation.
+Likewise, $a$ includes delegation's remaining data movement rather than
+assuming it disappears. Appendix~\ref{app:costs} connects these terms to the
+full communication and execution model.
+
+The model gives a direct comparison. FC-PQ has lower time per completion when
+\begin{equation}
+ \boxed{m+h>d+\frac{a}{b}.}
+ \label{eq:storycrossover}
+\end{equation}
+In words, \emph{CFL's per-operation handoff and policy costs must exceed
+FC-PQ's per-request costs plus its amortized pass cost}. When these costs are
+stable over a regime and $m+h>d$, sufficient batch occupancy produces an
+advantage. When $d\ge m+h$, increasing the batch alone cannot produce a strict
+win in this model. The appendix gives the crossover explicitly.
+Figure~\ref{fig:costcrossover} illustrates both the amortization opportunity
+and the per-request cost floor that batching cannot remove.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\columnwidth]{cost-crossover.pdf}
+\caption{Schematic of Equation~\eqref{eq:storycrossover}, not measurements.
+With fixed $a>0$ and $H=h+m>d$, the modeled costs tie at $b^*=a/(H-d)$;
+strict advantage starts to its right. If $d\ge H$, no batch can create
+a strict win. Costs and executor-change behavior must remain applicable
+as occupancy changes.}
+\label{fig:costcrossover}
+\end{figure}
+
+This comparison predicts a benefit from reusable shared state and enough
+pending work to amortize a pass. It also predicts failures: sparse activity
+leaves little to amortize; large payloads increase request cost; a large
+priority queue can increase scheduler cost; and effective CFL locality can
+leave little movement to save. If the serialized execution path is the
+bottleneck, its lower cost translates into higher predicted throughput.
+Otherwise publication, memory traffic, or another resource may limit both
+locks, and that bottleneck must be modeled separately.
+
+This is an analytical condition, not a measured speedup. Prediction requires
+independently established costs and a model of occupancy and executor changes;
+Section~\ref{sec:storyevaluation} describes the test.
+
+\paragraph{A second comparison: what does fairness add?}
+Outperforming CFL does not establish a low fairness overhead. Compare FC-PQ
+with a policy-disabled variant retaining the same publication and batching
+infrastructure. Bookkeeping and selection are direct additions; changed
+operation order, occupancy, and locality are separate effects. This matched
+comparison measures the policy's price, not the remaining advantage over CFL.
+
+\input{story-evaluation}
+
+\section{Relationship to prior work}
+\label{sec:storyrelated}
+The service objective matters when comparing mechanisms: SCL's lock
+opportunity includes idle opportunity~\cite{scl}, whereas our target is
+protected service. CFL's usage/group policy and NUMA locality must be credited
+under an aligned objective~\cite{cfl}. FC-PQ uses explicit delegates rather
+than TCLocks' transparent locking interface~\cite{tclocks}.
+
+SCL already suggests usage-fair scheduling of delegated requests. Our proposed
+contribution is the contract-to-cost-to-design connection and conditional
+CFL comparison, not that combination alone. The framework adapts established
+combining and communication models~\cite{fc,cc,logp,coherence}.
+\draftslot{NOVELTY-POSITION}{Complete comparison with prior fair delegation,
+cohorting, locality/fairness analyses, and predictive lock models before fixing
+the final novelty claim. The three reference papers do not establish absence
+of earlier results.}
+
+\section{Conclusion}
+Analyzing service allocation separately from execution cost exposes a design
+choice: change who receives service without requiring execution to move.
+FC-PQ makes that choice concrete. Its advantage over CFL depends on saved
+handoff costs covering request scheduling and amortized pass costs.
+Establishing the implementation contract and testing that boundary remain
+the next evidence obligations. The goal is an explained operating regime
+for fair local execution, not fairness for free.
+
+\balance
+
+\begin{thebibliography}{9}
+\bibitem{scl} Y. Patel, L. Yang, L. Arulraj, A. C. Arpaci-Dusseau,
+R. H. Arpaci-Dusseau, and M. M. Swift. Avoiding Scheduler Subversion using
+Scheduler-Cooperative Locks. EuroSys, 2020.
+\url{https://doi.org/10.1145/3342195.3387521}.
+\bibitem{cfl} J. Park and Y. I. Eom. Locks as a Resource: Fairly Scheduling
+Lock Occupation with CFL. PPoPP, 2024.
+\url{https://doi.org/10.1145/3627535.3638477}.
+\bibitem{fc} D. Hendler, I. Incze, N. Shavit, and M. Tzafrir. Flat Combining
+and the Synchronization-Parallelism Tradeoff. SPAA, 2010, pp. 355--364.
+\url{https://doi.org/10.1145/1810479.1810540}.
+\bibitem{cc} P. Fatourou and N. D. Kallimanis. Revisiting the Combining
+Synchronization Technique. PPoPP, 2012.
+\bibitem{tclocks} V. Gupta, K. K. Dwivedi, Y. Kothari, Y. Pan, D. Zhou, and
+S. Kashyap. Ship your Critical Section, Not Your Data: Enabling Transparent
+Delegation with TCLocks. OSDI, 2023.
+\url{https://www.usenix.org/conference/osdi23/presentation/gupta}.
+\bibitem{logp} D. Culler et al. LogP: Towards a Realistic Model of Parallel
+Computation. PPoPP, 1993. \url{https://doi.org/10.1145/155332.155333}.
+\bibitem{coherence} S. Ramos and T. Hoefler. Modeling Communication in
+Cache-Coherent SMP Systems---A Case-Study with Xeon Phi. HPDC, 2013.
+\url{https://spcl.inf.ethz.ch/Publications/index.php?pub=162}.
+\end{thebibliography}
+
+\clearpage
+\nobalance
+\appendix
+\input{story-details}
+\end{document}

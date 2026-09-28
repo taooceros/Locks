@@ -1,0 +1,52 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[margin=0.72in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,array,longtable}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[hidelinks,breaklinks]{hyperref}
+\usepackage{microtype}
+\usepackage{balance}
+\setlength{\columnsep}{0.25in}
+\setlength{\emergencystretch}{1em}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}{Definition}
+\newcommand{\src}[1]{\nolinkurl{#1}}
+\title{Analyzing Delegation and Handoff Locks:\\Separate Performance and Fairness Models}
+\author{Research section draft}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+We give separate analyses of lock performance and service fairness.
+The performance analysis uses a LogP-inspired communication and execution
+model to derive migration amortization, throughput crossover, and
+caller-return latency conditions for a given service policy and workload.
+The fairness analysis independently defines service credit and eligibility,
+then derives service-spread, accounting-error, and competing-service bounds
+without communication-cost assumptions. Separate implementation comparisons
+show why queue-pop budgets differ from completion budgets, equal billed
+service need not mean equal useful service, and minimum-credit ordering
+alone does not establish a dynamic-arrival guarantee. A final discussion
+states the additional assumptions needed to relate the two analyses.
+The mathematical artifact checks finite cases and explicit counterexamples;
+it establishes neither calibrated hardware performance nor concurrency
+correctness of the implementations.
+\end{abstract}
+\input{section}
+\begin{thebibliography}{9}
+\bibitem{logp} D. Culler et al. LogP: Towards a Realistic Model of Parallel Computation. PPoPP, 1993. \url{https://doi.org/10.1145/155332.155333}.
+\bibitem{loggp} A. Alexandrov, M. F. Ionescu, K. E. Schauser, and C. Scheiman. LogGP. SPAA, 1995. \url{https://doi.org/10.1145/215399.215427}.
+\bibitem{coherence} S. Ramos and T. Hoefler. Modeling Communication in Cache-Coherent SMP Systems---A Case-Study with Xeon Phi. HPDC, 2013. \url{https://spcl.inf.ethz.ch/Publications/index.php?pub=162}.
+\bibitem{fc} D. Hendler, I. Incze, N. Shavit, and M. Tzafrir. Flat Combining and the Synchronization-Parallelism Tradeoff. SPAA, 2010, pp. 355--364.
+\bibitem{cc} P. Fatourou and N. D. Kallimanis. Revisiting the Combining Synchronization Technique. PPoPP, 2012.
+\bibitem{mcs} J. M. Mellor-Crummey and M. L. Scott. Algorithms for Scalable Synchronization on Shared-Memory Multiprocessors. ACM TOCS, 1991. \url{https://doi.org/10.1145/103727.103729}.
+\end{thebibliography}
+\clearpage
+\nobalance
+\onecolumn
+\appendix
+\input{implementation-audit}
+\end{document}

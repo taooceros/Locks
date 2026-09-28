@@ -1,0 +1,30 @@
+# Evidence index
+
+This directory indexes the completed experiments that bear on the thesis: fairness by switching threads moves data, fairness by switching requests does not. Committed reports live on the branches listed in the table (`jj new <bookmark>` or `jj workspace add` to materialize). Raw `.worktree/` roots were git-ignored; on 2026-09-26 the roots cited below were moved off the removed worktrees to `~/Locks-artifacts/<branch-name>/<root>` (e.g. `~/Locks-artifacts/experiment-upscaledb-fc-pq-integration/upscaledb-joined-scaling/`), and every smoke, verification, build and superseded-campaign root was deleted. `.worktree/logp` in this checkout is a symlink into that archive. The full ledger is copied here as `all-experiments-2026-09-25.md`.
+
+| Study | Branch@commit | Report path | Trials | Key result for the thesis |
+|---|---|---|---:|---|
+| Initial UpScaleDB integration | `experiment/upscaledb-fc-pq-integration@dcbfacb` | `plan/2026-09-23/upscaledb-integration-plan.md` (sections "Fixed-work results", "Completed duration and service-profile results") | 600 primary + 80 profile | Packed 4 CPUs; FC-PQ vs Native paired speedup 0.777x (1W), 0.909x (2W), 2.039x (4W), 0.494x (8W), 0.209x (16W). Stage decomposition packed 8W: refactored->bridge mutex +10.5%, bridge->FC +54.2%, FC->FC-PQ +25.1%. See finding 002. |
+| Joined physical/NUMA/SMT scaling | `experiment/upscaledb-fc-pq-integration@dcbfacb` | `docs/reports/upscaledb-joined-dimensions/report.md`; raw `.worktree/upscaledb-joined-scaling/overview/scaling.csv` | 330 | P64 fixed: FC 4.07x, FC-PQ 2.93x, USCL 3.26x vs Native; CPU-s FC 72.74, FC-PQ 84.66, USCL 2.69, Native 12.00. P8 fixed: FC 1.73x, FC-PQ 1.51x, USCL 1.72x; CPU-s FC 8.43, FC-PQ 8.42, USCL 2.07, Native 9.23. See finding 003. |
+| H1-H3 hypotheses | `experiment/upscaledb-fc-pq-integration@dcbfacb` | `docs/reports/upscaledb-hypotheses/report.md` | 252 | H2: U-SCL waits 2180/2131/1681/0.58 us at release->request 0/50/500/5000 us vs FC-PQ ~0.6 us (reservation = idle with backlog). |
+| Boundary studies cost/arrival/database/tables | `experiment/upscaledb-fc-pq-integration@dcbfacb` | `docs/reports/upscaledb-boundaries/report.html`, `docs/reports/upscaledb-boundaries/provenance.json` | 306 | USCL 8-table split 597829 -> 4617 op/s; arrival 95% read 1.1x load FC/FC-PQ ~909K/s vs USCL ~676K/s with ~460K backlog. |
+| Other locks multitable | `experiment/multitable-other-locks@3f770d7` | `docs/reports/upscaledb-other-locks/report.html` | 180 | split/32 medians Mop/s: CLH 8.740, SpinLock 8.550, Ticket 8.060, MCS 7.151, FC 6.207, FC-PQ 5.704. |
+| High contention hotspot | `experiment/multitable-other-locks@3f770d7` | `docs/reports/fairness-campaign/report.html`, `plan/2026-09-25/upscaledb-high-contention.md`; raw `.worktree/upscaledb-high-contention-validated/analysis-readable/report.html` | 450 + 27 diagnostic | 32W FC-PQ/MCS 0.743 uniform, 1.135 hot90, 1.105 hot100; FC-PQ absolute ~10.45M -> ~1.02M op/s. |
+| Heterogeneous clients | `experiment/heterogeneous-clients@d9f1abc` | driver `integration/upscaledb/heterogeneous_clients.py`; raw `.worktree/heterogeneous-trials-20260925-01/analysis/summary.txt` (no committed report; figures in `experiment/multitable-other-locks@3f770d7:docs/reports/fairness-campaign/report.html`) | 126 primary + 126 profile | shared batch8 FC->FC-PQ profile Jain 0.579->0.628, reader share 7.3%->11.5%, USCL 0.908; shared pure read FC-PQ/FC throughput 0.397x. |
+| redb 1/64 | `experiment/redb-fair-transactions@e96f5f9` | driver `integration/redb_transactions.py`; raw `.worktree/redb-campaign-20260925-04/analysis/summary.json` (no committed report; figures in `experiment/multitable-other-locks@3f770d7:docs/reports/fairness-campaign/report.html`) | 180 | Immediate FC->FC-PQ Jain 0.891->0.992, small-txn share 32.6%->45.4%, small-txn throughput 1.500x, total records 0.832x, small-txn p99 bucket 2.097->8.389 ms; MCS Jain 0.907. |
+| LogP model checks | `research/logp-analysis@555ad76` | `analysis/logp/README.md`; raw `.worktree/logp/verification.json` | 8 | Abstract fairness/performance separation; not hardware evidence. |
+
+## Reading rules
+
+- Primary (uninstrumented) and profile (service-Jain) runs are separate cohorts; do not combine them into one Pareto point.
+- Fixed-work and duration modes are not interchangeable; duration changes the completed mix.
+- 3-5 trial ranges are not confidence intervals.
+- Latency percentiles are histogram bucket upper bounds.
+- CPU-s is not energy; drain/join timing boundaries differ per study.
+
+## Gaps relative to the thesis
+
+- No cache-migration measurement (no HITM/LLC counters) in any study; locality claims are inference.
+- CFL-local is an unverified proxy with cross-handle global accounting, not Park/Eom's CFL artifact.
+- DLock2 waiters spin only, never park (see finding 002); CPU-s and oversubscription numbers reflect that policy.
+- FC-PQ carries a constant per-request tax of 13-28% over FC at 1 worker.

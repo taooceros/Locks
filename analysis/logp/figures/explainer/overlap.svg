@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="580" viewBox="0 0 800 580" role="img" aria-labelledby="title desc" font-family="DejaVu Sans, sans-serif">
+  <title id="title">Only the exposed communication tail delays dependent service</title>
+  <desc id="desc">Two aligned schematic lanes show request B publication and transfer beginning during service A and ending afterward. The serialized executor waits only for the exposed tail before beginning dependent service B. Widths are arbitrary, not measured. Hidden latency still consumes communication resources. Cached polling is not one network message per load. Add only nonoverlapping exposed serialized-path costs, not the whole overlapping transfer again.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526575"/></marker><pattern id="hatch" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M0 10 L10 0" stroke="#C86D35" stroke-width="2"/></pattern></defs>
+  <rect width="800" height="580" fill="white"/>
+  <text x="30" y="42" font-size="28" font-weight="bold" fill="#18323D">Overlap hides latency, not resource demand</text>
+  <text x="30" y="77" font-size="20" fill="#526575">Aligned schematic lanes · arbitrary widths, no measurements</text>
+  <path d="M220 121 H752" stroke="#526575" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="637" y="108" font-size="20" fill="#526575">time →</text>
+  <text x="30" y="189" font-size="21" font-weight="bold" fill="#18323D"><tspan x="30">Serialized</tspan><tspan x="30" dy="28">executor</tspan></text>
+  <rect x="220" y="166" width="250" height="68" rx="6" fill="#167D8D"/>
+  <text x="345" y="207" text-anchor="middle" font-size="24" fill="white">Service A</text>
+  <rect x="470" y="166" width="110" height="68" fill="#F1F5F7" stroke="#C86D35" stroke-width="2"/>
+  <text x="525" y="207" text-anchor="middle" font-size="22" fill="#18323D">Wait</text>
+  <rect x="580" y="166" width="170" height="68" rx="6" fill="#C86D35"/>
+  <text x="665" y="207" text-anchor="middle" font-size="24" fill="white">Service B</text>
+  <text x="30" y="300" font-size="21" font-weight="bold" fill="#18323D"><tspan x="30">Request B</tspan><tspan x="30" dy="28">traffic</tspan></text>
+  <rect x="310" y="286" width="270" height="66" rx="6" fill="#F1F5F7" stroke="#C86D35" stroke-width="2"/>
+  <rect x="470" y="286" width="110" height="66" fill="url(#hatch)"/>
+  <text x="310" y="272" font-size="21" fill="#C86D35">Publication + transfer</text>
+  <text x="390" y="326" text-anchor="middle" font-size="21" fill="#18323D">overlapped</text>
+  <path d="M470 148 V371 M580 148 V371" stroke="#526575" stroke-width="2" stroke-dasharray="6 6"/>
+  <path d="M580 286 V239" stroke="#526575" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="601" y="275" font-size="20" fill="#18323D"><tspan x="601">B must be ready</tspan><tspan x="601" dy="28">before service</tspan></text>
+  <path d="M310 367 V381 H470 V367 M470 381 H580 V367" fill="none" stroke="#526575" stroke-width="2"/>
+  <text x="310" y="413" font-size="21" fill="#526575">hidden latency</text>
+  <text x="488" y="413" font-size="21" fill="#C86D35">exposed tail</text>
+  <rect x="30" y="438" width="740" height="57" rx="8" fill="#F1F5F7"/>
+  <text x="400" y="474" text-anchor="middle" font-size="21" fill="#18323D">Serialized path: service A + exposed tail + service B</text>
+  <text x="30" y="531" font-size="20" fill="#526575"><tspan x="30">Do not add the whole overlapping transfer again.</tspan><tspan x="30" dy="29">Hidden traffic still uses resources; cached polling ≠ a message/load.</tspan></text>
+</svg>

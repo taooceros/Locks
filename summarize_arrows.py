@@ -4,20 +4,33 @@
 import os
 import pyarrow.ipc as ipc
 
-OUTPUT_DIR = "visualization/output"
+from visualization.workspace_paths import resolve_output_dir
+
+OUTPUT_DIR = resolve_output_dir()
 LOCKS = [
-    "FC", "FCBan", "CC", "CCBan", "DSM",
-    "FC_PQ_BHeap", "FC_PQ_BTree",
-    "MCS", "Mutex", "SpinLock", "USCL",
-    "C_FC", "C_CC", "C_AQS",
-    "ShflLock", "ShflLock_C",
+    "FC",
+    "FCBan",
+    "CC",
+    "CCBan",
+    "DSM",
+    "FC_PQ_BHeap",
+    "FC_PQ_BTree",
+    "MCS",
+    "Mutex",
+    "SpinLock",
+    "USCL",
+    "C_FC",
+    "C_CC",
+    "C_AQS",
+    "ShflLock",
+    "ShflLock_C",
 ]
 FILENAME = "counter cs [1000, 3000] noncs [0].arrow"
 
 results = []
 
 for lock in LOCKS:
-    path = os.path.join(OUTPUT_DIR, lock, FILENAME)
+    path = os.path.join(str(OUTPUT_DIR), lock, FILENAME)
     if not os.path.exists(path):
         print(f"WARNING: missing file for {lock}: {path}")
         continue
@@ -42,22 +55,24 @@ for lock in LOCKS:
 
     thread_nums = sorted(set(table.column("thread_num").to_pylist()))
 
-    results.append({
-        "locktype": locktype,
-        "total_loop_count": total_loop_count,
-        "jfi_min": jfi_min,
-        "jfi_max": jfi_max,
-        "num_rows": num_rows,
-        "cs_lengths": cs_lengths,
-        "thread_nums": thread_nums,
-    })
+    results.append(
+        {
+            "locktype": locktype,
+            "total_loop_count": total_loop_count,
+            "jfi_min": jfi_min,
+            "jfi_max": jfi_max,
+            "num_rows": num_rows,
+            "cs_lengths": cs_lengths,
+            "thread_nums": thread_nums,
+        }
+    )
 
 # Sort by total_loop_count descending
 results.sort(key=lambda r: r["total_loop_count"], reverse=True)
 
 # Print markdown table
 header = "| Lock Type | Total Loop Count | JFI (min) | JFI (max) | Rows | Thread Configs | CS Lengths |"
-sep    = "|-----------|-----------------|-----------|-----------|------|----------------|------------|"
+sep = "|-----------|-----------------|-----------|-----------|------|----------------|------------|"
 print(header)
 print(sep)
 for r in results:

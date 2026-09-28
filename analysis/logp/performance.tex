@@ -1,0 +1,352 @@
+% Performance model and throughput results.
+\section{Performance analysis}
+\label{sec:performance}
+This analysis asks how much communication and execution work each lock
+requires, and how that work constrains throughput and caller-return latency.
+The service policy, executed operation mix, and executor sequence are inputs;
+no equal-share or bounded-lag guarantee is assumed. Results here do not use
+the fairness theorems. Costs are elapsed time, resource occupancy, or source
+work counts, not a scheduler's service-credit metric.
+
+\subsection{Communication and execution model}
+\label{sec:model}
+\subsubsection{Communication events}
+Classical LogP~\cite{logp} specifies small-message latency bound $L$, processor
+send/receive occupancy $o$, endpoint send/receive gap $g$, and $P$ processor
+modules. Its capacity is at most $\lceil L/g\rceil$ messages in flight from
+or to an endpoint. The runtime convention charges $L$ per message, giving
+$L+2o$ for an isolated one-way delivery. Independent deliveries can overlap:
+latency belongs to dependency paths, while occupancy and gaps constrain rate.
+An upper-bound $L$ is not a physical lower-bound latency.
+
+For coherent shared memory we use a \emph{LogP-inspired adaptation}, not an
+identification of a load with a message. Repeated private-cache polling can
+produce no new fabric traffic. Ownership transfer can require requests,
+invalidations, acknowledgments, and forwarding. Following the motivation of
+cache-coherent communication models~\cite{coherence}, transaction costs are
+indexed by type and topology. $P$ counts hardware execution endpoints and
+$N$ counts clients; directory/interconnect bottlenecks may be additional
+resources. A large cache line is not automatically a LogGP long message:
+LogGP's byte-gap parameter $G$~\cite{loggp} is appropriate only when a calibrated
+bulk-transfer regime exists.
+
+
+Construct a finite event DAG containing delegate execution, publication,
+discovery, queue manipulation, transfer, completion, and executor changes.
+Delegate nodes touching the same protected state are serialized. Independent
+publication and notification may overlap this chain. Label CPU work with its
+endpoint, messages with endpoint/topology, and contended atomic ownership
+with the resource it occupies. Failed elections, empty scans, and parked
+threads have events but contribute no successful operations.
+
+\begin{proposition}[Resource and dependency bound]
+\label{prop:resource}
+For a closed finite DAG completing $B$ operations, let $\mathrm{CP}$ be its
+longest weighted path, $W_p$ its total non-overlappable CPU occupancy at
+endpoint $p$, $v_p^s,v_p^r$ its message-send/receive counts, and $r_\ell a_\ell$
+the occupancy of a serialized hot-line resource. With endpoint gap $g_p$,
+\begin{align}
+T &\ge \max\{\mathrm{CP},\max_p W_p,\max_p G_p,
+                    \max_\ell r_\ell a_\ell\},\label{eq:resource}\\
+G_p&=\max\{(v_p^s-1)_+,(v_p^r-1)_+\}g_p .\nonumber
+\end{align}
+The costs must be exact within the abstract machine or guaranteed minima.
+Capacity and any additional fabric constraints remain part of the DAG/model.
+\end{proposition}
+\begin{proof}
+Every dependency path must complete; each non-overlappable resource must
+supply its total occupancy. A sequence of $v$ sends or receives has $v-1$
+inter-event gaps. Each requirement separately lower-bounds elapsed time;
+their maximum is therefore a lower bound. Taking a sum would unjustifiably
+forbid overlap. Include startup/drain events rather than counting transfers
+that lie outside the chosen observation interval.
+\end{proof}
+Thus $B/T$ has a model upper bound, not necessarily an attainable rate.
+Substituting measured \emph{means} for guaranteed minima yields a performance
+estimate, not a hardware theorem. Moreover, $O(1)$ successful queue operations
+do not imply $O(1)$ elapsed time when a predecessor can stop publishing.
+
+\subsubsection{Trace accounting and a predictive approximation}
+Let a trace have $E$ passes, $B>0$ completions, and $F$ executor changes.
+Define $b=B/E$ and $p=F/E$; zero-completion passes count in $E$.
+Partition the \emph{serialized execution lane}, without double counting,
+into warm service, per-operation scheduling/discovery and exposed request
+communication, pass administration, exposed protected-state/scheduler-state
+reacquisition, and uncovered idle time. Mean per-completion time is then
+represented by
+\begin{equation}
+ t_D \simeq \bar C_D+d_D+
+ \frac{A_D+p_D(M_D+K_D)}{b_D}+I_D .\label{eq:delegation}
+\end{equation}
+$A$ is mean administration per pass, $M$ and $K$ are mean exposed protected-data
+and scheduler-state reacquisition \emph{conditional on an executor change},
+and $I$ is uncovered idle time per completion. When $F=0$, its migration term
+is zero; finite startup cost is separate. $\bar C$ and $d$ are weighted by
+operations, not passes. Ratios of totals give this accounting; averaging
+per-pass ratios or assuming independence of batch size and cost does not.
+
+As a trace partition, the accounting is definitional. As a prediction,
+Equation~\eqref{eq:delegation} replaces trace costs by independently calibrated
+values and is only an approximation. It does not replace the DAG constraints.
+A request miss inside measured service must not be added again to $d$;
+a cold protected-data miss must not be counted both in $C$ and $M$.
+Speculative/prefetched communication contributes only its \emph{exposed}
+residual to this serialized decomposition. Network demand still appears in
+Equation~\eqref{eq:resource} even if its latency was hidden.
+
+Protected-data cost $M(W,\tau,\rho)$ depends on touched reusable lines $W$,
+topology $\tau$, and residency $\rho$, not merely allocated object size.
+Independent transfers might fit $d_\tau+(W-1)\gamma_\tau$; a dependent
+pointer chain might fit $W d_\tau$. These are alternative calibrated regimes,
+not universal coherence formulas. Input lines, queue metadata and protected
+state are separate working sets. A large heap can cease to be cache resident.
+An unchanged executor can also suffer capacity misses or interference;
+those costs are not excluded by the absence of executor-change migration.
+
+A comparable handoff estimate is
+\begin{equation}
+ t_H\simeq \bar C_H+h_H+M_H,\label{eq:handoff}
+\end{equation}
+where $h_H$ includes lock protocol and policy work, and $M_H$ is actual exposed
+movement per operation, possibly zero for local reuse. Admission cooldowns
+are not automatically $I_D$: another request may use the server meanwhile.
+
+\subsection{Migration amortization and throughput crossover}
+\label{sec:amortization}
+\begin{proposition}[Intra-epoch ownership invariance]
+\label{prop:ownership}
+Fix an epoch's executor, its operations' accessed-line trace up to a
+permutation, and exclusive protected-state access by that executor during the
+epoch. Permuting request order cannot introduce a transfer of a protected
+line to a \emph{different executing core within that epoch}.
+\end{proposition}
+\begin{proof}
+Every protected access in the permuted epoch is still issued by the same
+core. There is no second executor to which execution ownership can transfer.
+This says nothing about first-touch acquisition from an earlier owner,
+eviction/refetch from memory, requester inputs, or off-path metadata traffic.
+\end{proof}
+This is narrower than ``the data always stays in L1.'' If ordering changes
+which lines are accessed, the initial owners of those lines, the operation
+mix, batch boundaries, or executor selection, even the migration comparison
+needs to be recomputed.
+
+\begin{corollary}[Resident repeated-footprint case]
+For a fixed $W$-line exclusively modified footprint touched in every epoch,
+no external invalidations/evictions, and $F$ executor changes, at most $WF$
+protected-line ownership changes are required after warmup; under the model
+where every changed executor must acquire every line, the count is exactly
+$WF$. Per completion it is $Wp/b$.
+\end{corollary}
+\begin{proof}
+An unchanged executor requires no reacquisition. Each changed executor
+acquires each of the $W$ lines once, then retains it for that epoch.
+Sum over changed epochs and divide by $B$, using $F/B=p/b$.
+\end{proof}
+Handoff locks correspond to one operation per epoch, but their switch
+probability and topology must be measured. Owner-to-owner movement already
+exists in MCS; it is not a cost introduced only by CFL's added policy.
+
+\begin{proposition}[Conditional batching crossover]
+\label{prop:crossover}
+Assume the same service mix and warm cost $C$, the same migration cost $M$,
+$p_D=1$, no uncovered idle time, and costs independent of batch size in the
+considered regime. Within Equations~\eqref{eq:delegation}--\eqref{eq:handoff},
+delegation has smaller time per operation exactly when
+\begin{equation}
+ b(M+h-d)>M+A+K .\label{eq:crossover}
+\end{equation}
+If $M+h-d>0$, the smallest positive integer completion batch satisfying this
+inequality is
+\begin{equation}
+ b_{\min}=\left\lfloor\frac{M+A+K}{M+h-d}\right\rfloor+1.
+\end{equation}
+If the denominator is nonpositive and all costs are nonnegative, no positive
+batch meets the strict inequality.
+\end{proposition}
+\begin{proof}
+Cancel $C$ in $C+d+(M+A+K)/b<C+h+M$ and multiply by $b>0$.
+The integer result follows from the strict inequality.
+\end{proof}
+The saved term is $(1-1/b)M$; the unpaid terms are per-request scheduling and
+communication plus $(A+K)/b$. Increased migration cost lowers the relative
+importance of scheduler work, but oversized inputs, a congested publication
+line, or migrating PQ metadata can remove the advantage. This is a
+regime-dependent prediction, not a ranking of all locks on all machines.
+
+\subsubsection{Implementation deltas and controlled operation mix}
+To explain the performance difference between two variants, compare:
+\begin{align}
+\Delta_D&\simeq\Delta \bar C+\Delta d+
+ \Delta\!\left(\frac{A+p(M+K)}b\right)+\Delta I,\\
+\Delta_H&\simeq\Delta\bar C+\Delta h+\Delta M.
+\end{align}
+FC-PQ versus FC changes discovery and batching as well as policy; CC-Ban
+versus CC also changes the source budget (16 versus 64). CFL versus MCS
+changes queue policy and locality, not the existence of handoff itself.
+None is automatically a single-variable ablation. The evidence appendix
+identifies these structural confounders before interpreting a slowdown.
+
+For fixed per-class service $c_i>0$ and given useful-service fractions $f_i$
+on a fully utilized overhead-free server,
+\begin{equation}
+ X_i=f_i/c_i,\qquad X=\sum_i f_i/c_i.\label{eq:mix}
+\end{equation}
+For costs 1 and 9, the supplied mix $(f_1,f_2)=(1/10,9/10)$ gives
+$X=1/5$, whereas $(1/2,1/2)$ gives $X=5/9$ operations per normalized time
+unit. No overhead changed. These fractions are inputs to the cost model,
+not conclusions about which shares an implemented scheduler guarantees.
+Report useful work, class completion rates, service shares, and total
+operations together. A change in $\bar C$ due to a different class mix is not
+necessarily synchronization inefficiency.
+
+% Performance latency and implementation costs.
+\subsection{Batching versus caller return latency}
+\label{sec:return}
+A waiter can return after its own notification, while an executor caller may
+finish the rest of the batch first. If its operation is first in a batch of
+exactly $b$ completed operations, each later operation with serialized elapsed
+service at least $\tau_{\min}$ adds at least $(b-1)\tau_{\min}$
+post-completion delay. This is an elapsed-time lower bound, excluding extra
+administration. It follows from the synchronous return rule regardless of
+the policy that selected the operation order.
+
+Suppose a restricted implementation/regime has a certified per-subsequent-
+operation serialized upper bound $\tau_{\max}$ and remaining fixed tail work
+$e_{\rm tail}$. Then
+\begin{equation}
+ R_{\rm tail}\le e_{\rm tail}+(b-1)\tau_{\max}.\label{eq:tail}
+\end{equation}
+This assumes exactly $b$ completed operations and that \emph{all} other
+post-completion work is in the envelope. It is not a bound for FC-PQ obtained
+by replacing $b$ with 64: its announcement work, no-service pops, stalled
+publishers, and retries also need bounds.
+
+\begin{proposition}[Certified batching feasibility]
+\label{prop:frontier}
+Assume $\tau_{\max}>0$. Under
+Proposition~\ref{prop:crossover}'s performance approximation and the
+return envelope~\eqref{eq:tail}, a tail budget $D\ge e_{\rm tail}$ admits a
+positive integer batch certified by both models iff
+\begin{equation}
+ b_{\min}\le b_{\max}:=
+ 1+\left\lfloor\frac{D-e_{\rm tail}}{\tau_{\max}}\right\rfloor,
+ \qquad \tau_{\max}>0,
+\end{equation}
+with positive crossover denominator. If either condition fails, no batch
+has both certificates under the assumed envelopes.
+\end{proposition}
+\begin{proof}
+The strict throughput inequality requires $b\ge b_{\min}$.
+Rearranging~\eqref{eq:tail} to meet $D$ gives $b\le b_{\max}$.
+The integer interval is nonempty exactly under the stated condition.
+\end{proof}
+For an implementation with supported batches $\mathcal B$, further intersect
+this integer interval with $\mathcal B$ and with the regime in which the
+cost/envelope assumptions hold. A zero $\tau_{\max}$ is outside the stated
+proposition; it would impose no batch-dependent tail limit when
+$D\ge e_{\rm tail}$.
+Absence of a certificate is not proof that real hardware cannot meet both
+objectives: an upper envelope may be conservative. As a synthetic example,
+let $(M,A,K,h,d)=(20,4,4,2,8)$, giving $b_{\min}=3$.
+For $(e_{\rm tail},\tau_{\max},D)=(3,5,13)$, $b_{\max}=3$;
+only $b=3$ is certified. Reducing $D$ to 8 gives $b_{\max}=2$ and no
+certified batch. All numbers are normalized model costs, not measurements.
+This locates the point where merely increasing a batch budget cannot satisfy
+both modeled aims; a different return/executor mechanism or smaller
+coordination cost is needed to improve the certified region.
+
+For a stationary closed workload, the operation-weighted response-time law
+$N=X(\mathbb E[R]+\mathbb E[Z])$, with $Z$ the outside-lock think time,
+is an aggregate consistency check. It does not predict percentiles or an
+individual request's maximum waiting time.
+
+\subsection{Performance of the implemented lock families}
+\label{sec:instances}
+Table~\ref{tab:performance} summarizes the dominant \emph{source work}, not exact
+fabric traffic. The appendix provides complete target coverage and source
+ranges. Let $n$ be retained queue/list size, $a$ arrivals drained, $k$ pop
+attempts, and $b$ actual completions; use $n_{\max}$ over a pass for complexity
+bounds. Additional failed elections, allocation, stalls, and cleanup are
+not assumed constant.
+
+\begin{table*}[t]
+\centering\small
+\caption{Performance comparison only. Complexity describes source work,
+not latency or one-message-per-instruction counts. Elapsed-time predictions
+add machine, residency, and progress assumptions; no fairness theorem is used.}
+\label{tab:performance}
+\begin{tabular}{@{}P{0.14\textwidth}P{0.28\textwidth}P{0.25\textwidth}P{0.24\textwidth}@{}}
+\toprule
+Family & Discovery/scheduler demand & Execution and budget & Performance consequence \\
+\midrule
+FC & $O(n)$ visits/pass; $O(n/b)$ visits/completion for $b>0$ & Full list scan, no count cap; executor may change each pass & Retained idle nodes increase scan work; occupancy determines amortization. \\
+FC-Ban & FC scan plus eligibility tests, skips and retained-registration accounting & Skips reduce $b$; uncovered idle differs from client cooldown & Charge scan visits and exposed idle, not every caller's entire cooldown. \\
+FC-PQ heap/tree & $O((a+k)\log(n_{\max}+1))$ ordinary/amortized queue work plus buffers/timers & $a\le64$, $b\le k\le64$ per pass; queue may exceed 64 clients & Activation/pop ratios and migrating PQ metadata determine scheduling cost. \\
+FC-SL & Ordered skip-set operations, allocation and atomic metadata costs & Count budget on pops, not completions; direct ordered publication & Shared ordered metadata adds traffic; current source has the shared correctness blocker. \\
+CC / DSM & Linked-queue publication and $O(b)$ service traversal & CC cap 64, DSM source permits 65; both may stop earlier & Batch occupancy amortizes executor changes; absent links can stall progress. \\
+CC-Ban & CC protocol plus pre-enqueue wait and charge accounting & Cap 16, unlike CC's 64 & Comparative cost includes budget difference and admission effects. \\
+MCS / CLH & Constant successful queue/link operations; local/per-predecessor polling & Caller executes one operation per ownership epoch & Local polling does not remove protected-data migration or delayed linking. \\
+Spin / Ticket & Central acquisition/turn cache lines; retry or sharer traffic & Caller execution; no delegation amortization & Contended line demand and placement matter beyond successful atomic counts. \\
+Shfl / CFL & Variable queue inspection/relinking; CFL adds usage counters & Locality/policy can alter executor topology and run length & Model policy work and changed migration separately; neither is a fixed universal penalty. \\
+Mutex / U-SCL & OS waiting or slice admission plus ownership protocol & Caller execution; kernel/preemption terms may dominate & Runtime implementation and scheduling assumptions are required for latency bounds. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{FC versus FC-PQ.}
+Under a full active FC scan, $b\approx n$ makes per-operation scan work
+approximately constant. Under sparse activity, $n/b$ grows. In FC-PQ,
+$k/b$ quantifies wasted completed-node pops, and $a/b$ activation intensity;
+neither is fixed by $H$. Its scheduler ratio is approximately
+$(a+k)\log(n_{\max}+1)/b$, not unconditionally $O(N\log N)$ per pass.
+A heap's growth can copy $O(n)$ storage on a particular insertion, so an
+amortized cost is not a per-pass worst-case latency guarantee. BinaryHeap
+and BTreeSet share the ordering policy, not identical locality/allocation
+costs; the shared PQ migrates when the combiner changes.
+
+\paragraph{Queue and handoff families.}
+CC/DSM amortize linked-queue service over an executor epoch. MCS/CLH
+reduce centralized polling traffic relative to globally shared-turn polling,
+but still have enqueue hotspots and owner-to-owner protected-state movement.
+ShflLock and CFL change the topology and order of owners; the model therefore
+changes both $M_H$ and policy work. Rust/C wrappers must be treated as
+different implementations:
+the C FC cleanup/polling rules and C CC batch limit are recorded in the appendix.
+
+
+\paragraph{Admission and waiting strategies.}
+FC-Ban scans and skips published requests; CC-Ban delays the requester before
+enqueue. These paths change scan work, actual occupancy, and exposed idle
+in different ways. U-SCL's slice admission needs its C protocol, not the
+Rust wrapper alone. Mutex and blocking-Parker paths require wakeup and
+scheduler terms; they are not accurately ranked by adding a fixed LogP
+message latency to a spin-lock cost. A dedicated RCL executor, when enabled,
+changes executor migration but consumes a server resource and scan capacity.
+The checked-in dispatch limitations matter before claiming such a comparison.
+
+\subsection{Performance validation and limits}
+\label{sec:performance-validation}
+A quantitative use of the model requires independently calibrated
+transaction/topology costs and observable event counts. At minimum record
+per-pass $(a,k,b,n)$, scan visits, activation frequency, executor transitions,
+class-specific completions and service costs, and full pass/return intervals.
+Do not fit a fresh unexplained residual for every lock. The present FC-PQ
+\texttt{combiner\_time\_stat} reuses its start timestamp inside each delegate,
+so it is not a full-pass timer; the benchmark's requester-equals-executor
+flag is not a complete history of who performed combining work.
+
+Two falsifiable regime predictions follow: at matched work and topology,
+exposed per-operation migration decreases with $F/B=p/b$ until another
+bottleneck dominates; sparse FC activity tracks retained-list visits per
+completion, while FC-PQ tracks activation/pop work per completion rather than
+only $N$. Neither prediction assumes a service-fairness bound.
+
+Hold out footprints, operation mixes, and placements after calibration, then
+predict time and crossover direction. Report uncertainty and failures,
+including locality effects outside the repeated-footprint assumption.
+Platform-specific ownership events and controlled access patterns are needed
+to attribute coherence; generic LLC misses cannot identify protected-state
+versus publication/PQ traffic. No coefficients or machine measurements are
+fabricated here. The \texttt{crossover} and \texttt{batch\_frontier} artifact
+checks exercise the algebra, not hardware speed or individual starvation.

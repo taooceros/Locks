@@ -1,0 +1,289 @@
+\section{Implementation inventory and evidence}
+\label{app:inventory}
+This appendix records source deductions at implementation commit
+\texttt{56a02ab}; analysis files are additional worktree changes. It is a static
+protocol audit, not a build, concurrency test, or assertion that every path
+is correct. The inventory is determined by
+\src{src/command_parser/lock_target.rs}:110--154,183--215 and
+\src{crates/libdlock/src/dlock2.rs}:55--81, rather than older README lists.
+There are 21 DLock2 target variants, including the two PQ backends and both
+Rust/C shuffle and CFL implementations. Similar names do not establish
+identical execution, timing, or fairness contracts.
+This is a shared factual inventory, not a combined analytical model.
+Performance conclusions are in Section~\ref{sec:performance}; fairness
+conclusions are in Section~\ref{sec:fairness}, each with its own comparison.
+
+For compact source references below, \src{d2/} means
+\src{crates/libdlock/src/dlock2/}, \src{d1/} means
+\src{crates/libdlock/src/dlock/}, and \src{lib/} means
+\src{crates/libdlock/src/}. Paths beginning \src{c/} or \src{src/} are
+relative to the repository root. Line ranges refer to this baseline.
+
+\subsection{All DLock2 targets}
+\small
+\begin{longtable}{@{}P{0.14\textwidth}P{0.51\textwidth}P{0.27\textwidth}@{}}
+\toprule
+Target enum & Model instance, budget, and guarantee boundary & Source evidence \\
+\midrule
+\endfirsthead
+\toprule Target enum & Model instance, budget, and guarantee boundary & Source evidence \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+FC & Inactive nodes publish through a head CAS; each pass scans the retained list to its end. No count/time cap. Cleanups run at pass multiples of 500 and remove sufficiently old nodes. Demand is list visits per completion, with election/activation retries separate; scan order does not establish usage fairness. & \src{d2/fc/lock.rs}:17,53--138,152--190. \\
+\addlinespace
+FCBan & Full FC-style scan plus combiner-side deadline tests. A skip does not complete a request. Penalties use elapsed work intervals and a counter of retained registrations, not instantaneous pending clients; eligibility and exposed server idle must be separated. & \src{d2/fc_ban/lock.rs}:59--62,103--138,148--167,182--205. \\
+\addlinespace
+CC & One tail swap per call, input/link publication in the predecessor slot, completion/wait flags, and baton handoff. At most 64 executed delegates per batch, possibly fewer on missing links. FIFO request order is not equal usage. & \src{d2/cc/lock.rs}:23,52--86,97--121. \\
+\addlinespace
+CCBan & TSC/backoff admission before enqueue, then queue combining. Cap 16 rather than CC's 64. Charge uses work intervals times a registration counter, which increments on first thread-local initialization. Thus the CC--CCBan delta is not a pure fairness-policy ablation. & \src{d2/cc_ban/lock.rs}:50--96,145--184. \\
+\addlinespace
+DSM & Per-client two-node toggle, tail enqueue, linked FIFO service. The post-execution test \texttt{counter > H} with default 64 permits 65 callbacks, subject to earlier successor/lookahead exits. It is not global double-buffer rotation. Unpublished successors can delay handoff. & \src{d2/dsm/lock.rs}:27,69--101,112--176. \\
+\addlinespace
+FcSL & Callers insert into a shared ordered SkipSet; a pass tries at most 64 pops and checks completion before executing. Successful service deactivates the node; a new call republishes. Charges include time since the previous timestamp, not only the delegate. Newcomer mean-charge initialization differs from a cumulative baseline. & \src{d2/fc_sl/lock.rs}:72--99,102--150,161--195. \\
+\addlinespace
+FcPqBTree & Shared sequential BTreeSet under combiner ownership, with a 64-slot announcement ring and at most 64 PQ pops. Ordinary queue work scales with arrivals/pops and queue size; allocation and migrating metadata matter. Exact-min proof is conditional on fixed continuous selectability and the billed metric. & \src{d2/fc_pq/lock.rs}:109--255,275--313; \src{lib/sequential_priority_queue.rs}:39--61. \\
+\addlinespace
+FcPqBHeap & Same admission, service policy and buffers as the tree version; BinaryHeap reverses ordering to pop minimum usage. Heap growth can relocate storage. Backend locality costs cannot be inferred from the identical min-credit policy. & \src{d2/fc_pq/lock.rs}:145--255; \src{lib/sequential_priority_queue.rs}:14--37. \\
+\addlinespace
+SpinLock & Contended acquisition operates on one AtomicBool with backoff; release stores false. The wrapper executes one delegate on the caller. Count attempts separately from ownership transfers; no FIFO or usage guarantee is supplied. & \src{lib/spin_lock.rs}:30--50; \src{d2/spinlock.rs}:41--46. \\
+\addlinespace
+MCS & Tail swap, predecessor link publication, own-node polling, and successor flag handoff or empty-tail CAS. One caller-executed operation per epoch. Constant successful queue operations do not bound a delayed link publication or protected-data migration latency. & \src{d2/mcs.rs}:78--107,124--152; \src{d2/spinlock.rs}:41--46. \\
+\addlinespace
+CLH & Tail swap, predecessor-flag polling, own-node release, and predecessor-node recycling. FIFO acquisition, not equal service. Polling is distributed over nodes but enqueue is a shared hotspot. & \src{d2/clh.rs}:98--124,171--185. \\
+\addlinespace
+Ticket & Fetch-add ticket admission and shared \texttt{now\_serving} polling; release advances the turn. Logical sharer invalidation demand is distinct from message count and latency. FIFO turn order does not bound heterogeneous service spread. & \src{d2/ticket.rs}:37--53. \\
+\addlinespace
+Mutex & One std::sync::Mutex guard and one delegate. The adapter supplies no fairness policy and does not pin a standard-library/kernel waiting implementation. Its opaque costs require the actual runtime and OS, not a guessed futex constant. & \src{d2/mutex.rs}:21--24,36--44. \\
+\addlinespace
+PthreadMutex & Explicit PTHREAD\_MUTEX\_NORMAL, lock/delegate/unlock. Libc/kernel contention, wakeup and scheduling remain external parameters; the type name does not supply an admission fairness bound. & \src{d2/pthread_mutex.rs}:60--65,89--100. \\
+\addlinespace
+ShflLock & Caller execution with fast-path ownership, queue promotion and same-NUMA shuffling. Leader traversal can stop at queue boundaries or a PRNG condition; no fixed request batch. \texttt{wcount} is not a delegate count budget. & \src{d2/shfl_lock/lock.rs}:23--30,200--289,298--417. \\
+\addlinespace
+ShflLockC & RawCAqs FFI reaches the Cargo-built AQS source. Same placement-policy family, but count its own traversal, promotion and lock-byte events; one delegate per acquisition, not combining. & \src{d2/c_aqs.rs}:75--88; \src{c/shfllock/aqs.c}:122--184,220--313. \\
+\addlinespace
+CFL & Queue shuffling plus global per-core/per-NUMA runtime accounting; a node-runtime scan and variable queue traversal affect policy demand. The fairness entity is not automatically an FC-PQ requester. Executor topology changes both policy work and $M_H$. & \src{d2/cfl.rs}:354--390,397--534,554--684,721--745. \\
+\addlinespace
+CFLC & RawCCfl FFI reaches the C implementation's runtime-based queue reshaping. One delegate per hold. Global core/node counters and a 100,000-tick node-spread threshold are source policy inputs, not a per-thread $C_{\max}$ theorem. Rust CFL also uses core/node accounting; neither should be described as an ideal per-request virtual-time scheduler. & \src{d2/c_cfl.rs}:75--90; \src{c/cfl/cfl.c}:187--304,312--445. \\
+\addlinespace
+FcC & Full active-list scan; completion is the delegate-pointer release to null after the response write. Cleanup uses 50-pass aging rather than Rust FC's 500. Waiters yield/retry after 100 pause iterations. The active scan has no enforced time cap merely because the build defines a timing macro. & \src{lib/c_binding/flatcombining.rs}:75--131; \src{c/FlatCombining/original/flatcombining.c}:13--56,90--129. \\
+\addlinespace
+CcC & FIFO tail queue, predecessor wait/completed flags, at most 64 callbacks while a successor exists, and a trailing-node combiner baton. This cap is established in the C source, not transferred from the Rust name. & \src{lib/c_binding/ccsynch.rs}:78--134; \src{c/CCsynch/ccsynch.c}:39--88. \\
+\addlinespace
+USCL & One caller-held critical section with slice admission, spin/yield, futex wait/wake and banned-time sleep. The nominal 2\,ms slice uses compile-time cycle conversion. Charge is held TSC ticks times an integer weight quotient, not delegate-only time. Default lazy C weighting is not an explicit DLock2 requester-weight policy. & \src{d2/uscl.rs}:21--41; \src{c/u-scl/fairlock.h}:91--185,188--305. \\
+\end{longtable}
+\normalsize
+
+\paragraph{The actual C build.}
+\src{crates/libdlock/build.rs}:18--33 compiles
+\src{c/CCsynch/ccsynch.c},
+\src{c/FlatCombining/original/flatcombining.c},
+\src{c/u-scl/fairlock.c}, \src{c/shfllock/aqs.c}, and \src{c/cfl/cfl.c}.
+\src{c/u-scl/fairlock.c}:1 includes the header containing its implementation.
+The build defines \texttt{CYCLE\_PER\_US=2400}; this is not a measurement of
+invariant-TSC frequency. A defined \texttt{FC\_THREAD\_MAX\_CYCLE} does not
+establish a time bound in the original FC scan, which traverses to null.
+Binding headers are in \src{crates/libdlock/binding/wrapper.h}:1--5.
+The raw-lock DLock2 wrapper executes exactly one delegate between acquire and
+release (\src{d2/spinlock.rs}:41--46), so these wrappers do not gain delegation
+batching from sharing the DLock2 interface.
+
+\subsection{FC-PQ proof and measurement obligations}
+\begin{enumerate}
+\item \textbf{Admission and visibility.}
+\src{d2/fc_pq/lock/buffer.rs}:52--84 reserves by tail fetch-add, waits for
+capacity, then publishes a valid flag. The iterator snapshots at most 64
+tickets and spins on each valid flag before consuming it (:96--150).
+This supports Proposition~\ref{prop:visibility}'s FIFO service-count bound,
+not a wall-clock deadline. Counter wraparound and memory correctness are
+excluded from that abstraction.
+\item \textbf{Selectable versus merely pending.}
+\src{d2/fc_pq/lock.rs}:175--255 buffers completed nodes, removes inactive ones,
+and may reinsert reactivated nodes. A request becoming ready while absent
+from the PQ need not be selected at the same boundary as a globally visible
+minimum. Newcomer credit is the mean operation charge (:157--162).
+No uniform admission-independent initial-spread bound follows.
+\item \textbf{Attempted starvation prevention.}
+The supported heap/tree backends pop a minimum
+(\src{lib/sequential_priority_queue.rs}:14--61). Before the next queue mutation,
+the post-pop clamp at \src{d2/fc_pq/lock.rs}:193--197 cannot decrease that
+minimum. Its threshold cannot promote an entry that has not been popped.
+\item \textbf{Billing and return.}
+The outer timestamps bracket input access, delegate call and result write
+(:209--217). The benchmark's inner useful-work timer has different boundaries
+(\src{src/benchmark/dlock2/proportional_counter.rs}:81--110).
+A combiner unlocks before checking its own completion (:286--295), so an
+operation's finish and the caller's return are distinct.
+\item \textbf{Misleading timer boundary.}
+The same \texttt{begin} variable is set at pass entry and reset at every
+delegate before \texttt{combiner\_time\_stat += end-begin}
+(:129--131,209,258--263). This does not accumulate the entire pass when it
+serves requests. FC-SL similarly resets its timestamp after each service
+(\src{d2/fc_sl/lock.rs}:102--150). These statistics cannot be substituted for
+full-pass occupancy without correcting the instrumentation.
+\end{enumerate}
+These are source-derived obligations and counterexamples, not silently fixed
+production algorithms. In particular, proving an ideal policy's invariant
+does not certify an unsafe concurrent implementation.
+
+\subsection{FC-SL: concrete synchronization prerequisite}
+\label{app:fcsl-race}
+The DLock2 FC-SL newcomer path has a source-level data race. Its
+\texttt{total\_usage} and \texttt{total\_served} fields are non-atomic
+\texttt{SyncUnsafeCell<u64>} (\src{d2/fc_sl/lock.rs}:48,50).
+Every \texttt{push\_node} reads the served counter, and zero-usage initialization
+also reads total usage (:78--82). This path runs from \texttt{lock()} before
+attempting the combiner mutex (:169--174), while another thread holding that
+mutex can update both counters in \texttt{combine()} (:134--136).
+There is no common synchronization protecting these conflicting accesses.
+The per-request active/completion flags and a later SkipSet insertion do not
+protect the global counters. Interior mutability and aligned x86 loads do
+not legalize a Rust data race.
+
+This is a correctness prerequisite for the concrete FC-SL instantiation,
+not a claim about the magnitude of accounting error $E_c$. Moving initialization
+under combiner ownership or adding synchronized counters with an explicit
+snapshot-consistency contract are possible repairs, but no repair is made in
+this analysis worktree. No executed race detector result or complete
+concurrency audit is claimed; the conflicting source paths are sufficient
+to identify this missing synchronization. Other variants have not thereby
+been certified race-free.
+
+\subsection{Legacy DLock1 coverage}
+The 11 target variants are listed in
+\src{src/command_parser/lock_target.rs}:41--66 and constructed at :83--105.
+DLock1 passes callbacks over a guard; it is not the same API/charge boundary as
+DLock2's function-delegate input/result path. The table accounts for every
+legacy target, rather than transferring a DLock2 bound by matching its name.
+
+\small
+\begin{longtable}{@{}P{0.14\textwidth}P{0.51\textwidth}P{0.27\textwidth}@{}}
+\toprule
+Target & Instance and distinguishing source behavior & Evidence \\
+\midrule
+\endfirsthead
+\toprule Target & Instance and distinguishing source behavior & Evidence \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+FC & Callback-based full linked-list scan, with Parker wake/completion events; no fixed count/time cutoff in the scan. & \src{d1/fc/fclock.rs}:71--100. \\
+\addlinespace
+FCBan & Combiner-side banned-until filter over the retained list. Full scan and eligibility tests remain; do not transplant DLock2's exact penalty formula without checking its charge/update code. & \src{d1/fc_fair_ban.rs}:77--123,165--203. \\
+\addlinespace
+FCBanSlice & Despite its name and declared slice constant, the early-return slice test is commented out. The active combiner traverses to list end. Accumulated work affects an adaptive caller wait timeout, not an enforced pass deadline. & \src{d1/fc_fair_ban_slice.rs}:82--154,210--224. \\
+\addlinespace
+CC & Current combiner request is included in the \texttt{H=16} loop. Up to 16 callbacks before baton handoff; different from DLock2 CC's 64. & \src{d1/ccsynch.rs}:104--132. \\
+\addlinespace
+CCBan & Separately executes the current request, then up to 16 followers: up to 17 callbacks per episode. Adds pre-enqueue banned-time delay. Thus its total budget differs from DLock1 CC despite the same loop constant 16. & \src{d1/ccsynch_fair_ban.rs}:61--75,99--118,153--197. \\
+\addlinespace
+FCSLNaive & Usage-keyed concurrent SkipMap, not a different non-concurrent container inferred from ``Naive.'' Nominal accumulated work threshold 240,000 TSC units, checked after an item; callers retry after timed waiting without an explicit combiner baton. & \src{d1/fc_sl_naive.rs}:22--40,57--110,119--153. \\
+\addlinespace
+FCSL & Same SkipMap/threshold but adds completion tracking and wakes a remaining queued node as next combiner. Charging includes dequeue and surrounding work. Neither its post-item threshold nor calibrated cycle convention establishes preemptive execution. & \src{d1/fc_sl.rs}:22--40,57--126,134--166. \\
+\addlinespace
+RCL & Dedicated server thread scans and executes posted callbacks. Generic conversion intentionally returns None, but a separate benchmark path constructs it. Server-resource accounting is essential; this target is not absent from DLock1. & \src{src/benchmark/dlock.rs}:107--145; \src{d1/rcl/rclserver.rs}:85--98; \src{d1/rcl/rclthread.rs}:42--97. \\
+\addlinespace
+Mutex & Non-delegation OtherLocks baseline; uses the mutex callback adapter, not a parameterized Parker. Runtime/OS waiting remains a separate model component. & \src{src/command_parser/lock_target.rs}:98--102; \src{lib/dlock.rs}:55--119. \\
+\addlinespace
+SpinLock & Non-delegation OtherLocks baseline, not converted into a futex-Parker implementation by selecting the block waiter option. & \src{src/command_parser/lock_target.rs}:98--102; \src{src/benchmark/dlock.rs}:38--57. \\
+\addlinespace
+USCL & OtherLocks wrapper over the scheduler-cooperative acquisition protocol; no DLock1 Parker parameter is applied. Slice/OS costs must be modeled from its underlying implementation. & \src{src/command_parser/lock_target.rs}:98--102; \src{lib/u_scl.rs}:41--51. \\
+\end{longtable}
+\normalsize
+
+\paragraph{Parking is a model dimension.}
+For delegation targets, the default \texttt{All} waiter choice expands into
+SpinParker and BlockParker variants
+(\src{src/benchmark/dlock.rs}:38--57). SpinParker uses polling/backoff and may
+yield (\src{lib/parker/spin_parker.rs}:26--63); BlockParker adds futex wait and
+wake events (\src{lib/parker/block_parker.rs}:18--100). Equal service-credit
+bounds do not remove scheduler wakeup delays. Baselines in OtherLocks do not
+inherit this Parker selection.
+
+\paragraph{RCL changes the resource budget, not only migration.}
+\src{src/benchmark/dlock.rs}:125--145 starts the server using
+\texttt{num\_cpu-1} and supplies that reduced CPU count to client work while
+retaining the thread count. The server thread requests affinity at
+\src{d1/rcl/rclthread.rs}:42--97. Assuming successful pinning, a single-server
+run can eliminate rotating-executor migration after warmup, but still pays
+request publication/completion and scanning. Its server is a resource in
+Proposition~\ref{prop:resource}, and worker capacity is reduced; an apples-to-
+apples comparison must hold total hardware resources fixed. This is source
+reachability and requested placement, not a measurement that affinity always
+succeeds. The exported DLock2 \src{d2/rcl.rs} modules have no DLock2 enum/CLI
+variant (\src{lib/dlock2.rs}:25--26,55--81); direct use is not a dispatched
+DLock2 benchmark and is not asserted working here.
+
+\section{Reproduction and claim/evidence boundary}
+\label{app:artifact}
+The standalone manuscript is \src{analysis/logp/paper.tex}.
+\src{performance.tex} and \src{fairness.tex} contain separate analyses;
+\src{section.tex} supplies their common scope and final discussion.
+The dependency-free artifact is \src{analysis/logp/check_model.py},
+requiring Python 3.9 or newer. From the
+worktree root:
+\begin{quote}\ttfamily\small
+python3 analysis/logp/check\_model.py\par
+\quad --output .worktree/logp/verification.json
+\end{quote}
+The line break above is typographical: run it as one command. The adjacent
+README supplies copyable commands for the checker and \texttt{latexmk} build.
+Outputs are in the ignored \src{.worktree/logp/} directory. All numerical
+illustrations in the section are exact normalized model values, not machine
+measurements.
+
+\begin{center}\small
+\begin{tabular}{lrl}
+\toprule
+Check & Cases & Enumerated evidence \\
+\midrule
+\multicolumn{3}{l}{\emph{Performance}}\\
+Crossover &5,120& Rational inequality cases \\
+Batch frontier &5,832& Brute-force versus algebraic integer intervals \\
+\addlinespace
+\multicolumn{3}{l}{\emph{Fairness}}\\
+Spread &44,400& One-step normalized integer invariant transitions \\
+Accounting error &164,421& True/virtual-credit error transitions \\
+Waiting bound &22,587& Competing transitions and terminal target choices \\
+Charge bias &256& Complete equal-billed-service cycles \\
+Announcement visibility &1,485& FIFO drain/service schedules \\
+\addlinespace
+\multicolumn{3}{l}{\emph{Cross-checks}}\\
+Counterexamples &7& Source-inspired and metric witness families \\
+\bottomrule
+\end{tabular}
+\end{center}
+All eight checks passed in both standard and optimized (\texttt{python3 -O})
+executions; the generated JSON reports were byte-identical. Their case counts
+have different meanings and are not numbers of independent concurrent Rust
+tests. Parameter domains are explicit in the script. It enumerates all
+permitted choices within those domains rather than sampling random traces;
+written proofs, not the finite domains, establish the conditional unbounded
+results. The script uses explicit failures rather than optimization-removable
+\texttt{assert} statements. Its JSON includes assumptions and example witnesses.
+
+\begin{center}\small
+\begin{tabular}{@{}P{0.22\textwidth}P{0.33\textwidth}P{0.36\textwidth}@{}}
+\toprule
+Claim & Evidence supplied & What is not inferred \\
+\midrule
+Abstract resource/migration bounds & Stated machine/residency assumptions and proofs & Guaranteed physical costs from empirical averages \\
+Batch crossover and return frontier & Algebra, integer certificates, exact-rational checks & A hardware speedup or unconditional FC-PQ return deadline \\
+Fixed-cohort service bounds & Inductive proofs, error reduction, finite transitions & Fairness under arbitrary admissions, suspension or credit resets \\
+Charging bias & Exact fixed-cost derivation and complete-cycle checks & The magnitude of bias in actual benchmark data \\
+FC-PQ visibility/newcomer/clamp limits & Source paths and abstract counterexamples & Executed Rust adversarial traces or full concurrency correctness \\
+Coverage of targets & Enum/dispatch, budget and charge source audit & Successful compilation, safety, or performance of every variant \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The prescribed development environment previously failed evaluation because
+\texttt{dotenv.resolved} had no defined value. The standard-library checks
+and manuscript tooling use existing host programs instead; environment files
+and lock implementations are unchanged. No performance suite is reported.
+A full systems paper still needs independent calibration, corrected
+measurement boundaries, controlled experimental resource accounting and
+held-out prediction. These empirical requirements do not turn the proven
+conditional statements into mere proposals, and the conditional statements
+do not substitute for the empirical requirements.
