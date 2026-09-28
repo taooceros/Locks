@@ -40,6 +40,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     (2026-09-23) is superseded by the publication analysis above
 
 ## By Date
+- 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 
 ### 2026-09-26
 

@@ -64,6 +64,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 - [x] **Implement MCS lock in DLock2 framework.**
   *(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`,
   uses per-lock ThreadLocal for queue nodes.)*
+- [x] **Fix FC-SL lost-request hang + usage data races** (2026-09-28, [plan](plan/2026-09-28/fcsl-lost-request-fix.md)): 2/12 hangs before, 350/350 passes after.
 
 ---
 
