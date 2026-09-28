@@ -54,30 +54,30 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   control tripping the writer assertion, and 72 fresh-process smoke cells with
   provenance (refactored vs native within repeat noise). No formal matrix run.
 
-- [x] **Implement CFL baseline (required comparison).**
-  *(Done: `ee262bf` — CFL-MCS implemented as `DLock2Wrapper<RawCflLock>`.
-  Per-thread vLHT tracking with O(N) queue reordering during unlock.
-  Smoke test: CFL JFI=0.992 at 4T but ~23% throughput loss vs MCS,
-  while FC-PQ JFI=0.891 with only ~1.3% loss vs FC — validates the
-  "delegation breaks the fairness-performance tradeoff" thesis.)*
-
 - [x] **Implement MCS lock in DLock2 framework.**
   *(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`,
   uses per-lock ThreadLocal for queue nodes.)*
 - [x] **Fix FC-SL lost-request hang + usage data races** (2026-09-28, [plan](plan/2026-09-28/fcsl-lost-request-fix.md)): 2/12 hangs before, 350/350 passes after.
 
+- [x] **Prune withdrawn evidence (2026-09-28).** [Plan](plan/2026-09-28/evidence-prune.md);
+  removed redb external-lock, oversubscribed, stale 1-worker-tax and other low-occupancy
+  pre-fast-path, batch8, historical-demo, H3 burst/sleep, admission-accounting, 120 s and
+  CFL smoke-test results; provenance in [Withdrawn](docs/evidence/README.md#withdrawn).
+
 ---
 
 ## E0 Prerequisites (engineering, not results)
 
-- [ ] **(a) Spin-then-park waiters in FC and FC-PQ.**
-  `crates/libdlock/src/dlock2/fc/lock.rs` and
-  `crates/libdlock/src/dlock2/fc_pq/lock.rs`; reuse the
-  `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
+- [ ] **(a) Shelved, no longer a prerequisite: spin-then-park waiters in FC and FC-PQ.**
+  Parking is deferred; waiters stay spin-only and every experiment keeps
+  threads <= CPUs. Unmerged: spin-then-park change `uwqronmm` (`spin_park`
+  feature) and the E0(a') timed-park comparison `zlqxmnyz`.
 
-- [ ] **(b) Trim FC-PQ per-request tax.**
+- [~] **(b) Trim FC-PQ per-request tax.**
   Sample `__rdtscp` every k requests; bound heap arity.
-  Target: FC-PQ/FC >= 0.95 at 1 worker.
+  Target: FC-PQ/FC >= 0.95 at 1 worker. Met by `fcpq_fast_path` in
+  [PR #48](https://github.com/taooceros/Locks/pull/48) (1W FC-PQ/FC 1.12);
+  features are default-off and the default is still to be decided.
 
 - [ ] **(c) Obtain and validate the real CFL (Park/Eom, PPoPP'24).**
   Replace `cfl_local` as the CFL comparison.
@@ -110,19 +110,21 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 
 ---
 
-## E3 Database confirmation (after E0(a))
+## E3 Database confirmation (spin-only, threads <= CPUs)
 
 - [ ] **UpScaleDB single-operation integration.** Preload size (1K vs 1M
   records) as the W knob, plus perf counters.
-- [ ] **redb 1/64 write-transaction mix** as the application endpoint.
+- [ ] **redb 1/64 write-transaction mix** as the application endpoint,
+  regenerated with the internal-lock harness ([guide](integration/redb/README.md)).
 - [ ] **Run both via [`integration/README.md`](integration/README.md) workflows.**
 
 ---
 
 ## E4 SCL-fidelity (only if E1-E3 hold)
 
-- [ ] **Disk-backed UpScaleDB with fsync.** 4 find + 4 insert on 4 CPUs,
-  120 s, lock-opportunity accounting.
+- [ ] **Disk-backed UpScaleDB with fsync.** 4 find + 4 insert on 8 CPUs
+  (threads <= CPUs), 120 s, lock-opportunity accounting. The original SCL
+  setup (4 + 4 on 4 CPUs) oversubscribed.
 
 ---
 

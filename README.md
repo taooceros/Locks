@@ -39,8 +39,8 @@ to test that thesis.
   Jain stays >= 0.95 under 1:8 request cost heterogeneity.
 - **H4** The crossover D\* where delegation overtakes the best switching lock
   shrinks as fairness granularity tightens.
-- **H5** In a real DB (UpScaleDB, redb) the same ordering holds once waiters
-  park instead of spin.
+- **H5** In a real DB, the same ordering holds in UpScaleDB and redb with
+  threads <= CPUs (waiters spin only).
 
 ## What existing evidence says
 
@@ -52,12 +52,15 @@ other branches.
 | Supports (work-conservation) | U-SCL H2 reservation wait ~2.18 ms with a waiting requester vs FC-PQ ~0.6 us. |
 | Supports (work-conservation) | U-SCL backlog ~460K at 1.1x load. |
 | Supports | Hotspot, 32 workers: FC-PQ/MCS 0.743 uniform -> 1.135 hot90. |
-| Supports | redb 1/64 write mix: FC -> FC-PQ service Jain 0.891 -> 0.992 at 0.832x total records; MCS Jain 0.907. |
 | Supports | P8 fixed-work: FC 1.73x native. |
+| Supports (E0(b)) | In the E0(b) ablation ([PR #48](https://github.com/taooceros/Locks/pull/48), open; default-off feature), `fcpq_fast_path` removes the 1-worker FC-PQ tax: 64.7 ns -> -8.1 ns per request vs FC; 1W FC-PQ/FC 0.53 -> 1.12. |
+| Does not yet support | Saturated FC-PQ still costs more per op than FC: E0(b) measures 32W FC-PQ/FC 0.65 (cs 1) / 0.88 (cs 1000), and the fast path leaves saturated per-op cost within 2-5 ns ([PR #48](https://github.com/taooceros/Locks/pull/48)); P8 FC-PQ 13% below FC at identical CPU-s ([finding 003](docs/findings/003-eight-core-eight-worker-upscaledb.md)). |
 | Does not yet support | No cache-migration counters anywhere; D_migrate is inferred, not measured. |
 | Does not yet support | CFL-local (`cfl_local`, the Rust port) is an unverified proxy for CFL and matched/beat FC at P8. |
-| Does not yet support | DLock2 waiters spin only -> 4-CPU/8-worker collapse: 0.494x and 4x CPU vs U-SCL ([finding 002](docs/findings/002-dlock2-spin-wait-oversubscription-collapse.md)). |
-| Does not yet support | FC-PQ constant tax: +28% at 1 worker, -13% vs FC at P8 with identical CPU ([finding 002](docs/findings/002-dlock2-spin-wait-oversubscription-collapse.md), [finding 003](docs/findings/003-eight-core-eight-worker-upscaledb.md)). |
+
+DLock2 waiters spin only, so every experiment keeps threads <= CPUs; with more
+threads than CPUs the spinners starve a preempted combiner and throughput
+collapses ([finding 002](docs/findings/002-dlock2-spin-wait-oversubscription-collapse.md)).
 
 ## Plan
 
@@ -65,11 +68,17 @@ Ordered experiments. E0 is engineering, not results. E1 is the core figure.
 
 ### E0 Prerequisites
 
-- (a) Spin-then-park waiters in `crates/libdlock/src/dlock2/fc/lock.rs` and
-  `crates/libdlock/src/dlock2/fc_pq/lock.rs`, reusing the
-  `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
+- (a) Shelved, no longer a prerequisite: spin-then-park waiters in
+  `crates/libdlock/src/dlock2/fc/lock.rs` and
+  `crates/libdlock/src/dlock2/fc_pq/lock.rs`. Parking is deferred; waiters
+  stay spin-only and every experiment keeps threads <= CPUs. Unmerged:
+  spin-then-park change `uwqronmm` (`spin_park` feature) and the E0(a')
+  timed-park comparison `zlqxmnyz`.
 - (b) Trim the FC-PQ per-request tax: sample `__rdtscp` every k requests,
-  bound heap arity. Target: FC-PQ/FC >= 0.95 at 1 worker.
+  bound heap arity. Target: FC-PQ/FC >= 0.95 at 1 worker. Status: met by
+  `fcpq_fast_path` in [PR #48](https://github.com/taooceros/Locks/pull/48)
+  (1W FC-PQ/FC 1.12); features are default-off and the default is still to
+  be decided.
 - (c) Obtain and validate the real CFL (Park/Eom, PPoPP'24) instead of
   `cfl_local`. Neither the `cfl` target (Rust port) nor `cflc` (local
   fairnumas adaptation in `c/cfl/`) is a verified paper implementation.
@@ -99,17 +108,19 @@ Ordered experiments. E0 is engineering, not results. E1 is the core figure.
 - Plot throughput vs achieved maximum usage gap.
 - Prediction: FC-PQ sits off the switching locks' trade-off curve.
 
-### E3 Database confirmation (after E0(a))
+### E3 Database confirmation (spin-only, threads <= CPUs)
 
 - UpScaleDB single-operation integration with preload size (1K vs 1M records)
   as the W knob, plus perf counters.
-- redb 1/64 write-transaction mix as the application endpoint.
+- redb 1/64 write-transaction mix as the application endpoint, regenerated
+  with the internal-lock harness ([`integration/redb/README.md`](integration/redb/README.md)).
 - Both via the [`integration/README.md`](integration/README.md) workflows.
 
 ### E4 SCL-fidelity (only if E1-E3 hold)
 
-- Disk-backed UpScaleDB with fsync, 4 find + 4 insert on 4 CPUs, 120 s,
-  lock-opportunity accounting.
+- Disk-backed UpScaleDB with fsync, 4 find + 4 insert on 8 CPUs
+  (threads <= CPUs), 120 s, lock-opportunity accounting. The original SCL
+  setup (4 + 4 on 4 CPUs) oversubscribed.
 
 ## Success criteria
 

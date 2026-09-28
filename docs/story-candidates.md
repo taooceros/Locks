@@ -13,20 +13,21 @@ problems; existing locks conflate them. Delegation lets the scheduler see the
 whole waiting set and charge each requester its actual service cost, so
 service can be redistributed deliberately, at a visible and priced cost.
 
-**Lead figure.** redb 1/64 write mix: FC -> FC-PQ service Jain 0.891 -> 0.992,
-small-transaction share 32.6% -> 45.4%, small-transaction throughput 1.50x,
-total records 0.832x, small-transaction p99 bucket up. Turn-fair MCS stays at
-Jain 0.907.
+**Lead figure.** redb 1/64 write mix (E3, not yet run with the internal-lock
+harness): FC vs FC-PQ vs turn-fair MCS, service Jain and small-transaction
+share against total records/s and small-transaction p99.
 
-**Arc.** Turn fairness is not service fairness (MCS numbers) -> U-SCL fixes
-service fairness by banning (H2 reservation wait, multi-table collapse) ->
-delegation + usage-ordered selection -> the price (records/s, CPU, p99) ->
-negative controls where there is no imbalance to fix (pure read 0.397x,
-split-32 losses) -> open failure (UpScaleDB batch8, Jain 0.628).
+**Arc.** Turn fairness is not service fairness (MCS in the redb 1/64 mix) ->
+U-SCL fixes service fairness by banning (H2 reservation wait, multi-table
+collapse) -> delegation + usage-ordered selection -> the price (records/s,
+CPU, p99) -> negative controls where there is no imbalance to fix (pure read
+0.397x, split-32 losses).
 
-**Strength.** Every number already exists; honest about cost.
+**Strength.** Honest about cost.
 **Weakness.** The headline (usage-fair scheduling redistributes service) is
-SCL's and CFL's contribution; the mechanism's advantage is not explained.
+SCL's and CFL's contribution; the mechanism's advantage is not explained. The
+lead figure and the MCS step of the arc wait on E3 (the external-lock redb
+numbers are withdrawn, see `docs/evidence/README.md`).
 
 ## B. Two sequences: fairness by switching threads moves data
 
