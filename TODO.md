@@ -130,6 +130,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
     pin/record CPU frequency, then rerun.
   - [x] perf-02 clock normalisation ([plan](plan/2026-09-28/redb-perf-02-clock.md)): ref_tsc + client clock; at 2.2 GHz FC-PQ ≈ FC ≈ U-SCL, MCS 0.78-0.84×; counters cost ≈ 0; formal matrix rerun with clock still open.
   - [x] Fixed 3.0 GHz rerun ([plan](plan/2026-09-28/redb-perf-02-clock.md)): power setups + preflight, sampler in timed cells; 168 perf + 360 formal cells, 0 failed; FC-PQ/U-SCL at 4-8 clients 0.92-1.27× (S0 raw 2.4-3.5×); U-SCL body 120-200 → 31-51 µs. S2 (C6 off) open.
+  - [x] Report organising the redb and surviving UpScaleDB evidence ([docs/reports/2026-09-29-delegation-in-databases.md](docs/reports/2026-09-29-delegation-in-databases.md)): S1 primary (FC-PQ service Jain 0.94-1.00, 1.17-1.34× MCS tx/s, parity with U-SCL); UpScaleDB supports FC-PQ ≻ FC fairness only; NCS sweep and UpScaleDB rerun under the redb methodology listed as next tests.
 - [ ] **Run both via [`integration/README.md`](integration/README.md) workflows.**
 
 ---
