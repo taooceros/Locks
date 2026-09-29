@@ -124,6 +124,18 @@ pub fn proportional_counter<'a>(
                 non_cs_loop.clone(),
                 lock.clone(),
             );
+
+            // Hits and acquisitions both include warmup.
+            #[cfg(feature = "fcpq_fast_path_stat")]
+            if let libdlock::dlock2::DLock2Impl::FC_PQ_BHeap(l) = &*lock {
+                let all: u64 = records.iter().map(|r| r.all_acquire).sum();
+                println!(
+                    "Fast path hits: {} acquisitions: {} (trial {})",
+                    l.fast_path_hits(),
+                    all,
+                    bencher.current_trial()
+                );
+            }
             finish_benchmark(&bencher.output_path, file_name, &lock.to_string(), records);
         }
     }

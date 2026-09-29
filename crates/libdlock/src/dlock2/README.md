@@ -74,6 +74,27 @@ on the same lock and unwinding out of a delegate are unsupported.
 entries; this alone does not bound request latency or realized service shares.
 Publication, eligibility, combining-pass budgets and callback duration also matter.
 
+**Low-contention fast path** (E0(b) ablation; cargo features of `libdlock`,
+all default-off; [plan](../../../../plan/2026-09-27/e0b-fcpq-fast-path.md)):
+
+| Feature | Effect |
+|---------|--------|
+| `fcpq_cached_tid` | The ring tie-breaker (thread id) is cached in the node at creation instead of `current().id()` per enrollment (D6) |
+| `fcpq_fast_path` | `lock()` tries the combiner lock before publishing its request. If the caller's node is inactive and both the PQ and the admission ring are empty, the caller runs its own request and charges usage, `total_usage` and `total_served` with the same timestamps as `combine()` (D1, D2, D4) |
+| `fcpq_fast_path_notime` | The same bypass without timestamps or usage charge; isolates timestamp cost and is fairness-incorrect by design. Mutually exclusive with `fcpq_fast_path` |
+| `fcpq_fast_path_stat` | Per-thread hit counter: `FCPQ::get_fast_path_hits()` (calling thread) and `FCPQ::fast_path_hits()` (sum, exact once callers have joined) |
+
+The gate runs once per request, before the request is written to the node
+(payload, `complete=false`). A combiner that still holds the node from an
+earlier request would serve a published request, so a later bypass could run
+it twice. A holder that finds other work pending publishes and combines if its
+node is still enrolled. Otherwise it releases the lock before enrolling,
+because the ring may be full and only a lock holder drains it. Arrival means
+ring publication (`tail.fetch_add`), not `active=true` (D5). Before
+publication a newcomer is invisible, and any number of fast-path CSs may run.
+Once its increment is visible, at most one fast-path CS, already past its
+gate, finishes ahead of it.
+
 ## Common Structure
 
 Each delegation lock module typically contains:

@@ -12,6 +12,16 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
   - Scope: service-fair delegation thesis, claims H1-H5, experiments E0-E4,
     success and kill criteria; checklist in [TODO.md](../TODO.md)
 
+### E0(b) FC-PQ low-contention fast path (2026-09-27)
+
+- [FC-PQ fast path](./2026-09-27/e0b-fcpq-fast-path.md)
+  - Status: approved as an ablation (workspace `e0b-fastpath`); implemented
+    behind default-off `libdlock` features `fcpq_cached_tid`,
+    `fcpq_fast_path`, `fcpq_fast_path_notime` and `fcpq_fast_path_stat`, with
+    stress and enrollment-window tests; benchmarks pending
+  - Scope: FC-PQ only (`crates/libdlock/src/dlock2/fc_pq/`); target
+    FC-PQ/FC >= 0.95 at 1 worker
+
 ### Theoretical analysis (formal version of the thesis)
 
 - [Publication Analysis Plan](./2026-09-23/logp-publication-analysis.md)
@@ -41,6 +51,10 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## By Date
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
+
+### 2026-09-27
+
+- [E0(b) FC-PQ fast path](./2026-09-27/e0b-fcpq-fast-path.md)
 
 ### 2026-09-26
 
