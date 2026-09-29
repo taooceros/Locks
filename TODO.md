@@ -54,6 +54,18 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   control tripping the writer assertion, and 72 fresh-process smoke cells with
   provenance (refactored vs native within repeat noise). No formal matrix run.
 
+- [x] **redb: closure-style delegated write API.**
+  [Plan](plan/2026-09-29/redb-closure-write-api.md), [guide](integration/redb/README.md).
+  Patch 0002 now runs `FnOnce(&mut WriteTransaction) -> Result<R, E>` (commit on Ok,
+  abort on Err; closure panics aborted explicitly and re-raised on the requester);
+  fixed insert is a harness closure; new `transfer` smoke cohort. Verified: 94/94 gate
+  cases (new: closure Err/panic for all six variants, transfer stress with conserved
+  snapshots + ID-order replay, read-your-own-writes, reopen `check_integrity`), 165
+  upstream redb tests, 108 smoke cells (0 failures). Parity vs the fixed-body build:
+  equal under fat LTO; default builds 2-4% lower on patched variants from crate-boundary
+  codegen (native unchanged). No formal matrix run. redb-internal rerun harness folded
+  (uscl, service time, sweep, perf, power setups).
+
 - [x] **Implement CFL baseline (required comparison).**
   *(Done: `ee262bf` — CFL-MCS implemented as `DLock2Wrapper<RawCflLock>`.
   Per-thread vLHT tracking with O(N) queue reordering during unlock.
@@ -75,9 +87,16 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   `crates/libdlock/src/dlock2/fc_pq/lock.rs`; reuse the
   `crates/libdlock/src/parker/block_parker.rs` design; feature-flagged.
 
-- [ ] **(b) Trim FC-PQ per-request tax.**
+- [~] **(b) Trim FC-PQ per-request tax.**
   Sample `__rdtscp` every k requests; bound heap arity.
   Target: FC-PQ/FC >= 0.95 at 1 worker.
+  *(In progress: [plan](plan/2026-09-27/e0b-fcpq-fast-path.md). The
+  uncontended fast path (try-lock first, bypass the PQ when nothing else is
+  pending) and the cached thread id are implemented as default-off `libdlock`
+  features `fcpq_fast_path`, `fcpq_fast_path_notime`, `fcpq_cached_tid` and
+  `fcpq_fast_path_stat`, with stress and enrollment-window tests. Benchmark
+  ablation pending; k-sampling and heap arity are not started.)*
+  - [x] FC-PQ thread-churn stress test (thread_local slot reuse, two instances; 2026-09-28, see plan).
 
 - [ ] **(c) Obtain and validate the real CFL (Park/Eom, PPoPP'24).**
   Replace `cfl_local` as the CFL comparison.
@@ -115,6 +134,15 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 - [ ] **UpScaleDB single-operation integration.** Preload size (1K vs 1M
   records) as the W knob, plus perf counters.
 - [ ] **redb 1/64 write-transaction mix** as the application endpoint.
+  - [x] Harness ready for the rerun ([plan](plan/2026-09-28/redb-internal-rerun.md)):
+    service-time Jain, `None` primary, 1/2/4/8 clients, `uscl`, FC-PQ fast path;
+    gate 64/64, 165 upstream tests, 336-cell smoke. Follow-up done: 168-cell
+    perf cohort (MCS ≈100 HITM loads/tx from 2 clients, FC-PQ flat 10-20) and the
+    504-cell formal matrix (FC-PQ service_jain 0.96-1.00 in half1_half64). Open:
+    pin/record CPU frequency, then rerun.
+  - [x] perf-02 clock normalisation ([plan](plan/2026-09-28/redb-perf-02-clock.md)): ref_tsc + client clock; at 2.2 GHz FC-PQ ≈ FC ≈ U-SCL, MCS 0.78-0.84×; counters cost ≈ 0; formal matrix rerun with clock still open.
+  - [x] Fixed 3.0 GHz rerun ([plan](plan/2026-09-28/redb-perf-02-clock.md)): power setups + preflight, sampler in timed cells; 168 perf + 360 formal cells, 0 failed; FC-PQ/U-SCL at 4-8 clients 0.92-1.27× (S0 raw 2.4-3.5×); U-SCL body 120-200 → 31-51 µs. S2 (C6 off) open.
+  - [x] Report organising the redb and surviving UpScaleDB evidence ([docs/reports/2026-09-29-delegation-in-databases.md](docs/reports/2026-09-29-delegation-in-databases.md)): S1 primary (FC-PQ service Jain 0.94-1.00, 1.17-1.34× MCS tx/s, parity with U-SCL); UpScaleDB supports FC-PQ ≻ FC fairness only; NCS sweep and UpScaleDB rerun under the redb methodology listed as next tests.
 - [ ] **Run both via [`integration/README.md`](integration/README.md) workflows.**
 
 ---

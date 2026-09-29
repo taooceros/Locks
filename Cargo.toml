@@ -10,6 +10,11 @@ edition = "2021"
 [features]
 default = ["combiner_stat"]
 combiner_stat = []
+# E0(b) FC-PQ fast-path ablation (docs/evidence/e0b-fast-path-ablation).
+fcpq_cached_tid = ["libdlock/fcpq_cached_tid"]
+fcpq_fast_path = ["libdlock/fcpq_fast_path"]
+fcpq_fast_path_notime = ["libdlock/fcpq_fast_path_notime"]
+fcpq_fast_path_stat = ["libdlock/fcpq_fast_path_stat"]
 
 
 [dependencies]

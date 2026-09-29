@@ -1,5 +1,5 @@
 diff --git a/src/db.rs b/src/db.rs
-index 276a16a..c361da1 100644
+index 276a16a..9f06ac7 100644
 --- a/src/db.rs
 +++ b/src/db.rs
 @@ -236,6 +236,9 @@ pub(crate) struct TransactionGuard {
@@ -71,7 +71,7 @@ index 276a16a..c361da1 100644
 +    // Locks integration: begin_write for the delegated path. Identical to
 +    // begin_write except that admission is the external delegation lock: the
 +    // tracker's Mutex/Condvar writer lock is not taken. Only reachable from the
-+    // private fixed-insert body while delegated-writer mode is active.
++    // private closure write body while delegated-writer mode is active.
 +    pub(crate) fn begin_delegated_write(&self) -> Result<WriteTransaction, TransactionError> {
 +        // Fail early if there has been an I/O error -- nothing can be committed in that case
 +        self.mem.check_io_errors()?;
@@ -231,14 +231,14 @@ index 8c0841b..6375c13 100644
          let mut state = self.state.lock().unwrap();
          let ids = mem::take(&mut state.pending_non_durable_commits);
 diff --git a/src/transactions.rs b/src/transactions.rs
-index 1150a63..3ea7c3f 100644
+index 1150a63..1532a18 100644
 --- a/src/transactions.rs
 +++ b/src/transactions.rs
 @@ -812,6 +812,12 @@ impl WriteTransaction {
          self.shrink_policy = shrink_policy;
      }
  
-+    // Locks integration: lets the private fixed-insert body report the
++    // Locks integration: lets the private closure write body report the
 +    // allocated ID so the correctness gate can check transaction-ID order.
 +    pub(crate) fn dlock_transaction_id(&self) -> u64 {
 +        self.transaction_id.raw_id()
