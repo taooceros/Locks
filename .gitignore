@@ -46,3 +46,8 @@ crates/*/Cargo.lock
 
 # regenerated perf output (profile.nu / experiment.nu)
 profiles/
+
+# coro_delegation study: `bin/` above would hide the cargo bin target, and
+# `*.zst` would hide the small (<0.5 MB) superseded-result archives cited in FINDINGS.md
+!crates/coro_delegation/src/bin/
+!crates/coro_delegation/results/*.tar.zst

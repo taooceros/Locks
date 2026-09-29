@@ -1,9 +1,19 @@
 # Combiner-thread fairness of delegation locks in a coroutine executor
 
-Workspace: `/home/hongtao/Locks-coro` (jj workspace `coro` of the Locks repo).
+Exploratory side study, separate from the thesis plan in the root `README.md`.
+Plan: [`plan/2026-09-28/coro-delegation-study.md`](../../plan/2026-09-28/coro-delegation-study.md).
 Crate: `crates/coro_delegation`. Build: `cargo build --release -p coro_delegation`.
-Results: `crates/coro_delegation/results/` (JSON, one file per run, git-tracked).
+Results: `crates/coro_delegation/results/` (JSON, one file per run).
 Findings: `crates/coro_delegation/FINDINGS.md` (dated entries, newest first).
+
+Results policy (a deliberate exception to the repo-wide rule that raw results
+live under ignored `.worktree/`): the final result JSONs (950 files, 19 MB
+apparent size) stay Git-tracked because they are the evidence behind every
+number in `FINDINGS.md`, and `scripts/summarize.py` /
+`scripts/summarize_tokio.py` regenerate its tables from them. Superseded runs
+are not kept as loose JSON; each superseded set is one small `results/*.tar.zst`
+archive (0.25–0.40 MB each) cited from `FINDINGS.md`. New exploratory runs
+should go to `.worktree/`; only a set that backs a recorded finding is copied in.
 
 ## Question
 
