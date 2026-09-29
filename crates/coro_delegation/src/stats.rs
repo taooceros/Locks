@@ -253,6 +253,37 @@ pub fn take_combining(worker: usize) -> u64 {
     }
 }
 
+static FOREIGN_CS: [CachePadded<AtomicU64>; MAX_WORKERS] =
+    [const { CachePadded::new(AtomicU64::new(0)) }; MAX_WORKERS];
+
+/// Burden under the uniform definition of REVIEW-2026-09-30 I8, used by
+/// `ces` and `co_mutex`: critical-section cycles that `worker` executed for
+/// a request whose *home* is another worker. A request's home is the worker
+/// that was polling the task when it asked for the lock (the executor's
+/// `Placement::Home` target at that moment); an uncontended acquisition is
+/// therefore never foreign, and a waiter the lock resumes on the releaser's
+/// worker is foreign iff it queued elsewhere. Cycles are the lock's own
+/// charge window (`ces`: the closure; `co_mutex`: ownership observed by
+/// `lock()` to `unlock()`), attributed to the worker where the critical
+/// section started. Queue administration is not included (it is in `o`).
+/// Same gating and ordering as [`record_combining`].
+#[inline]
+pub fn record_foreign_cs(worker: usize, cycles: u64) {
+    if worker < MAX_WORKERS && recording() {
+        FOREIGN_CS[worker].fetch_add(cycles, Ordering::Relaxed);
+    }
+}
+
+/// Read and reset the foreign critical-section counter of `worker`
+/// (harness use: reset before a run, read after the executor shut down).
+pub fn take_foreign_cs(worker: usize) -> u64 {
+    if worker < MAX_WORKERS {
+        FOREIGN_CS[worker].swap(0, Ordering::Relaxed)
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,12 +7,14 @@
 //! coro-bench --lock ces --ces-chain-bound 64 --wake-placement home ...
 //! coro-bench --lock fcpq --pass-limit 8 --rotate-combiner --wake-placement home ...
 //! coro-bench --lock dispatch-pq --starvation-clamp 8 --wake-placement home ...
+//! coro-bench --lock cfl --cfl-prewake off --starvation-clamp 64 ...
+//! coro-bench --lock co-pq --co-step-aside remote --ces-chain-bound 64 --wake-placement home ...
 //! coro-bench --sanity
 //! ```
 //!
 //! Variant label written to the JSON (`lock` field): base id plus one suffix
 //! per non-default knob, e.g. `ces-k64-home`, `fcpq-h8-rotate`, `fc-remote`,
-//! `dispatch-home`, `fc-noyield`, `dispatch-pq-home-c8`.
+//! `dispatch-home`, `fc-noyield`, `dispatch-pq-home-c8`, `cfl-nopre-c64`.
 
 use std::path::PathBuf;
 
@@ -22,11 +24,15 @@ use coro_delegation::executor::Placement;
 use coro_delegation::lock::DelegationLock;
 use coro_delegation::locks::actor::{Actor, ActorOptions};
 use coro_delegation::locks::ces::{Ces, CesOptions};
+use coro_delegation::locks::cfl::{self, Cfl, CflOptions, CflStats, Scan, Shuffle};
+use coro_delegation::locks::co_mutex::{
+    CoFifo, CoOptions, CoPq, StepAside, DEFAULT_CHAIN_BOUND, DEFAULT_STARVATION_CLAMP,
+};
 use coro_delegation::locks::dispatch::Dispatch;
 use coro_delegation::locks::dispatch_pq::{self, DispatchPq, DispatchPqOptions, HandoffStats};
 use coro_delegation::locks::fc::{Fc, FcOptions, WakePlacement};
 use coro_delegation::locks::fc_pq::{self, FcPq, FcPqOptions, NewcomerInit, WaitStats};
-use coro_delegation::workload::{self, Config, Report, Shared};
+use coro_delegation::workload::{self, Config, ParallelMode, Report, Shared};
 
 const LOCKS: &[&str] = &[
     "dispatch",
@@ -36,6 +42,9 @@ const LOCKS: &[&str] = &[
     "actor",
     "actor-inline",
     "dispatch-pq",
+    "cfl",
+    "co-fifo",
+    "co-pq",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -99,13 +108,64 @@ impl NewcomerInitArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CflShuffleArg {
+    Usage,
+    Off,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum OnOffArg {
+    On,
+    Off,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CflScanArg {
+    Full,
+    Overlap,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum ParallelModeArg {
+    Spin,
+    Yield,
+}
+
+impl ParallelModeArg {
+    fn mode(self) -> ParallelMode {
+        match self {
+            ParallelModeArg::Spin => ParallelMode::Spin,
+            ParallelModeArg::Yield => ParallelMode::Yield,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum StepAsideArg {
+    Remote,
+    Home,
+    None,
+}
+
+impl StepAsideArg {
+    fn co(self) -> StepAside {
+        match self {
+            StepAsideArg::Remote => StepAside::Remote,
+            StepAsideArg::Home => StepAside::Home,
+            StepAsideArg::None => StepAside::None,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "coro-bench",
     about = "Delegation locks on a coroutine executor"
 )]
 struct Cli {
-    /// Lock variant: dispatch | ces | fc | fcpq | actor | actor-inline | dispatch-pq
+    /// Lock variant: dispatch | ces | fc | fcpq | actor | actor-inline | dispatch-pq | cfl |
+    /// co-fifo | co-pq
     #[arg(long, default_value = "dispatch")]
     lock: String,
     /// Executor workers (each pinned to its own physical core)
@@ -143,6 +203,11 @@ struct Cli {
     /// Executor balancing-steal interval in polls (0 = steal only when idle)
     #[arg(long, default_value_t = coro_delegation::executor::DEFAULT_BALANCE_INTERVAL)]
     balance_interval: u32,
+    /// Client parallel work after each op, all locks: spin (same poll,
+    /// original) | yield (`yield_now().await`, then spin). Recorded as
+    /// `config.parallel_mode`, not in the label
+    #[arg(long, value_enum, default_value_t = ParallelModeArg::Spin)]
+    parallel_mode: ParallelModeArg,
     /// Output JSON path (stdout if omitted)
     #[arg(long)]
     out: Option<PathBuf>,
@@ -152,14 +217,17 @@ struct Cli {
 
     // --- placement (all locks) -------------------------------------------
     /// Placement of lock-issued wakes: dispatch / dispatch-pq handoff, CES
-    /// chain-break handoff, every fc/fcpq wake (served waiters, next
-    /// combiner, self-yield), actor client completions (`default` keeps the
-    /// variant's own: actor default, actor-inline remote)
+    /// and co-fifo / co-pq chain-break handoff, every fc/fcpq wake (served
+    /// waiters, next combiner, self-yield), actor client completions
+    /// (`default` keeps the variant's own: actor default, actor-inline
+    /// remote)
     #[arg(long, value_enum, default_value_t = WakePlacementArg::Default)]
     wake_placement: WakePlacementArg,
 
     // --- ces -------------------------------------------------------------
-    /// ces: break the inline chain after this many handoffs (label -k<K>)
+    /// ces: break the inline chain after this many handoffs (label -k<K>).
+    /// co-fifo / co-pq: the same, default 64, 0 = unbounded (label always
+    /// -k<K>)
     #[arg(long)]
     ces_chain_bound: Option<u32>,
     /// ces: break the inline chain after this many cycles (label -t<T>)
@@ -188,7 +256,9 @@ struct Cli {
     no_combiner_yield: bool,
     /// fcpq: passes a queued request may wait before its key is clamped to
     /// the heap minimum, 0 = never (default 8; label -c<N>). dispatch-pq:
-    /// the same in handoffs (default 16)
+    /// the same in handoffs (default 16). cfl: handoffs a waiter may watch
+    /// go to others before it gets headship regardless of usage (default
+    /// 256). co-pq: in handoffs, default 256 (label always -c<N>)
     #[arg(long)]
     starvation_clamp: Option<u64>,
     /// fcpq / dispatch-pq: admission usage of a client's first queued
@@ -202,11 +272,39 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     fcpq_wait_stats: bool,
 
-    // --- dispatch-pq -----------------------------------------------------
-    /// dispatch-pq: record acquisition paths and the handoff cycle breakdown,
-    /// written as `handoff` in the JSON (instrumentation, no label suffix)
+    // --- dispatch-pq / cfl -----------------------------------------------
+    /// dispatch-pq / cfl: record acquisition paths and the handoff cycle
+    /// breakdown, written as `handoff` (dispatch-pq) / `cfl` (cfl) in the
+    /// JSON (instrumentation, no label suffix)
     #[arg(long, default_value_t = false)]
     handoff_stats: bool,
+
+    // --- cfl ---------------------------------------------------------------
+    /// cfl: successor choice by the queue head: usage (minimum charged
+    /// cycles among the waiters behind it, default) or off (MCS FIFO; label
+    /// -noshfl)
+    #[arg(long, value_enum, default_value_t = CflShuffleArg::Usage)]
+    cfl_shuffle: CflShuffleArg,
+    /// cfl: wake a node when it becomes queue head (on, default) or only
+    /// after the owner's release (off; label -nopre)
+    #[arg(long, value_enum, default_value_t = OnOffArg::On)]
+    cfl_prewake: OnOffArg,
+    /// cfl: head scan policy: full (finish the scan before each acquisition
+    /// attempt, default) or overlap (scan only while the lock is held, CFL
+    /// rule; label -ovl)
+    #[arg(long, value_enum, default_value_t = CflScanArg::Full)]
+    cfl_scan: CflScanArg,
+    /// cfl: head spin budget per poll before parking, TSC cycles (default
+    /// 8000; label -spin<N>)
+    #[arg(long)]
+    head_spin_cycles: Option<u64>,
+
+    // --- co-fifo / co-pq -------------------------------------------------
+    /// co-fifo / co-pq: where `unlock().await` puts the releaser after
+    /// waking the grantee inline: remote (injector), home (this worker's
+    /// inbox), none (no suspension, as a synchronous drop); label -s<mode>
+    #[arg(long, value_enum, default_value_t = StepAsideArg::Remote)]
+    co_step_aside: StepAsideArg,
 }
 
 impl Cli {
@@ -227,6 +325,7 @@ impl Cli {
             seed: self.seed,
             unique_keys: false,
             balance_interval: self.balance_interval,
+            parallel_mode: self.parallel_mode.mode(),
         }
     }
 
@@ -355,6 +454,54 @@ impl Cli {
         label
     }
 
+    /// cfl's own wake placement is `home`; `--wake-placement default` keeps
+    /// it (as for actor).
+    fn cfl_options(&self) -> CflOptions {
+        let d = CflOptions::default();
+        CflOptions {
+            shuffle: match self.cfl_shuffle {
+                CflShuffleArg::Usage => Shuffle::Usage,
+                CflShuffleArg::Off => Shuffle::Off,
+            },
+            scan: match self.cfl_scan {
+                CflScanArg::Full => Scan::Full,
+                CflScanArg::Overlap => Scan::Overlap,
+            },
+            prewake: self.cfl_prewake == OnOffArg::On,
+            starvation_clamp: self.starvation_clamp.unwrap_or(d.starvation_clamp),
+            head_spin_cycles: self.head_spin_cycles.unwrap_or(d.head_spin_cycles),
+            wake_placement: match self.wake_placement {
+                WakePlacementArg::Default => d.wake_placement,
+                p => p.fc(),
+            },
+            record_handoffs: self.handoff_stats,
+        }
+    }
+
+    /// `cfl[-noshfl][-nopre][-ovl][-remote][-c<N>][-spin<N>]`.
+    fn cfl_label(&self) -> String {
+        let mut label = String::from("cfl");
+        if self.cfl_shuffle == CflShuffleArg::Off {
+            label.push_str("-noshfl");
+        }
+        if self.cfl_prewake == OnOffArg::Off {
+            label.push_str("-nopre");
+        }
+        if self.cfl_scan == CflScanArg::Overlap {
+            label.push_str("-ovl");
+        }
+        if self.cfl_options().wake_placement != CflOptions::default().wake_placement {
+            label.push_str(self.wake_placement.suffix());
+        }
+        if let Some(c) = self.starvation_clamp {
+            label.push_str(&format!("-c{c}"));
+        }
+        if let Some(s) = self.head_spin_cycles {
+            label.push_str(&format!("-spin{s}"));
+        }
+        label
+    }
+
     /// `variant` (`ActorOptions::plain` / `inline`) with the CLI's
     /// non-default knobs applied.
     fn actor_options(&self, variant: ActorOptions) -> ActorOptions {
@@ -378,6 +525,45 @@ impl Cli {
         }
         label
     }
+
+    fn co_options(&self) -> CoOptions {
+        let d = CoOptions::default();
+        CoOptions {
+            step_aside: self.co_step_aside.co(),
+            chain_bound: match self.ces_chain_bound {
+                None => Some(DEFAULT_CHAIN_BOUND),
+                Some(0) => None,
+                k => k,
+            },
+            break_placement: self.wake_placement.executor(),
+            queue: FcPqOptions {
+                starvation_clamp: self.starvation_clamp.unwrap_or(DEFAULT_STARVATION_CLAMP),
+                newcomer_init: self
+                    .newcomer_init
+                    .map_or(d.queue.newcomer_init, NewcomerInitArg::fc_pq),
+                record_waits: self.fcpq_wait_stats,
+                ..d.queue
+            },
+        }
+    }
+
+    /// `co-fifo-s<step>-k<K>[-home|-remote]`, `co-pq-...-c<N>[-n<init>]`.
+    fn co_label(&self, base: &str) -> String {
+        let o = self.co_options();
+        let mut label = format!(
+            "{base}-s{}-k{}{}",
+            o.step_aside.label(),
+            o.chain_bound.unwrap_or(0),
+            self.wake_placement.suffix()
+        );
+        if base == "co-pq" {
+            label.push_str(&format!("-c{}", o.queue.starvation_clamp));
+            if let Some(n) = self.newcomer_init {
+                label.push_str(&format!("-n{}", n.name()));
+            }
+        }
+        label
+    }
 }
 
 fn run_lock(cli: &Cli, cfg: &Config, tsc_hz: f64) -> Report {
@@ -392,6 +578,12 @@ fn run_lock(cli: &Cli, cfg: &Config, tsc_hz: f64) -> Report {
             let opts = cli.dispatch_pq_options();
             workload::run_benchmark(cfg, tsc_hz, &cli.dispatch_pq_label(), move |data| {
                 DispatchPq::with_options(data, opts)
+            })
+        }
+        "cfl" => {
+            let opts = cli.cfl_options();
+            workload::run_benchmark(cfg, tsc_hz, &cli.cfl_label(), move |data| {
+                Cfl::with_options(data, opts)
             })
         }
         "ces" => {
@@ -423,6 +615,18 @@ fn run_lock(cli: &Cli, cfg: &Config, tsc_hz: f64) -> Report {
                 Actor::with_options(data, opts)
             })
         }
+        "co-fifo" => {
+            let opts = cli.co_options();
+            workload::run_co_benchmark(cfg, tsc_hz, &cli.co_label("co-fifo"), move |data| {
+                CoFifo::with_options(data, opts)
+            })
+        }
+        "co-pq" => {
+            let opts = cli.co_options();
+            workload::run_co_benchmark(cfg, tsc_hz, &cli.co_label("co-pq"), move |data| {
+                CoPq::with_options(data, opts)
+            })
+        }
         other => {
             eprintln!("unknown lock {other:?}; known: {}", LOCKS.join(", "));
             std::process::exit(2);
@@ -445,6 +649,11 @@ fn sanity_lock(id: &str, cfg: &Config) -> Result<workload::SanityOutcome, String
             ..o
         }),
         "dispatch-pq" => workload::sanity(cfg, DispatchPq::<Shared>::new),
+        "cfl" => workload::sanity(cfg, Cfl::<Shared>::new),
+        "co-fifo" => {
+            workload::sanity_co(cfg, |data| CoFifo::with_options(data, CoOptions::default()))
+        }
+        "co-pq" => workload::sanity_co(cfg, |data| CoPq::with_options(data, CoOptions::default())),
         other => Err(format!("{other}: not available")),
     }
 }
@@ -483,7 +692,7 @@ fn main() {
     let cfg = cli.config();
     let report = run_lock(&cli, &cfg, tsc_hz);
     print_summary(&report);
-    let fcpq_wait = if cli.lock == "fcpq" || cli.lock == "dispatch-pq" {
+    let fcpq_wait = if cli.lock == "fcpq" || cli.lock == "dispatch-pq" || cli.lock == "co-pq" {
         fc_pq::take_wait_stats()
     } else {
         None
@@ -520,10 +729,35 @@ fn main() {
             per(h.grant_to_start_cycles)
         );
     }
+    let cfl_stats = if cli.lock == "cfl" {
+        cfl::take_handoff_stats()
+    } else {
+        None
+    };
+    if let Some(s) = &cfl_stats {
+        let per = |c: u64| c as f64 / s.handoffs.max(1) as f64;
+        eprintln!(
+            "  cfl: fast={} handoffs={} per handoff: release={:.0} react={:.0} pass={:.0} cycles; spin/late/woken={}/{}/{} scan={:.0} (on path {:.0}) visited={:.1} parks={} max_wait={}",
+            s.fast,
+            s.handoffs,
+            per(s.release_cycles),
+            per(s.react_cycles),
+            per(s.pass_cycles),
+            s.acq_spin,
+            s.acq_late,
+            s.acq_woken,
+            per(s.scan_cycles),
+            per(s.scan_on_path_cycles),
+            per(s.scan_visited),
+            s.parks,
+            s.max_wait
+        );
+    }
     let out = Output {
         report: &report,
         fcpq_wait: fcpq_wait.map(wait_json),
         handoff: handoff.map(handoff_json),
+        cfl: cfl_stats.map(cfl_json),
     };
     let json = serde_json::to_string_pretty(&out).expect("serialize report");
     match &cli.out {
@@ -555,6 +789,10 @@ struct Output<'a> {
     /// (`dispatch_pq::HandoffStats`).
     #[serde(skip_serializing_if = "Option::is_none")]
     handoff: Option<serde_json::Value>,
+    /// cfl only: acquisition paths, handoff cycle breakdown, scan / spin /
+    /// park counters and waits in handoffs (`cfl::CflStats`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cfl: Option<serde_json::Value>,
 }
 
 fn wait_json(w: WaitStats) -> serde_json::Value {
@@ -580,6 +818,36 @@ fn handoff_json(h: HandoffStats) -> serde_json::Value {
     })
 }
 
+fn cfl_json(s: CflStats) -> serde_json::Value {
+    serde_json::json!({
+        "fast": s.fast,
+        "handoffs": s.handoffs,
+        "release_cycles": s.release_cycles,
+        "react_cycles": s.react_cycles,
+        "pass_cycles": s.pass_cycles,
+        "acq_spin": s.acq_spin,
+        "acq_spin_react": s.acq_spin_react,
+        "acq_late": s.acq_late,
+        "acq_late_react": s.acq_late_react,
+        "acq_woken": s.acq_woken,
+        "acq_woken_react": s.acq_woken_react,
+        "grants": s.grants,
+        "grant_to_poll_cycles": s.grant_to_poll_cycles,
+        "early_heads": s.early_heads,
+        "scan_cycles": s.scan_cycles,
+        "scan_on_path_cycles": s.scan_on_path_cycles,
+        "scan_visited": s.scan_visited,
+        "moves": s.moves,
+        "promoted": s.promoted,
+        "spin_cycles": s.spin_cycles,
+        "parks": s.parks,
+        "park_rechecks": s.park_rechecks,
+        "head_wakes": s.head_wakes,
+        "max_wait": s.max_wait,
+        "wait_hist": s.wait_hist.to_vec(),
+    })
+}
+
 fn print_summary(r: &Report) {
     let us = |c: u64| c as f64 / r.tsc_hz * 1e6;
     eprintln!(
@@ -601,6 +869,20 @@ fn print_summary(r: &Report) {
         r.starved_bystanders,
         r.total_combiner_yields
     );
+    eprintln!(
+        "  parallel_mode={} o={} cycles/op burden_foreign_jain={} total_foreign_cs={} cycles",
+        r.config.parallel_mode.label(),
+        r.o_cycles_per_op
+            .map_or("null".to_string(), |o| format!("{o:.0}")),
+        fmt_opt(r.burden_foreign_jain),
+        r.total_foreign_cs_cycles
+    );
+    if let Some(s) = &r.co_mutex {
+        eprintln!(
+            "  co: fast={} free={} handoff={} step_asides={} chain_breaks={} sync_drops={}",
+            s.fast, s.free, s.handoff, s.step_asides, s.chain_breaks, s.sync_drops
+        );
+    }
     eprintln!(
         "  placements default={} inline={} remote={} home={}  chains n={} p50={} max={}",
         r.placements.default,

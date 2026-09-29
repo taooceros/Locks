@@ -53,3 +53,60 @@ pub fn cycles() -> u64 {
     // SAFETY: rdtscp is available on every x86-64 target this crate supports.
     unsafe { core::arch::x86_64::__rdtscp(&mut aux) }
 }
+
+// ---------------------------------------------------------------------------
+// Coroutine-style mutex (RESEARCH.md, "API assumption (2026-09-30)")
+// ---------------------------------------------------------------------------
+
+/// A task's view of a coroutine-style mutex. The critical section is the
+/// task's own continuation, not a shipped closure:
+///
+/// ```text
+/// let mut g = h.lock().await;   // h: this task's handle
+/// g.insert(k, v);               // CS: any code on *g, may .await
+/// g.unlock().await;             // explicit async release
+/// ```
+///
+/// `unlock().await` is where an implementation may suspend the releaser
+/// once (step aside) so that the next owner runs first. Dropping the guard
+/// without `unlock` is a correct synchronous release. Holding the guard
+/// across unrelated `.await`s is allowed: the owner stays owner and waiters
+/// wait. Not reentrant: a second `lock()` by the current owner deadlocks.
+///
+/// Implemented by a per-task handle ([`CoLock::handle`]) rather than by
+/// the mutex itself because usage-ordered policies charge each critical
+/// section to a client, and the executor has no task-local storage. `lock`
+/// takes `&self`: waiter nodes live in the `lock()` future (pinned while
+/// queued), so concurrent `lock()` calls on one handle are sound; they
+/// share its usage account.
+pub trait AsyncMutex<T: Send + 'static>: Send + Sync + 'static {
+    type Guard<'a>: AsyncGuard<T> + Send + 'a
+    where
+        Self: 'a;
+
+    fn lock(&self) -> impl Future<Output = Self::Guard<'_>> + Send;
+
+    /// Cumulative charged usage in TSC cycles (ownership observed by
+    /// `lock()` to `unlock()` / drop), 0 for locks that do not account.
+    fn usage(&self) -> u64;
+}
+
+/// Ownership of the protected value, released by [`AsyncGuard::unlock`] or
+/// by `Drop`.
+pub trait AsyncGuard<T>: std::ops::DerefMut<Target = T> {
+    fn unlock(self) -> impl Future<Output = ()> + Send;
+}
+
+/// Constructor side of a coroutine-style mutex (the analogue of
+/// [`DelegationLock`]).
+pub trait CoLock<T: Send + 'static>: Send + Sync + 'static {
+    type Handle: AsyncMutex<T>;
+
+    fn new(data: T) -> Self;
+
+    /// One handle per task: its identity for usage accounting.
+    fn handle(self: &Arc<Self>) -> Self::Handle;
+
+    /// Human-readable variant name used in result files.
+    fn name() -> &'static str;
+}

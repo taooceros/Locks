@@ -24,6 +24,15 @@
 //! `executor::current_task_inline_resumed`). Queue administration is not
 //! included. `LockClient::combining_cycles` is 0: clients never run other
 //! clients' closures; the worker absorbs the burden instead.
+//!
+//! Burden under the uniform definition shared with `co_mutex`
+//! ([`stats::record_foreign_cs`]): the closure's cycles are also charged to
+//! the executing worker when the request was made on another worker. This
+//! differs from the combining charge above when an inline-resumed request
+//! had queued on the combiner's own worker (combining, not foreign) and when
+//! a non-inline grant runs away from its home, e.g. a chain-break wake with
+//! `default` placement or a grantee moved by a balancing steal (foreign, not
+//! combining).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -114,6 +123,7 @@ impl<T: Send + 'static> LockClient<T> for CesClient<T> {
             f: Some(f),
             result: None,
             state: State::Init,
+            home: NO_HOME,
         }
     }
 
@@ -136,7 +146,12 @@ struct Run<'a, T, R, F> {
     f: Option<F>,
     result: Option<R>,
     state: State,
+    /// Worker polling the task when it requested the lock (`NO_HOME` off
+    /// the executor): the request's home for [`stats::record_foreign_cs`].
+    home: usize,
 }
+
+const NO_HOME: usize = usize::MAX;
 
 impl<T, R, F> Unpin for Run<'_, T, R, F> {}
 
@@ -171,9 +186,12 @@ where
         let r = f(unsafe { &mut *queue.data() });
         let dt = cycles().wrapping_sub(t0);
         self.client.usage += dt;
-        if inline {
-            if let Some(w) = executor::worker_id() {
+        if let Some(w) = executor::worker_id() {
+            if inline {
                 stats::record_combining(w, dt);
+            }
+            if self.home != NO_HOME && self.home != w {
+                stats::record_foreign_cs(w, dt);
             }
         }
         match queue.release() {
@@ -213,6 +231,7 @@ where
         let queue = &this.client.lock.queue;
         match this.state {
             State::Init => {
+                this.home = executor::worker_id().unwrap_or(NO_HOME);
                 if queue.acquire_or_enqueue(&this.client.node, cx) {
                     this.critical(cx)
                 } else {

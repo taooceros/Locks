@@ -2,6 +2,8 @@
 
 pub mod actor;
 pub mod ces;
+pub mod cfl;
+pub mod co_mutex;
 pub mod dispatch;
 pub mod dispatch_pq;
 pub mod fc;

@@ -5,6 +5,712 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-30 — coroutine-style mutex (lock().await / unlock().await)
+
+Binding API assumption from 2026-09-30 (RESEARCH.md "API assumption"): the
+critical section is the task's own continuation, `let mut g =
+h.lock().await; …; g.unlock().await;`, and `unlock().await` is where the
+lock may step the releaser aside so the next owner runs first. New locks
+`co-fifo` / `co-pq` (`src/locks/co_mutex.rs`) implement it; the closure
+locks are the references. Every cell was run with the client's parallel
+work spun in the releasing poll (`spin`, the old harness) and after one
+`yield_now()` (`yield`, REVIEW I1). There is no `sleep` mode: the executor
+has no timer.
+
+### One-line verdicts (W = 8, heavy 8×, b31, 3 repeats)
+
+- **(a) co-fifo with step-aside is within 2–6 % of fc/ces sustained and not
+  below either bursty, whether or not the app yields.** Sustained spin:
+  `co-fifo-sremote-k64-home` 0.352 [0.350, 0.353] Mops/s, o = 1208 cycles/op,
+  against `ces-k64-home` 0.359 [0.358, 0.364] / 1161 and `fc-remote` 0.374
+  [0.373, 0.375] / 959, i.e. 0.98× and 0.94× (spreads disjoint). Yield: 0.351 /
+  1227 against 0.361 / 1131 and 0.371 / 989. Bursty spin: 0.305 [0.305, 0.307],
+  inside `ces-k64-home`'s spread (0.297 [0.296, 0.307]) and above `fc-remote`
+  (0.294 [0.293, 0.297]); the same holds under yield. The same lock with a
+  synchronous release (`-snone`) is 0.233 / o 4608 under spin and 0.344 /
+  1370 under yield. So the explicit async release removes the I1 artefact
+  without relying on the app: spin and yield are equal (0.352 vs 0.351). It
+  does not close the last 6 % to `fc-remote` sustained. Confirmation cells:
+  0.347 at W = 16 b31, 0.354 at W = 8 b0; no ces/fc reference was rerun
+  there.
+- **(b) co-pq is as fair as fcpq-h16-home-c16, at 0.85–0.87× its ops/s and
+  1.3–1.4× its o.** Sustained spin: `co-pq-sremote-k64-home-c256` Jain 0.999
+  against 0.997, 0.520 [0.519, 0.523] against 0.598 [0.596, 0.598] Mops/s
+  (0.87×), o 1519 against 1158. Yield: 0.515 against 0.600 (0.86×), o 1570
+  against 1145. Confirmation cells (sustained): W = 16 b31 0.506 / 0.598
+  (0.85×, o 1606 / 1128), W = 8 b0 0.518 / 0.600 (0.86×, o 1537 / 1139), both
+  Jain 0.999 against 0.997, both modes alike. Served mix L:H 5.10 against 5.36;
+  heavy / light p99 387 / 104 µs against 626 / 343 µs. Against
+  `dispatch-pq-home-c256` (Jain 1.000) it is 1.68× the ops/s at a third of the
+  o (4509). Clamp: 256 and 0 are equal in throughput and Jain; 64 binds (Jain
+  0.711, L:H 1.22), as clamp 16 did for dispatch-pq. Best step-aside is
+  `remote` (`home` 0.509 [0.508, 0.510] vs 0.520 [0.519, 0.523]). Bursty,
+  neither co-pq nor fcpq is fair (Jain 0.697, 0.703; co-pq 0.85× fcpq's
+  ops/s); `dispatch-pq` is (1.000), at 0.39× / 0.50× fcpq's ops/s (spin /
+  yield).
+- **(c) A synchronous release (`-snone`, same as `drop(g)`) costs 2–9 % when
+  the continuation yields and 34–81 % when it spins in the same poll.**
+  co-fifo spin: 0.66× sustained (o +3400 cycles, about one 4000-cycle parallel
+  spin), 0.19× bursty (o 32 621, about one 32 000-cycle spin). Under spin the
+  client tasks also end up on one worker: the busiest worker ran a median
+  100 % of client polls (min 89 % for co-fifo, 52 % for co-pq-c256).
+  co-fifo yield: 0.98× sustained, 0.91×
+  bursty. co-pq: 0.60× / 0.94× sustained spin / yield. Sync drops were never
+  taken in the harness (`sync_drops` 0); `-snone` measures the same release
+  path.
+- **(d) With K = 64 and home break, burden is even: foreign-CS Jain
+  0.991–1.000** for every co-* variant that steps aside (and for `-snone`
+  under yield), against 0.996–1.000 for `ces-k64-home`, sustained and bursty,
+  both modes. Sustained, a chain breaks every 65 acquisitions (0.0154 per
+  acquisition), as designed; bursty chains never reach 64. Sustained, 87 %
+  (co-fifo) and 94 % (co-pq) of critical-section cycles run away from the
+  request's home worker (ces 86 %). The unbounded chain was not run, so these
+  runs do not show what the bound buys. The foreign-CS definition misses one
+  failure: under `-snone` + spin all tasks migrate to one worker for good, so
+  their requests are "home" there. Foreign share is then 0.000 while that
+  worker runs (median) 100 % of client polls. Read it with the client-poll
+  share (third table of `summarize_co.py`).
+
+### Results
+
+`python3 scripts/summarize_co.py results 'co1-*.json'` (all columns, plus
+confirmation cells and burden detail). Throughput in Mops/s; o = (window −
+CS cycles) / ops; thr@FIFO = the throughput the run's o would give at the
+1:1 mix, (C̄_FIFO + o)⁻¹. That is a prediction that assumes o does not depend
+on the class: o at a fixed FIFO mix cannot be derived from window totals (one
+equation, two per-class unknowns). The per-class op counts are
+`classes.{light,heavy}.ops`. Burden Jain: foreign-CS definition for ces / co-*
+(`burden_foreign_jain`), combining-cycles definition for fc / fcpq
+(`burden_jain`, not the same quantity), `–` for dispatch / dispatch-pq.
+Latencies are run-latency p99 in µs; for ces and co-* they include the
+step-aside round trip (lock() to unlock().await's return). Starved = clients
+/ bystanders; every cell below had 0 / 0. Brackets are shown for Mops/s and o
+where the verdicts use them; other columns are medians. The script prints
+every spread.
+
+Sustained (64 clients, parallel work 4 × light CS):
+
+| variant | par | Mops/s | Jain | o | thr@FIFO | L:H | light / heavy p99 | burden | byst p99 |
+|---|---|---|---|---|---|---|---|---|---|
+| `dispatch` | spin | 0.211 [0.209, 0.211] | 0.668 | 5457 | 0.211 | 1.00 | 313 / 313 | – | 0.8 |
+| `ces-k64-home` | spin | 0.359 [0.358, 0.364] | 0.668 | 1161 [1067, 1163] | 0.359 | 1.00 | 186 / 186 | 0.999 | 2.9 |
+| `fc-remote` | spin | 0.374 [0.373, 0.375] | 0.664 | 959 [939, 970] | 0.374 | 1.00 | 179 / 179 | 0.987 | 3.3 |
+| `fcpq-h16-home-c16` | spin | 0.598 [0.596, 0.598] | 0.997 | 1158 [1153, 1167] | 0.361 | 5.36 | 343 / 626 | 0.999 | 3.1 |
+| `dispatch-pq-home-c256` | spin | 0.309 | 1.000 | 4509 [4494, 4512] | 0.230 | 5.46 | 164 / 685 | – | 3.7 |
+| `co-fifo-sremote-k64-home` | spin | 0.352 [0.350, 0.353] | 0.673 | 1208 [1204, 1244] | 0.352 | 1.00 | 186 / 186 | 0.997 | 2.9 |
+| `co-fifo-shome-k64-home` | spin | 0.351 | 0.674 | 1215 [1213, 1217] | 0.351 | 1.00 | 238 / 238 | 0.999 | 1.5 |
+| `co-fifo-snone-k64-home` | spin | 0.233 | 0.655 | 4608 | 0.233 | 1.00 | 268 / 268 | (see d) | 0.8 |
+| `co-pq-sremote-k64-home-c256` | spin | 0.520 [0.519, 0.523] | 0.999 | 1519 [1511, 1530] | 0.334 | 5.10 | 104 / 387 | 1.000 | 5.8 |
+| `co-pq-sremote-k64-home-c64` | spin | 0.344 [0.342, 0.344] | 0.711 | 1693 [1674, 1714] | 0.326 | 1.22 | 209 / 216 | 0.998 | 3.4 |
+| `co-pq-sremote-k64-home-c0` | spin | 0.524 [0.522, 0.525] | 0.999 | 1500 [1484, 1509] | 0.335 | 5.11 | 104 / 387 | 1.000 | 5.8 |
+| `co-pq-shome-k64-home-c256` | spin | 0.509 [0.508, 0.510] | 0.999 | 1623 [1606, 1624] | 0.329 | 5.13 | 141 / 477 | 1.000 | 4.0 |
+| `co-pq-snone-k64-home-c256` | spin | 0.311 | 0.999 | 4754 | 0.229 | 6.04 | 149 / 745 | (see d) | 0.8 |
+| `dispatch` | yield | 0.215 | 0.670 | 5237 | 0.215 | 1.00 | 313 / 313 | – | 2.3 |
+| `ces-k64-home` | yield | 0.361 [0.358, 0.363] | 0.668 | 1131 [1089, 1164] | 0.361 | 1.00 | 179 / 179 | 0.997 | 2.3 |
+| `fc-remote` | yield | 0.371 [0.370, 0.372] | 0.664 | 989 [984, 1004] | 0.371 | 1.00 | 179 / 179 | 0.995 | 2.7 |
+| `fcpq-h16-home-c16` | yield | 0.600 [0.592, 0.601] | 0.997 | 1145 [1138, 1183] | 0.362 | 5.36 | 328 / 596 | 1.000 | 2.9 |
+| `dispatch-pq-home-c256` | yield | 0.306 [0.303, 0.306] | 1.000 | 4587 [4567, 4658] | 0.228 | 5.47 | 164 / 715 | – | 2.3 |
+| `co-fifo-sremote-k64-home` | yield | 0.351 [0.350, 0.352] | 0.673 | 1227 [1202, 1240] | 0.351 | 1.00 | 186 / 186 | 0.999 | 2.3 |
+| `co-fifo-shome-k64-home` | yield | 0.351 [0.351, 0.352] | 0.674 | 1218 [1212, 1227] | 0.351 | 1.00 | 231 / 231 | 0.999 | 2.9 |
+| `co-fifo-snone-k64-home` | yield | 0.344 | 0.673 | 1370 [1365, 1373] | 0.343 | 1.00 | 171 / 179 | 0.999 | 1.6 |
+| `co-pq-sremote-k64-home-c256` | yield | 0.515 [0.514, 0.519] | 0.999 | 1570 [1541, 1571] | 0.332 | 5.10 | 104 / 402 | 1.000 | 5.1 |
+| `co-pq-sremote-k64-home-c64` | yield | 0.338 [0.338, 0.340] | 0.710 | 1768 [1735, 1781] | 0.322 | 1.21 | 209 / 216 | 0.999 | 2.9 |
+| `co-pq-sremote-k64-home-c0` | yield | 0.521 [0.516, 0.521] | 0.999 | 1529 [1516, 1554] | 0.334 | 5.11 | 104 / 387 | 0.999 | 5.1 |
+| `co-pq-shome-k64-home-c256` | yield | 0.507 [0.506, 0.511] | 0.999 | 1636 [1609, 1639] | 0.329 | 5.12 | 127 / 477 | 1.000 | 5.4 |
+| `co-pq-snone-k64-home-c256` | yield | 0.485 [0.484, 0.486] | 0.999 | 1839 [1824, 1843] | 0.319 | 5.11 | 86 / 447 | 1.000 | 3.3 |
+
+Bursty (16 clients, parallel work 32 × light CS):
+
+| variant | par | Mops/s | Jain | o | thr@FIFO | L:H | light / heavy p99 | burden | byst p99 |
+|---|---|---|---|---|---|---|---|---|---|
+| `dispatch` | spin | 0.067 [0.067, 0.069] | 0.679 | 27 865 | 0.067 | 1.00 | 253 / 253 | – | 1.1 |
+| `ces-k64-home` | spin | 0.297 [0.296, 0.307] | 0.686 | 2593 [2350, 2632] | 0.290 | 1.11 | 67 / 67 | 0.997 | 44.7 |
+| `fc-remote` | spin | 0.294 [0.293, 0.297] | 0.667 | 2518 [2451, 2536] | 0.294 | 1.00 | 60 / 60 | 1.000 | 31.6 |
+| `fcpq-h16-home-c16` | spin | 0.355 [0.352, 0.356] | 0.703 | 1618 [1599, 1666] | 0.335 | 1.24 | 67 / 78 | 1.000 | 29.8 |
+| `dispatch-pq-home-c256` | spin | 0.138 [0.136, 0.139] | 1.000 | 13 284 | 0.120 | 5.38 | 108 / 506 | – | 10.7 |
+| `co-fifo-sremote-k64-home` | spin | 0.305 [0.305, 0.307] | 0.692 | 2264 [2226, 2277] | 0.299 | 1.09 | 60 / 60 | 1.000 | 44.7 |
+| `co-fifo-shome-k64-home` | spin | 0.294 [0.293, 0.294] | 0.731 | 2911 | 0.275 | 1.34 | 141 / 156 | 1.000 | 29.8 |
+| `co-fifo-snone-k64-home` | spin | 0.059 | 0.656 | 32 621 | 0.059 | 1.00 | 253 / 253 | (see d) | 0.8 |
+| `co-pq-sremote-k64-home-c256` | spin | 0.301 | 0.697 | 2387 [2386, 2404] | 0.294 | 1.11 | 58 / 82 | 0.994 | 29.8 |
+| `co-pq-shome-k64-home-c256` | spin | 0.285 [0.284, 0.285] | 0.726 | 3078 | 0.269 | 1.29 | 141 / 156 | 1.000 | 29.8 |
+| `co-pq-snone-k64-home-c256` | spin | 0.063 | 0.999 | 32 710 | 0.059 | 5.99 | 201 / 923 | (see d) | 0.8 |
+| `dispatch` | yield | 0.104 | 0.677 | 16 025 | 0.104 | 1.00 | 186 / 186 | – | 4.2 |
+| `ces-k64-home` | yield | 0.303 [0.293, 0.303] | 0.686 | 2469 [2464, 2698] | 0.295 | 1.11 | 56 / 56 | 1.000 | 29.8 |
+| `fc-remote` | yield | 0.290 [0.288, 0.292] | 0.668 | 2630 | 0.290 | 1.00 | 56 / 56 | 1.000 | 29.8 |
+| `fcpq-h16-home-c16` | yield | 0.346 [0.346, 0.349] | 0.696 | 1707 | 0.330 | 1.19 | 52 / 60 | 1.000 | 29.8 |
+| `dispatch-pq-home-c256` | yield | 0.173 [0.166, 0.174] | 1.000 | 10 030 | 0.146 | 5.37 | 78 / 357 | – | 12.6 |
+| `co-fifo-sremote-k64-home` | yield | 0.299 [0.299, 0.300] | 0.694 | 2435 | 0.292 | 1.10 | 56 / 56 | 1.000 | 29.8 |
+| `co-fifo-shome-k64-home` | yield | 0.283 | 0.702 | 2933 | 0.274 | 1.15 | 58 / 71 | 1.000 | 26.1 |
+| `co-fifo-snone-k64-home` | yield | 0.273 [0.269, 0.273] | 0.681 | 3009 [3008, 3116] | 0.272 | 1.02 | 15 / 16 | 1.000 | 27.0 |
+| `co-pq-sremote-k64-home-c256` | yield | 0.298 [0.298, 0.300] | 0.707 | 2541 | 0.288 | 1.17 | 52 / 63 | 1.000 | 29.8 |
+| `co-pq-shome-k64-home-c256` | yield | 0.277 | 0.703 | 3094 | 0.269 | 1.15 | 60 / 71 | 1.000 | 25.1 |
+| `co-pq-snone-k64-home-c256` | yield | 0.270 | 0.692 | 3181 | 0.266 | 1.08 | 8 / 32 | 1.000 | 27.0 |
+
+Other measured points:
+- co-pq clamps 64 and 0 with `home` / `none` step-aside behave as with
+  `remote`: c0 ≈ c256, and c64 binds sustained (Jain 0.67–0.77). Bursty, the
+  clamp changes nothing within any step-aside. Jain is 0.69–0.73, except
+  `-snone` + spin at 0.999, where the one-worker collapse keeps the queue
+  full.
+- Worst observed wait (`--fcpq-wait-stats`, handoffs, sustained): c256 257–269,
+  c64 65–91, c0 697–10 330. A waiter is promoted after 256 handoffs and served
+  within 13 more, as for dispatch-pq.
+- Bursty, 13–33 % of co-* acquisitions take the uncontended CAS (0 % for
+  `-snone` + spin); sustained, 0.0 %.
+- (b) decomposition: co-pq's o exceeds co-fifo's by 311 cycles (spin,
+  sustained) and by 343 (yield). The handoff mechanics are identical, so the
+  difference is the heap / usage path or the served mix (5:1 against 1:1).
+  These runs do not separate the two [INFERENCE]. The clamp scan is at most
+  a small part: c0, which skips it, is 1500 [1484, 1509] against 1519 [1511,
+  1530].
+
+### Design (`src/locks/co_mutex.rs`, `src/lock.rs`)
+
+- API: `lock::AsyncMutex<T>` (`lock(&self) -> impl Future<Output =
+  Guard<'_>>`, `usage()`), `lock::AsyncGuard<T>` (`DerefMut<Target = T>`,
+  `unlock(self) -> impl Future<Output = ()>`), and `lock::CoLock<T>`
+  (constructor, `handle()` per task). The trait sits on a per-task handle
+  because usage order needs a client identity and the executor has no
+  task-local storage.
+- One type `CoMutex<T, Q>`: `Q = FifoList` (co-fifo) or `UsageList` (co-pq,
+  FC-PQ's `UsageQueue`, shared with dispatch-pq). The lock word and
+  enqueue/release protocol are dispatch-pq's: a fast-path CAS, `QUEUED` under
+  a TTAS spinlock, and a releaser that fails its CAS and then sees the push,
+  so no wakeup is lost. The waiter node is embedded in the pinned `lock()`
+  future, so there is no allocation per request.
+- `unlock().await`: charge usage (cycles from `lock()` returning to
+  `unlock()`), hand ownership to `Q`'s pick, `wake_inline` it, then step
+  aside once (`--co-step-aside remote` = `reschedule_self_remote`, `home` =
+  the `Home` hint on itself, i.e. the back of this worker's queue, `none` = no
+  suspension) and return `Pending`. Chain bound `--ces-chain-bound` (default
+  64, 0 = off) with `--wake-placement` as break placement, exactly as `ces`.
+  `Drop` of the guard, or of an unpolled `unlock()` future, does the `none`
+  release synchronously and counts `sync_drops`.
+- Burden, uniform definition (REVIEW I8), `stats::record_foreign_cs`,
+  reported for `ces` and co-*: critical-section cycles a worker executed for a
+  request made on another worker (the request's home is the worker polling
+  the task when it asked). JSON `workers[].foreign_cs_cycles`,
+  `burden_foreign_jain`, `total_foreign_cs_cycles`; `ces`'s
+  `combining_cycles` is unchanged.
+- Harness: `--parallel-mode {spin,yield}` for every lock (`config.parallel_mode`;
+  `run_p3.sh` `PARALLEL_MODE`, file suffix `-p<mode>`). New JSON fields for
+  every lock: `window_cycles`, `cs_cycles`, `o_cycles_per_op`; co-* add
+  `co_mutex` (fast / free / handoff acquisitions, step-asides, chain breaks,
+  sync drops over each client's window). co-* clients run the same keys,
+  costs, critical-section body and measurements as `client_task`, written as
+  `lock().await; insert + spin; unlock().await`. Labels:
+  `co-fifo-s{remote,home,none}-k<K>[-home|-remote]`, `co-pq-…-c<N>`
+  (`run_p3.sh`), matrix `scripts/run_co.sh`, tables `scripts/summarize_co.py`.
+
+### Checks
+
+- Unit tests (`co_mutex.rs`, 9, both policies):
+  - release order: FIFO, and usage order 1, 3, 0, 2 for usages 300, 100,
+    400, 200;
+  - the clamp counts handoffs: same schedule as dispatch-pq;
+  - dropping a queued or a granted `lock()` future passes the lock on;
+  - no lost wakeup across the unlock/enqueue race, on wake-driven test
+    executors. Dense and sparse runs, step-aside remote and none; the handoff
+    and found-free-under-spinlock paths both occur;
+  - co-pq serves cheap handles more (charged usage ratio within 0.5–2);
+  - mutual exclusion and completion on the executor, with an
+    overlap-detecting critical section. Covered: 3 step-asides × K ∈ {3, ∞} ×
+    {sustained, sparse};
+  - the guard is held across an unrelated `yield_now().await` in one op of
+    three: no overlap, and waiters do queue;
+  - sync-drop release: guard dropped, or `unlock()` future dropped unpolled;
+    `sync_drops` equals ops;
+  - chain bound: with K = 3 on 1 and 4 workers the deepest inline chain seen
+    inside a critical section is exactly 3 and chain breaks occur, and
+    without the bound it is deeper.
+- TSan once (rustup nightly 2026-04-28, `-Zsanitizer=thread -Zbuild-std`):
+  9/9, 0 reports. `coro-bench --sanity`: all 10 locks pass (co-fifo
+  176 542 ops, co-pq 258 961).
+- Allocation probe (throwaway, `.worktree/co-mutex/allocprobe`, counting
+  global allocator):
+  - OS threads with flag wakers: 0 allocations over 119–240 k ops for each
+    lock × step-aside;
+  - on the executor (W = 4): `remote` 0.0159 per op, one `Injector` block per
+    63 pushes, as dispatch-remote before; `home` 0;
+  - `none` 59–84 per ~300 k ops: chain-break `Home` wakes going to inbox
+    blocks.
+
+  The lock itself allocates nothing.
+- Code review by the read-only LockAdvisor agent (protocol, step-aside,
+  cancel-after-grant, guard across awaits, aliasing of the in-future node):
+  no correctness issue. Its hardening and documentation notes are applied.
+
+### Provenance
+
+One frozen binary: `.worktree/co-mutex/frozen/coro-bench`, sha256
+`2173c50751fb1222a2fe8dd126a09030919f86b6dfc24aa9f3e0592a4eb26ca5`. It is a
+release build of the workspace at 2026-09-29 23:15 UTC with rustc 1.100.0-nightly
+2026-09-22. `scaling_max_freq` was 3.0 GHz on cpu0, 8, 15 and 16. Main matrix
+2026-09-29 23:17:10–23:24:58 UTC:
+`BIN=… PREFIX=co1 scripts/run_co.sh`. It has repeats outermost, spin and yield
+interleaved inside each repeat, and `FCPQ_WAIT_STATS=1`, which is on for every
+fcpq, dispatch-pq and co-pq run. Confirmation 23:42:39–23:43:59:
+`PHASE=confirm CO_FIFO=co-fifo-sremote-k64-home
+CO_PQ=co-pq-sremote-k64-home-c256`, with `fcpq-h16-home-c16` rerun beside it.
+240 JSONs `results/co1-*.json`, all under
+`~/.cache/locks-experiments/measurement.lock`.
+
+### Limits and next question
+
+- Not run: sleep mode (the executor has no timer); the unbounded chain
+  (K = 0) in the benchmark; an intermittent / arrival scenario; a real-work
+  critical section (the CS is still a TSC spin, so locality cannot show,
+  REVIEW I3); W = 16 and b0 cover only the two best co variants plus fcpq.
+- co-pq inherits REVIEW I2: usage is cumulative, so a returning client is
+  favoured. The advisor proposed a rule and it was not implemented: an
+  admission floor, `base = max(base, max(last served base, heap min) −
+  mean)`, under the spinlock, a 3-line `UsageQueue::push` parameter. Its
+  falsifier is the review's `--intermittent` scenario: an intermittent
+  client's share should be ≈ its presence, while the all-present
+  population's L:H and Jain should stay within spread.
+- Open: where co-pq's extra ~300 cycles/op over co-fifo go (heap vs
+  accounting), and whether the 6 % sustained gap between co-fifo and
+  `fc-remote` is the per-op step-aside (injector push + unpark), i.e. the
+  price of keeping the critical section in the task.
+
+## 2026-09-30 — async CFL: usage-fair queue lock without delegation
+
+Question: can a *non-delegating* async lock give usage-fair service at
+delegation-level throughput if it is built like CFL (Park & Eom, PPoPP'24;
+ShflLock family) rather than like `dispatch-pq`? In `cfl` the queue head
+shuffles the waiters behind it while the owner runs, and the next owner is
+woken early; in `dispatch-pq` the release picks the successor and wakes
+it. **Every result is under the spin-parallel-work harness**: the client's
+parallel work is a synchronous 4 000-cycle spin in the poll that released
+the lock, and bystanders spin. REVIEW-2026-09-30 I1 shows that this
+harness inflates a dispatched grantee's scheduling latency, which is
+exactly the cost pre-wake attacks. The one same-window check with
+`--parallel-mode yield` is at the end. Nothing here compares cfl with
+delegation outside this harness.
+
+### One-line verdicts
+
+- **(a) Pre-wake removes about one critical section of the grant→run
+  gap, not the gap.** Instrumented, W = 8 b31 sustained, per handoff:
+  react (lock word cleared → head's CAS) is 6 031 cycles without pre-wake
+  and 3 586 with it. The difference, 2 445, is close to the served mix's
+  mean CS, C̄ = 2 535. Waking the head before the owner's CS adds 683
+  cycles of pass (94 → 777), because the wake call now sits between the
+  CAS and the CS. Net: per-handoff cost 6 173 → 4 468 (−28 %),
+  throughput 0.258 → 0.317 Mops/s (1.23×), util 0.301 → 0.370. The gap
+  remains because the new head's scheduling latency (grant → first poll
+  as head: 4 376 cycles) exceeds C̄. Only 16 % of granted heads still find
+  the lock held. 87 % of handoffs are taken "late" (react 4 084), 13 % by
+  a head spinning on the word (react 324). Same window,
+  `dispatch-pq-home-c256` spends spin 223 + queue 558 + grant→start
+  3 927 = 4 708 per handoff.
+- **(b) Shuffling off the critical path does not keep Jain ≥ 0.99 here;
+  shuffling on it does.** With the default full scan before each
+  acquisition and clamp 256 or off, service Jain is 1.000 in every cfl
+  usage-order cell (W = 8 b31 / b0, W = 16, sustained / bursty, spin /
+  yield), L:H 5.35–5.67.
+  - The scan costs 1 761 cycles per handoff: 61.2 waiters examined, ≈ 29
+    cycles each. 1 503 of those cycles (85 %) run after the release, on
+    the critical path, because most heads arrive late.
+  - Under the CFL rule (`-ovl`: scan only while the lock is held),
+    scanning leaves the critical path (22 cycles on path) and fairness
+    goes with it. Jain 0.684 / 0.688 and L:H 1.09 / 1.06 (sustained /
+    bursty): FIFO. Only 35 % / 13 % of handoffs splice a waiter forward.
+  - Clamp: 256 and off (c0) overlap in throughput and Jain, but c0 lets
+    the max wait reach 577–2 775 handoffs (c256: 258).
+  - Clamp 64 is FIFO in the sustained cell: Jain 0.686, L:H 1.09, 61 % of
+    handoffs promoted. This is the dispatch-pq clamp mechanism again: the
+    heavy wait under usage order (~219 handoffs) exceeds 64.
+- **(c) Under this harness, delegation is still about 2× faster.**
+  - cfl against same-window `fcpq-h16-home-c16`, ops/s / util:
+    0.52× / 0.54× at W = 8 b31 sustained, 0.53× / 0.54× at b0, 0.53× /
+    0.56× at W = 16 (`cfl-remote` 0.55× / 0.59×). Bursty: 0.40× / 0.24×
+    (`cfl-remote` 0.69× / 0.40×), where FC-PQ is itself unfair (Jain
+    0.698).
+  - In cycles: o = 4 375 per op for cfl vs 1 135 for FC-PQ. cfl's
+    instrumented per-handoff cost, 4 468, is release 105 + react 3 586 +
+    pass 777. React is the woken head's scheduling latency not covered by
+    the owner's CS, plus the on-path scan (1 503).
+  - FC-PQ's combiner starts the next closure after 1 103 cycles of
+    in-pass admin and 40 of gap (2026-09-29 instrumented), with no wake or
+    schedule between critical sections.
+  - util = C̄ / (C̄ + o) reproduces cfl's util: 2 535 / (2 535 + 4 375) =
+    0.367, measured 0.370. With FC-PQ's o at cfl's mix it would be 0.69
+    [computed].
+  - A second, smaller effect: a critical section runs slower on its
+    owner's worker. Light CS is 1 494 cycles under cfl vs 1 373 under
+    FC-PQ (+9 %), heavy 8 522 vs 8 410 (+1.3 %) [INFERENCE: the protected
+    data migrates between workers].
+  - Against dispatch-pq's best fair variant, cfl is 1.02× (W = 8 b31
+    sustained), 1.04× (b0) and 0.93× (W = 16; `cfl-remote` 0.97×).
+    Bursty, `cfl-remote` is 1.10× `dispatch-pq-remote-c256`. A CFL-style
+    design lands within about 10 % of dispatch-pq, not at delegation
+    level.
+- **(d) Spinning heads cost some worker time and bystander latency; no
+  starvation.**
+  - Heads spend 4.1 % of all worker cycles spinning or scanning
+    (sustained; 1.1 % bursty).
+  - Worst-worker bystander p99, cfl vs dispatch-pq: 4.7 vs 3.7 µs
+    sustained against home-c256; bursty 12.6 [7.9, 13.0] vs 6.3 µs
+    (home) and 17.7 vs 16.8 µs with remote wakes; at W = 16, 3.4 (cfl) /
+    2.4 (`cfl-remote`) vs 2.8 µs (remote-c256).
+  - `-spin2000` lowers it to 4.4 / 10.2 µs at 0.96× the throughput
+    (sustained).
+  - No run starved a client or a bystander.
+  - Burden Jain: "–". cfl never combines and each CS runs on its owner's
+    task, as in dispatch-pq. The foreign-CS burden of REVIEW-2026-09-30
+    I8 is not instrumented for cfl (Caveats).
+
+### Design (`src/locks/cfl.rs`)
+
+- **Lock word and queue.** The word holds `LOCKED | NO_STEAL`; the queue
+  is an MCS tail-swap list of per-client nodes. An uncontended acquire is
+  CAS `0 → LOCKED`, so it fails while `NO_STEAL` is set, i.e. while a head
+  exists. The head (the next owner) acquires with CAS `w → w | LOCKED`,
+  then passes headship to its `next`. Nodes are allocated once per client
+  and owned by the lock (freed on drop): a granter or releaser may touch a
+  node after its owner has moved on.
+- **Shuffle (`--cfl-shuffle usage`, default).**
+  - Before trying to acquire, the head examines every visible waiter
+    behind it. Incremental chunks of 4 run while it spins.
+  - It remembers the one with the smallest key: the client's cumulative
+    charged CS cycles at enqueue, or the lock's running mean cost per
+    request for a never-served client. Ties go FIFO. `UsageNode`
+    accounting is reused from FC-PQ.
+  - At acquisition it splices that node right behind itself and passes
+    headship to it.
+  - Only the head writes interior links. A node whose `next` is still
+    null (the tail, or one being linked) is never moved. Each splice
+    moves a node that immediately becomes head, so the waiters behind the
+    head stay in arrival order.
+  - Starvation clamp: the oldest waiter gets headship regardless of usage
+    once more than N handoffs happened since it queued (global handoff
+    tick minus its enqueue tick; default 256, 0 = off, label `-c<N>`).
+    Arrival order means only that one waiter needs checking.
+  - `--cfl-scan overlap` (`-ovl`) examines waiters only while the word is
+    held, the CFL rule. `--cfl-shuffle off` (`-noshfl`) is MCS FIFO.
+- **Pre-wake (`--cfl-prewake on`, default).**
+  - The node that becomes head is woken at its predecessor's acquisition,
+    with `--wake-placement` (own default `home`; `remote` → `-remote`).
+  - The head spins on the word inside its poll for up to
+    `--head-spin-cycles` (default 8 000, about one heavy CS; label
+    `-spin<N>`).
+  - If the word is still held after that, the head parks: it registers
+    its waker, stores itself in `parked_head` (SeqCst) and re-checks the
+    word (SeqCst).
+  - The releaser does `fetch_and(!LOCKED)` (SeqCst), then loads
+    `parked_head` and wakes the head it swaps out.
+  - `off` (`-nopre`) instead wakes the successor after the release.
+- **Accounting.** The owner charges `key + cycles()` around its own
+  closure; the uncontended path charges on top of its own usage.
+- **`NO_STEAL` race (fairness only).** A head leaving an empty queue
+  clears `NO_STEAL`, and that clear can land after a new first head set
+  it. Uncontended acquisitions can then overtake the queue until some head
+  polls and sees the word held. The protocol does not bound this;
+  `CflStats::fast` counts it. It counted 0 in every instrumented cfl run
+  (e.g. `cfl` sustained: 0 of ≈ 620 k acquisitions per run).
+- **`--handoff-stats`.** Writes JSON `cfl`: per-handoff release / react /
+  pass split, how the head got the lock (spin / late / woken), grant →
+  first poll as head, early heads, scan cycles (total and after the
+  release), waiters examined, head spin, parks, park re-checks, releaser
+  wakes, splice / promotion counts, and waits in handoffs.
+- **Driver and summaries.** `scripts/run_cfl.sh`;
+  `scripts/summarize_cfl.py`; `run_p3.sh` suffixes `-noshfl -nopre -ovl
+  -spin<N>` and env `PARALLEL_MODE`.
+
+### Checks
+
+- Unit tests (`cfl.rs`, 7):
+  - Successor order: the min-usage waiter behind the head is served next.
+    Under Overlap, heads that arrive after the release give FIFO.
+  - Shuffle off is FIFO.
+  - The clamp counts handoffs: clamp 0 / 1 / 2 serves the oldest
+    expensive waiter 6th / 3rd / 4th.
+  - No lost wakeup across head park / release. 4 OS threads run
+    wake-driven executors that stall on a stranded task; head spin is 0,
+    so every head that finds the word held parks. Dense and sparse
+    regimes, pre-wake on and off. Asserts parks, releaser wakes of parked
+    heads, and park re-checks that found the word already cleared, all
+    > 0.
+  - Cheaper class served more: 8:1, clamp off, pre-wake on and off. Light
+    ops > 3× heavy; charged usage ratio in [0.5, 2].
+  - Starvation bound on the real executor: 1:50 mix, clamps 4 and 16.
+    Promotions > 0; max wait ≤ clamp + 2 + clients.
+  - Mutual exclusion and completion on the real executor: 4 workers, 36
+    option sets ({usage-full, usage-overlap, off} × pre-wake × placement
+    {home, remote, default} × head spin {8 000, 0}), sustained and sparse,
+    with an overlap-detecting CS.
+- The crate's lib tests pass on the frozen snapshot, 32/32 before the
+  concurrent `co_mutex` module existed. In the final snapshot, 40/41:
+  the one failure is a `co_mutex` test from that in-flight work, outside
+  this entry.
+- TSan once: nightly `rustc 1.97.0-nightly (37d85e592 2026-04-28)`,
+  `-Zsanitizer=thread -Zbuild-std`, 7/7 cfl tests, 0 reports.
+- `coro-bench --sanity` in the window: PASS for all eight locks (cfl
+  158 572 ops).
+- Allocation probe: a throwaway counting global allocator, 1 s after a
+  300 ms warm-up, W = 8, 64 clients at 1:8, 4 000-cycle parallel work.
+  With executor-default wakes: 0 allocations over 372 817 ops. With home
+  wakes: 0.0159 per op (also `-noshfl` and `-nopre`); remote: 0.0163.
+  That is one executor `Injector` block per ~63 pushes, as for
+  `dispatch-pq-home` (0.0159). The lock itself allocates nothing after
+  `client()`.
+- A read-only advisor pass over the wake / park / splice protocol found
+  no lost wakeup, double ownership or use-after-free. Its documentation
+  points are in the module docs: the splice relies on no cancellation
+  after enqueue, and a shutdown with a queued client aborts. Its claimed
+  bound of 2 steals per `NO_STEAL` race does not hold, and was replaced
+  by the unbounded statement above.
+
+### Setup
+
+- **Binary.** Frozen `target/cfl/coro-bench`, sha256 `a8764fdd…`, built
+  from a private snapshot of the crate (`.worktree/cfl/snapshot.sh`:
+  minimal workspace, same `Cargo.lock`), so another agent's concurrent
+  edits could not change it. The snapshot does contain that agent's
+  compiled in-flight additions:
+  - `--parallel-mode` in `workload.rs`. The spin path is unchanged:
+    `parallel_work` has no await in spin mode.
+  - A `record_foreign_cs` call in `ces.rs` (one branch plus a relaxed
+    add). `ces-k64-home` ran 0.364 here vs 0.365 in the actor-entry
+    window.
+  - An unused `co_mutex` module.
+  Later edits to `cfl.rs` are comments only (checked with a
+  comment-stripped diff against the snapshot).
+- **Driver.** `scripts/run_cfl.sh`, stages sanity, main, w16, b0, inst,
+  yield, yinst, run under the measurement lock. The first invocation
+  finished its main stage (84 runs, labels verified), then died when
+  `run_p3.sh` was edited mid-run. The driver now runs a private copy.
+- **Window.** Unix 1790722871–1790723515: 252 runs, sequential, repeats
+  outermost within each stage, a 2 s window after 200 ms warm-up, n = 3
+  per cell, TSC 2.2001 GHz. All CPUs at `scaling_max_freq` 3.0 GHz, the
+  state of the 2026-09-29 entries.
+- **References.** They reproduce the dispatch-pq window: `dispatch`
+  0.212 (then 0.212 [0.208, 0.212]), `dispatch-pq-home-c256` 0.311
+  (0.311 [0.309, 0.312]), `fcpq-h16-home-c16` 0.610 [0.603, 0.613]
+  (0.612 [0.611, 0.613]).
+- **Spin default.** The default head spin was chosen from an exploratory
+  n = 1 sweep before the window. Snapshot `c7e89d2e…` had identical cfl
+  code but spin default 2 000; runs in `.worktree/cfl/x1`. Spins 2 000 /
+  4 000 / 8 000 / 16 000 / 32 000 gave 0.288 / 0.301 / 0.308 / 0.308 /
+  0.306 Mops/s sustained; bursty was flat. The same sweep fixed the "best"
+  variant for the clamp and placement rows (`cfl`, home). `cfl-spin2000`
+  keeps the suggested 2× light default as a row.
+- **Files.** `results/acfl-*` (plain) and `results/acfli-*` (W = 8 b31
+  with `--handoff-stats`); yield files carry `-pyield`.
+- **Tables.** `python3 scripts/summarize_cfl.py results 'acfl-*.json'`
+  and `… 'acfli-*.json'`. Dispatch-pq breakdown: `python3
+  scripts/summarize_dispatch_pq.py results
+  'acfli-dispatch-pq-home-c256-w8-*.json'
+  'acfli-dispatch-pq-remote-c256-w8-*.json'`.
+- **Definitions.** util, o and byst p99 as in the dispatch-pq entry.
+  "dpq-best" (bold) is the fair dispatch-pq variant, home-c256 or
+  remote-c256, with the higher median ops/s in that cell. Burden Jain:
+  `ces-k64-home` 0.996 / 0.999 and `fcpq-h16-home-c16` 0.968–1.000; "–"
+  for the rest. cfl run latency is grant wait + CS with no step-aside, so
+  it is not the quantity ces / co-* report.
+
+### Results (medians [min, max], n = 3, same window)
+
+| cell | variant | Mops/s | ×dispatch | ×dpq-best | ×fcpq-c16 | util (×dispatch / ×dpq-best / ×fcpq-c16) | service Jain | L:H ops | light / heavy p99 (µs) | byst p99 (µs) | o (cyc/op) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| w8 b31 sus | dispatch | 0.212 [0.211, 0.213] | 1.00 | 0.68 | 0.35 | 0.477 [0.476, 0.478] (1.00 / 1.32 / 0.70) | 0.665 | 1.00 | 312.8 / 312.8 | 0.8 | 5429 [5405, 5456] |
+| w8 b31 sus | **dispatch-pq-home-c256** | 0.311 [0.310, 0.311] | 1.47 | 1.00 | 0.51 | 0.361 [0.359, 0.362] (0.76 / 1.00 / 0.53) | 1.000 | 5.58 [5.58, 5.63] | 163.8 / 714.9 | 3.7 | 4533 [4519, 4538] |
+| w8 b31 sus | dispatch-pq-remote-c256 | 0.287 [0.286, 0.288] | 1.35 | 0.92 | 0.47 | 0.333 [0.333, 0.335] (0.70 / 0.92 / 0.49) | 1.000 | 5.59 [5.55, 5.62] | 178.7 [178.7, 186.2] / 774.5 | 3.7 | 5112 [5101, 5120] |
+| w8 b31 sus | ces-k64-home | 0.364 [0.361, 0.365] | 1.72 | 1.17 | 0.60 | 0.818 [0.812, 0.818] (1.72 / 2.27 / 1.19) | 0.665 [0.665, 0.666] | 1.00 | 186.2 / 186.2 | 3.1 | 1102 [1095, 1148] |
+| w8 b31 sus | fcpq-h16-home-c16 | 0.610 [0.603, 0.613] | 2.88 | 1.96 | 1.00 | 0.685 [0.675, 0.685] (1.44 / 1.90 / 1.00) | 0.997 | 5.47 [5.46, 5.48] | 342.5 [342.5, 357.4] / 625.5 | 3.1 | 1135 [1132, 1187] |
+| w8 b31 sus | cfl | 0.317 [0.316, 0.321] | 1.49 | 1.02 | 0.52 | 0.370 [0.364, 0.370] (0.78 / 1.02 / 0.54) | 1.000 | 5.62 [5.55, 5.62] | 156.4 / 685.1 [685.1, 714.9] | 4.7 | 4375 [4324, 4429] |
+| w8 b31 sus | cfl-c0 | 0.320 [0.318, 0.322] | 1.51 | 1.03 | 0.52 | 0.371 [0.370, 0.377] (0.78 / 1.03 / 0.54) | 1.000 | 5.56 [5.54, 5.60] | 156.4 / 685.1 | 4.7 | 4323 [4250, 4365] |
+| w8 b31 sus | cfl-c64 | 0.265 [0.265, 0.271] | 1.25 | 0.85 | 0.43 | 0.585 [0.585, 0.597] (1.23 / 1.62 / 0.85) | 0.686 [0.685, 0.687] | 1.09 | 253.2 / 253.2 | 5.6 [5.4, 5.6] | 3444 [3270, 3445] |
+| w8 b31 sus | cfl-nopre | 0.258 [0.256, 0.258] | 1.21 | 0.83 | 0.42 | 0.301 [0.299, 0.301] (0.63 / 0.83 / 0.44) | 1.000 | 5.54 [5.54, 5.55] | 201.1 / 863.8 | 4.2 [4.2, 4.4] | 5967 [5963, 6035] |
+| w8 b31 sus | cfl-noshfl | 0.288 [0.284, 0.289] | 1.36 | 0.93 | 0.47 | 0.656 [0.647, 0.656] (1.38 / 1.82 / 0.96) | 0.671 | 1.00 | 230.8 / 230.8 | 6.3 [6.1, 6.3] | 2630 [2616, 2735] |
+| w8 b31 sus | cfl-noshfl-nopre | 0.238 [0.234, 0.239] | 1.12 | 0.77 | 0.39 | 0.544 [0.536, 0.545] (1.14 / 1.51 / 0.79) | 0.672 [0.672, 0.673] | 1.00 | 268.1 / 268.1 | 3.7 | 4207 [4199, 4360] |
+| w8 b31 sus | cfl-ovl | 0.291 [0.290, 0.291] | 1.37 | 0.94 | 0.48 | 0.641 [0.639, 0.641] (1.34 / 1.78 / 0.94) | 0.684 | 1.09 | 238.3 / 238.3 | 6.5 [6.3, 6.5] | 2719 [2715, 2744] |
+| w8 b31 sus | cfl-remote | 0.290 [0.289, 0.292] | 1.37 | 0.93 | 0.48 | 0.338 [0.338, 0.344] (0.71 / 0.94 / 0.49) | 1.000 | 5.54 [5.51, 5.56] | 178.7 [171.3, 178.7] / 774.5 | 4.7 | 5022 [4942, 5044] |
+| w8 b31 sus | cfl-spin2000 | 0.303 [0.290, 0.304] | 1.43 | 0.98 | 0.50 | 0.352 [0.340, 0.357] (0.74 / 0.97 / 0.51) | 1.000 | 5.52 [5.52, 5.58] | 171.3 [163.8, 171.3] / 744.7 [714.9, 744.7] | 4.4 [4.4, 4.7] | 4704 [4657, 5013] |
+| w8 b31 bur | dispatch | 0.069 [0.066, 0.069] | 1.00 | 0.31 | 0.19 | 0.161 [0.154, 0.161] (1.00 / 0.61 / 0.22) | 0.680 [0.680, 0.681] | 1.00 | 253.2 [238.3, 253.2] / 238.3 [238.3, 253.2] | 0.9 [0.9, 1.1] | 26643 [26620, 28004] |
+| w8 b31 bur | dispatch-pq-home-c256 | 0.137 [0.136, 0.139] | 1.98 | 0.61 | 0.38 | 0.163 [0.162, 0.166] (1.01 / 0.61 / 0.22) | 1.000 | 5.46 [5.45, 5.48] | 111.7 [108.0, 111.7] / 536.2 [536.2, 655.3] | 6.3 [6.1, 7.2] | 13416 [13201, 13577] |
+| w8 b31 bur | **dispatch-pq-remote-c256** | 0.224 [0.210, 0.224] | 3.23 | 1.00 | 0.63 | 0.265 [0.248, 0.266] (1.65 / 1.00 / 0.36) | 1.000 | 5.49 [5.48, 5.49] | 55.9 [55.9, 59.6] / 253.2 [253.2, 268.1] | 16.8 | 7229 [7203, 7888] |
+| w8 b31 bur | ces-k64-home | 0.308 [0.298, 0.309] | 4.45 | 1.38 | 0.86 | 0.666 [0.643, 0.668] (4.13 / 2.51 / 0.90) | 0.684 [0.682, 0.684] | 1.12 [1.11, 1.12] | 63.3 [63.3, 67.0] / 63.3 [63.3, 67.0] | 44.7 | 2382 [2367, 2633] |
+| w8 b31 bur | fcpq-h16-home-c16 | 0.357 | 5.15 | 1.60 | 1.00 | 0.739 [0.739, 0.740] (4.58 / 2.78 / 1.00) | 0.698 [0.697, 0.698] | 1.23 | 67.0 / 78.2 | 29.8 | 1610 [1603, 1613] |
+| w8 b31 bur | cfl | 0.143 [0.141, 0.145] | 2.06 | 0.64 | 0.40 | 0.174 [0.171, 0.175] (1.08 / 0.66 / 0.24) | 1.000 | 5.36 [5.34, 5.39] | 104.3 [100.5, 108.0] / 506.4 [476.6, 506.4] | 12.6 [7.9, 13.0] | 12708 [12528, 12971] |
+| w8 b31 bur | cfl-c0 | 0.143 [0.142, 0.144] | 2.06 | 0.64 | 0.40 | 0.173 [0.172, 0.174] (1.07 / 0.65 / 0.23) | 1.000 | 5.38 [5.36, 5.40] | 104.3 / 506.4 | 8.8 [7.4, 12.1] | 12740 [12620, 12821] |
+| w8 b31 bur | cfl-c64 | 0.142 [0.142, 0.143] | 2.05 | 0.64 | 0.40 | 0.172 [0.171, 0.172] (1.06 / 0.65 / 0.23) | 1.000 | 5.38 [5.38, 5.40] | 104.3 [104.3, 108.0] / 506.4 [506.4, 536.2] | 12.1 [12.1, 12.6] | 12825 [12786, 12874] |
+| w8 b31 bur | cfl-nopre | 0.136 [0.131, 0.137] | 1.96 | 0.61 | 0.38 | 0.165 [0.160, 0.167] (1.03 / 0.62 / 0.22) | 1.000 | 5.35 [5.30, 5.35] | 111.7 [108.0, 119.1] / 536.2 [506.4, 565.9] | 6.7 [5.6, 10.7] | 13503 [13374, 14146] |
+| w8 b31 bur | cfl-noshfl | 0.149 [0.148, 0.151] | 2.16 | 0.67 | 0.42 | 0.345 [0.342, 0.348] (2.14 / 1.30 / 0.47) | 0.677 [0.677, 0.678] | 1.00 | 134.0 [126.6, 134.0] / 134.0 [126.6, 134.0] | 14.9 [12.1, 15.8] | 9657 [9528, 9793] |
+| w8 b31 bur | cfl-noshfl-nopre | 0.145 [0.142, 0.146] | 2.09 | 0.65 | 0.41 | 0.337 [0.328, 0.337] (2.09 / 1.27 / 0.46) | 0.677 [0.677, 0.679] | 1.00 | 134.0 [126.6, 134.0] / 134.0 [126.6, 134.0] | 8.8 [6.5, 10.2] | 10058 [9996, 10401] |
+| w8 b31 bur | cfl-ovl | 0.144 [0.141, 0.144] | 2.08 | 0.64 | 0.40 | 0.326 [0.319, 0.327] (2.02 / 1.23 / 0.44) | 0.688 [0.687, 0.688] | 1.06 | 141.5 [134.0, 141.5] / 141.5 | 11.2 [10.7, 13.5] | 10290 [10263, 10645] |
+| w8 b31 bur | cfl-remote | 0.245 [0.231, 0.246] | 3.54 | 1.10 | 0.69 | 0.294 [0.279, 0.296] (1.82 / 1.11 / 0.40) | 1.000 | 5.40 [5.39, 5.41] | 48.4 [48.4, 50.3] / 230.8 [230.8, 238.3] | 17.7 | 6336 [6290, 6859] |
+| w8 b31 bur | cfl-spin2000 | 0.138 [0.138, 0.140] | 1.99 | 0.62 | 0.39 | 0.168 [0.168, 0.170] (1.04 / 0.64 / 0.23) | 1.000 | 5.35 [5.33, 5.37] | 111.7 / 565.9 [536.2, 565.9] | 10.2 [7.2, 10.7] | 13275 [13002, 13304] |
+| w8 b0 sus | dispatch | 0.205 | 1.00 | 0.66 | 0.34 | 0.450 (1.00 / 1.27 / 0.66) | 0.655 [0.655, 0.656] | 1.00 | 312.8 / 312.8 | 5.8 | 5906 [5902, 5909] |
+| w8 b0 sus | **dispatch-pq-home-c256** | 0.311 [0.310, 0.311] | 1.52 | 1.00 | 0.51 | 0.354 [0.353, 0.356] (0.79 / 1.00 / 0.52) | 1.000 | 5.74 [5.71, 5.75] | 163.8 / 714.9 | 4.0 | 4570 [4565, 4600] |
+| w8 b0 sus | dispatch-pq-remote-c256 | 0.286 [0.285, 0.287] | 1.40 | 0.92 | 0.47 | 0.333 [0.333, 0.335] (0.74 / 0.94 / 0.49) | 1.000 | 5.57 [5.56, 5.59] | 178.7 / 774.5 | 4.0 | 5127 [5102, 5151] |
+| w8 b0 sus | fcpq-h16-home-c16 | 0.609 [0.608, 0.610] | 2.98 | 1.96 | 1.00 | 0.683 [0.681, 0.684] (1.52 / 1.93 / 1.00) | 0.997 | 5.48 [5.47, 5.48] | 134.0 / 655.3 | 4.7 | 1148 [1141, 1152] |
+| w8 b0 sus | cfl | 0.323 [0.322, 0.326] | 1.58 | 1.04 | 0.53 | 0.371 [0.370, 0.377] (0.82 / 1.05 / 0.54) | 1.000 | 5.67 [5.64, 5.67] | 148.9 [148.9, 156.4] / 685.1 | 4.7 [4.7, 4.9] | 4282 [4205, 4302] |
+| w8 b0 sus | cfl-remote | 0.271 [0.270, 0.274] | 1.32 | 0.87 | 0.44 | 0.320 [0.317, 0.323] (0.71 / 0.90 / 0.47) | 1.000 | 5.49 [5.48, 5.52] | 186.2 / 804.2 [804.2, 834.0] | 4.9 [4.7, 4.9] | 5522 [5442, 5569] |
+| w16 b31 sus | dispatch | 0.211 | 1.00 | 0.62 | 0.35 | 0.477 [0.476, 0.477] (1.00 / 1.18 / 0.71) | 0.667 [0.667, 0.668] | 1.00 | 312.8 / 312.8 | 0.8 | 5450 [5449, 5467] |
+| w16 b31 sus | dispatch-pq-home-c256 | 0.316 [0.316, 0.317] | 1.50 | 0.93 | 0.53 | 0.375 [0.373, 0.375] (0.79 / 0.92 / 0.56) | 1.000 | 5.49 | 163.8 [156.4, 163.8] / 685.1 | 3.1 [3.1, 3.4] | 4353 [4333, 4369] |
+| w16 b31 sus | **dispatch-pq-remote-c256** | 0.341 [0.340, 0.342] | 1.61 | 1.00 | 0.57 | 0.405 [0.404, 0.405] (0.85 / 1.00 / 0.60) | 1.000 | 5.47 [5.47, 5.49] | 148.9 / 625.5 [625.5, 655.3] | 2.8 [2.8, 2.9] | 3844 [3824, 3863] |
+| w16 b31 sus | fcpq-h16-home-c16 | 0.595 [0.595, 0.597] | 2.82 | 1.75 | 1.00 | 0.674 [0.673, 0.676] (1.41 / 1.66 / 1.00) | 0.997 | 5.42 [5.42, 5.43] | 134.0 / 565.9 [565.9, 595.7] | 2.6 | 1202 [1198, 1206] |
+| w16 b31 sus | cfl | 0.318 [0.317, 0.323] | 1.51 | 0.93 | 0.53 | 0.378 [0.377, 0.379] (0.79 / 0.93 / 0.56) | 1.000 | 5.46 [5.45, 5.52] | 156.4 / 685.1 | 3.4 [3.3, 3.5] | 4303 [4232, 4318] |
+| w16 b31 sus | cfl-remote | 0.329 [0.328, 0.331] | 1.56 | 0.97 | 0.55 | 0.395 [0.391, 0.396] (0.83 / 0.98 / 0.59) | 1.000 | 5.44 [5.39, 5.44] | 148.9 / 655.3 | 2.4 [2.1, 2.6] | 4043 [4017, 4083] |
+| w8 b31 sus yield | dispatch | 0.216 | 1.00 | 0.70 | 0.36 | 0.487 (1.00 / 1.35 / 0.73) | 0.666 [0.666, 0.667] | 1.00 | 312.8 / 312.8 | 2.3 | 5231 [5225, 5235] |
+| w8 b31 sus yield | **dispatch-pq-home-c256** | 0.310 [0.309, 0.310] | 1.43 | 1.00 | 0.52 | 0.360 (0.74 / 1.00 / 0.54) | 1.000 | 5.58 [5.58, 5.59] | 163.8 / 714.9 | 2.3 | 4548 [4547, 4550] |
+| w8 b31 sus yield | dispatch-pq-remote-c256 | 0.285 [0.284, 0.287] | 1.32 | 0.92 | 0.48 | 0.332 [0.329, 0.336] (0.68 / 0.92 / 0.50) | 1.000 | 5.58 [5.56, 5.59] | 186.2 [178.7, 186.2] / 804.2 [774.5, 804.2] | 2.2 | 5151 [5084, 5198] |
+| w8 b31 sus yield | fcpq-h16-home-c16 | 0.598 [0.597, 0.606] | 2.77 | 1.93 | 1.00 | 0.669 [0.667, 0.677] (1.38 / 1.86 / 1.00) | 0.997 | 5.50 [5.48, 5.50] | 342.5 [327.7, 342.5] / 625.5 | 2.9 [2.9, 3.0] | 1219 [1173, 1225] |
+| w8 b31 sus yield | cfl | 0.314 [0.312, 0.314] | 1.45 | 1.01 | 0.53 | 0.365 [0.362, 0.366] (0.75 / 1.01 / 0.55) | 1.000 | 5.57 [5.55, 5.58] | 156.4 / 714.9 | 3.1 | 4448 [4438, 4497] |
+| w8 b31 sus yield | cfl-nopre | 0.255 [0.254, 0.256] | 1.18 | 0.82 | 0.43 | 0.298 [0.297, 0.299] (0.61 / 0.83 / 0.45) | 1.000 | 5.55 [5.52, 5.56] | 201.1 / 863.8 | 2.6 | 6062 [6018, 6072] |
+| w8 b31 sus yield | cfl-remote | 0.293 [0.274, 0.296] | 1.36 | 0.95 | 0.49 | 0.341 [0.323, 0.347] (0.70 / 0.95 / 0.51) | 1.000 | 5.51 [5.50, 5.56] | 171.3 [171.3, 186.2] / 774.5 [744.7, 834.0] | 2.9 [2.8, 2.9] | 4941 [4855, 5430] |
+| w8 b31 bur yield | dispatch | 0.112 [0.111, 0.112] | 1.00 | 0.49 | 0.32 | 0.256 [0.255, 0.257] (1.00 / 0.94 / 0.35) | 0.675 [0.675, 0.676] | 1.00 | 171.3 / 171.3 | 2.9 [2.8, 3.0] | 14677 [14635, 14698] |
+| w8 b31 bur yield | dispatch-pq-home-c256 | 0.168 [0.167, 0.174] | 1.51 | 0.73 | 0.48 | 0.203 [0.200, 0.208] (0.79 / 0.75 / 0.28) | 1.000 | 5.44 [5.40, 5.44] | 81.9 [78.2, 81.9] / 372.3 [357.4, 372.3] | 14.4 [12.6, 14.9] | 10424 [10006, 10504] |
+| w8 b31 bur yield | **dispatch-pq-remote-c256** | 0.229 | 2.05 | 1.00 | 0.66 | 0.271 [0.271, 0.272] (1.06 / 1.00 / 0.37) | 1.000 | 5.49 [5.49, 5.50] | 54.0 [52.1, 55.9] / 238.3 | 14.9 | 7002 [6986, 7014] |
+| w8 b31 bur yield | fcpq-h16-home-c16 | 0.348 [0.345, 0.350] | 3.12 | 1.52 | 1.00 | 0.731 [0.723, 0.733] (2.86 / 2.70 / 1.00) | 0.693 [0.692, 0.693] | 1.19 [1.19, 1.20] | 52.1 [52.1, 54.0] / 59.6 | 29.8 | 1700 [1683, 1771] |
+| w8 b31 bur yield | cfl | 0.177 [0.177, 0.178] | 1.59 | 0.77 | 0.51 | 0.214 [0.214, 0.215] (0.84 / 0.79 / 0.29) | 1.000 | 5.38 [5.37, 5.38] | 78.2 / 357.4 | 13.0 [13.0, 13.5] | 9745 [9704, 9747] |
+| w8 b31 bur yield | cfl-nopre | 0.169 [0.162, 0.169] | 1.51 | 0.74 | 0.48 | 0.204 [0.198, 0.204] (0.80 / 0.75 / 0.28) | 1.000 | 5.37 [5.32, 5.39] | 81.9 [81.9, 85.6] / 357.4 [357.4, 372.3] | 11.2 [11.2, 14.0] | 10373 [10369, 10854] |
+| w8 b31 bur yield | cfl-remote | 0.249 [0.234, 0.249] | 2.23 | 1.08 | 0.71 | 0.297 [0.280, 0.300] (1.16 / 1.10 / 0.41) | 1.000 | 5.41 [5.38, 5.44] | 46.5 [44.7, 50.3] / 230.8 [230.8, 238.3] | 14.9 | 6216 [6196, 6781] |
+
+No run starved a client or a bystander. cfl vs dpq-best is outside both
+spreads in every cell quoted in (c). At W = 8, cfl's heavy p99 (685–715
+µs sustained) is at or below dispatch-pq's (715–775 µs). At W = 16,
+`dispatch-pq-remote-c256`'s is lower (626 vs 685 µs). FC-PQ's is
+566–655 µs.
+
+### Where the handoff goes (instrumented, W = 8 b31)
+
+cfl, per handoff (an acquisition by a queue head), in TSC cycles:
+
+- **release**: previous owner's CS end → lock word cleared.
+- **react**: word cleared → head's CAS. It is split by how the head got
+  the lock: spinning (it saw the word held in that poll), late (the word
+  was already free when it was polled), woken (it had parked).
+- **pass**: CAS → CS start: handoff tick, successor choice and splice,
+  headship pass, pre-wake call.
+- **grant→poll**: headship grant → the head's first poll as head.
+- **early**: share of granted heads that found the word still held at
+  that first poll.
+- **scan (on path)**: scan cycles per handoff, and the part after the
+  release.
+- **busy**: head spin + scan as a share of W × window cycles.
+
+dispatch-pq rows give its spin / queue / grant→start. Waits are in
+handoffs; "≥ 63" is the histogram's open last bucket. Every cfl
+acquisition in these cells went through the queue (uncontended path 0).
+
+| cont | variant | o inst / plain | release / react / pass | spin / late / woken | react late | grant→poll | early | scan (on path) | head spin | spliced / promoted | busy | wait p50 / p99 / max |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| sus | cfl | 4516 / 4375 | 105 / 3586 / 777 | 0.13 / 0.87 / 0.00 | 4084 | 4376 | 0.16 | 1761 (1503) | 582 | 0.88 / 0.000 | 0.041 | 38 / ≥ 63 / 258 |
+| sus | cfl-nopre | 6218 / 5967 | 46 / 6031 / 94 | 0 / 1.00 / 0 | 6031 | 6530 | 0.00 | 1866 (1866) | 52 | 0.88 / 0.000 | 0.027 | 38 / ≥ 63 / 258 |
+| sus | cfl-noshfl | 2701 / 2630 | 102 / 1566 / 979 | 0.47 / 0.53 / 0.00 | 2661 | 4820 | 0.48 | – | 2568 | – | 0.042 | ≥ 63 / ≥ 63 / 64 |
+| sus | cfl-noshfl-nopre | 4416 / 4207 | 131 / 4021 / 216 | 0 / 1.00 / 0 | 4021 | 9069 | 0.00 | – | 41 | – | 0.001 | ≥ 63 / ≥ 63 / 64 [64, 70] |
+| sus | cfl-ovl | 2790 / 2719 | 106 / 1737 / 906 | 0.42 / 0.58 / 0.00 | 2722 | 4869 | 0.42 | 1144 (22) | 2465 | 0.35 / 0.000 | 0.060 | ≥ 63 / ≥ 63 / 103 [92, 109] |
+| sus | cfl-c64 | 3458 / 3444 | 107 / 2413 / 889 | 0.44 / 0.56 / 0.00 | 4057 | 4605 | 0.45 | 1593 (875) | 1790 | 0.30 / 0.612 | 0.050 | ≥ 63 / ≥ 63 / 68 |
+| sus | cfl-c0 | 4596 / 4323 | 98 / 3587 / 874 | 0.13 / 0.87 / 0.00 | 4087 | 4485 | 0.16 | 1774 (1513) | 580 | 0.88 / 0.000 | 0.041 | 38 / ≥ 63 / 2644 [577, 2775] |
+| sus | cfl-remote | 5249 / 5022 | 77 / 4466 / 664 | 0.12 / 0.88 / 0.00 | 5026 | 5089 | 0.26 | 1897 (1614) | 474 | 0.88 / 0.000 | 0.038 | 38 / ≥ 63 / 258 |
+| sus | cfl-spin2000 | 5002 / 4704 | 114 / 4003 / 830 | 0.01 / 0.87 / 0.12 | 4069 | 4373 | 0.16 | 1824 (1560) | 333 | 0.88 / 0.000 | 0.036 | 38 / ≥ 63 / 258 |
+| sus | dispatch-pq-home-c256 | 4762 / 4533 | spin 223 / queue 558 / grant→start 3927 | | | | | | | | | |
+| sus | dispatch-pq-remote-c256 | 5251 / 5112 | spin 213 / queue 568 / grant→start 4432 | | | | | | | | | |
+| bur | cfl | 12987 / 12708 | 46 / 12078 / 826 | 0.10 / 0.90 / 0.00 | 13407 | 13963 | 0.11 | 949 (830) | 467 | 0.86 / 0.000 | 0.011 | 8 / 53 / 258 [164, 258] |
+| bur | cfl-nopre | 13668 / 13503 | 39 / 13495 / 84 | 0 / 1.00 / 0 | 13495 | 15111 | 0.00 | 931 (931) | 41 | 0.86 / 0.000 | 0.007 | 8 / 53 / 258 |
+| bur | cfl-remote | 7106 / 6336 | 66 / 6348 / 651 | 0.10 / 0.90 / 0.00 | 7029 | 7986 | 0.20 | 1032 (888) | 434 | 0.85 / 0.000 | 0.019 | 7 / 51 / 258 [174, 258] |
+| bur | dispatch-pq-home-c256 | 13529 / 13416 | spin 159 / queue 383 / grant→start 12934 | | | | | | | | | |
+| bur | dispatch-pq-remote-c256 | 7990 / 7229 | spin 214 / queue 408 / grant→start 7292 | | | | | | | | | |
+| sus yield | cfl | 4779 / 4448 | 81 / 3786 / 856 | 0.13 / 0.87 / 0.00 | 4311 | 4552 | 0.15 | 1830 (1567) | 556 | 0.88 / 0.000 | 0.042 | 38 / ≥ 63 / 258 |
+| sus yield | cfl-nopre | 6342 / 6062 | 98 / 6110 / 90 | 0 / 1.00 / 0 | 6110 | 6682 | 0.00 | 1863 (1863) | 47 | 0.88 / 0.000 | 0.027 | 38 / ≥ 63 / 258 |
+| sus yield | dispatch-pq-home-c256 | 4725 / 4548 | spin 187 / queue 543 / grant→start 3944 | | | | | | | | | |
+| bur yield | cfl | 10337 / 9745 | 57 / 9385 / 852 | 0.11 / 0.89 / 0.00 | 10457 | 11270 | 0.11 | 991 (871) | 476 | 0.85 / 0.000 | 0.014 | 8 / 52 / 258 [150, 258] |
+| bur yield | dispatch-pq-home-c256 | 10663 / 10424 | spin 185 / queue 417 / grant→start 10024 | | | | | | | | | |
+
+Spreads between repeats, in the full-scan pre-wake cells: react and
+grant→poll ≤ 2 %, scan ≤ 5 %. `-ovl` reaches 13 % (react) and `-c64`
+11 % (scan). React for woken heads varies widely (few events; e.g. 4 349
+[3 730, 4 475]). Instrumentation (a few `cycles()` reads per handoff)
+raises o by 14–298 cycles sustained and by up to 770 bursty
+(`cfl-remote`), so the component columns are upper bounds [INFERENCE].
+
+### Mechanism
+
+- **Pre-wake buys min(scheduling latency, owner CS) per handoff.** The
+  woken head's latency is ≈ 4.4 k cycles here (≈ 5.1 k remote, ≈ 14 k
+  bursty home). With usage order the served mix shifts to light ops,
+  C̄ = 2 535, so 84 % of heads miss the CS they were meant to overlap.
+  Under FIFO order (`-noshfl`, C̄ = 5 004) 48 % arrive early and pre-wake
+  cuts o by 37 % (4 207 → 2 630). Under usage order it cuts o by 27 %
+  (5 967 → 4 375). The fairness mix shift that cost FC-PQ 4 % and
+  dispatch-pq most of its utilisation (2026-09-29) also shrinks what
+  pre-wake can hide.
+- **Why the scan lands on the critical path.** The scan is cheap per
+  waiter (≈ 29 cycles; the nodes' link lines are read-shared). It is
+  serial with the late head, though: a head polled after the release
+  must scan ~61 waiters before its CAS, or give up usage order (`-ovl`).
+  Making it incremental across headships would need the list kept sorted
+  by key, and a new arrival's key sits near the back of that order, so an
+  insertion from the front walks most of the list anyway [INFERENCE, not
+  measured].
+- **Why remote wakes help bursty only.** Bursty (16 clients, 32 k
+  parallel work) a home wake waits behind the home worker's own 32 k spin
+  (grant→poll ≈ 14.0 k); a remote wake is picked up by another worker at
+  its next injector check (≈ 8.0 k). Sustained, the injector check comes
+  later than the home worker's inbox drain (5.1 k vs 4.4 k) [INFERENCE,
+  from grant→poll only].
+- **The yield harness does not move the home / remote cells.** With one
+  `yield_now()` before the parallel spin (REVIEW I1), sustained numbers
+  stay within a few percent: cfl 0.314 vs 0.317, grant→poll 4 552 vs
+  4 376, `dispatch-pq-home-c256` 0.310 vs 0.311, FC-PQ 0.598 vs 0.610.
+  Bursty, cfl rises to 0.177 (from 0.143) and `cfl-remote` to 0.249 (from
+  0.245). [INFERENCE] With home and remote wakes the woken head still
+  waits in a FIFO run queue (the back of its home worker's local queue,
+  or the injector) behind other runnable tasks. The review's large gain
+  came from inline (run-next) placement, which this binary offers
+  neither cfl nor dispatch-pq. So (a)–(c) stand for these placements
+  under both harnesses, and nothing is shown for inline placement.
+
+### Caveats
+
+1. Spin-parallel-work harness (REVIEW-2026-09-30 I1). The yield check
+   covers home / remote wakes only (above).
+2. Burden: cfl records no `stats::record_foreign_cs`, so REVIEW I8's
+   uniform foreign-CS burden is not measured for it. Instrument it like
+   `ces` (home = worker at enqueue, charge the closure on another worker)
+   before any burden comparison with ces / co-*.
+3. The head-spin default and the "best" variant come from n = 1
+   exploratory runs with a different snapshot (Setup). The clamp and
+   placement rows exist only for `cfl` (home).
+4. `ops/s` counts cheap light ops; util is the like-for-like work
+   measure. The ×fcpq-c16 ratios in bursty compare against a lock whose
+   own service Jain there is 0.698.
+5. Keys are cumulative charges, so REVIEW I2 (usage rewards absence)
+   applies to cfl unchanged. This closed-loop workload has no idle
+   clients.
+6. Cancellation after enqueue is unsupported (abort). The harness never
+   cancels.
+7. The `NO_STEAL` race (Design) is unbounded in this protocol and was
+   never observed (uncontended path 0 in all 72 instrumented cfl runs).
+   There are two candidate fixes, untested and not in this binary: the
+   head's CAS also sets `NO_STEAL`, and `release()` re-sets `NO_STEAL`
+   before waking a parked head. Whether together they bound the steals
+   has not been proven or tested.
+
+### Next question
+
+Most of cfl's remaining handoff cost is the woken head's scheduling
+latency beyond one CS, plus the scan it then does on the critical path.
+Does a depth-2 pre-wake remove both? In that variant the head wakes its
+chosen successor as soon as it picks it, during the owner's CS. The
+successor then has the owner's remaining CS plus the head's CS to get
+scheduled, the scan happens while the lock is held, and the 683-cycle
+wake leaves the pass. Also open: a pre-wake into the granter's run-next
+slot (`wake_inline`, the cfl analogue of the review's `dpq-inline` /
+`ces-pq`). Under the yield harness the head would be polled right after
+the owner releases, so react would be about the scan alone. It would also
+keep heads on the owner's worker, as a CES chain does, so it needs a
+chain bound with a break placement and the foreign-CS burden
+instrumentation before it can be measured honestly. Until then, (c)
+describes cfl with home / remote wakes under this harness, not the queue
+design as such.
+Separately, pre-register LockAdvisor's admission floor for REVIEW I2 (a
+returning client enters at most one mean request behind the currently
+served key), with the review's intermittent-client falsifier.
+
 ## 2026-09-29 — dispatch-pq: usage-ordered fairness without delegation
 
 Kill test for "delegation is needed for cheap service fairness": FC-PQ's

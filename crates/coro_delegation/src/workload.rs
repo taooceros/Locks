@@ -4,7 +4,10 @@
 //!   random key (bounded key space so the map stops growing early) and spins
 //!   `class_cost` cycles. Heavy class cost = `heavy_ratio` x light.
 //! - `clients` client tasks, half light, half heavy (even ids light); each
-//!   loops `run(cs).await` then `spin_cycles(parallel_work)`.
+//!   loops `run(cs).await` (closure locks) or `lock().await; cs;
+//!   unlock().await` (coroutine-style `co-*` locks, same body), then its
+//!   parallel work ([`ParallelMode`]: spin in the same poll, or
+//!   `yield_now()` first).
 //! - `bystanders` tasks loop `spin_cycles(bystander_work)` then `yield_now()`;
 //!   the executor records their schedule->poll latency.
 //! - Phases: warm-up (not recorded) -> measure (recorded) -> stop. An op is
@@ -15,6 +18,7 @@
 //! so the service Jain index is comparable across variants.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,7 +26,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::executor::{yield_now, Executor};
-use crate::lock::{cycles, DelegationLock, LockClient};
+use crate::lock::{cycles, AsyncGuard, AsyncMutex, CoLock, DelegationLock, LockClient};
+use crate::locks::co_mutex::{self, HandleStats};
 use crate::locks::{ces, dispatch, fc};
 use crate::stats::{self, Histogram, LatencySummary, TaskKind, WorkerStats};
 
@@ -45,6 +50,7 @@ impl<T: Send + 'static, P: fc::Policy<T>> ClientExtras for fc::Client<T, P> {
     }
 }
 impl<T: Send + 'static> ClientExtras for crate::locks::actor::ActorClient<T> {}
+impl<T: Send + 'static> ClientExtras for crate::locks::cfl::CflClient<T> {}
 
 pub type Shared = BTreeMap<u64, u64>;
 
@@ -70,6 +76,40 @@ pub struct Config {
     /// Executor balancing-steal interval in polls (0 = off); see
     /// `Executor::with_balance_interval`.
     pub balance_interval: u32,
+    /// How a client spends its parallel work after each op.
+    pub parallel_mode: ParallelMode,
+}
+
+/// How a client spends `parallel_work_cycles` after an op (REVIEW I1).
+/// There is no `sleep`: the executor has no timer, and an off-executor
+/// timer thread would be a harness-specific wake source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParallelMode {
+    /// Spin synchronously in the poll that finished the op (the original
+    /// harness; worst case for inline / LIFO placement of a grantee).
+    #[default]
+    Spin,
+    /// `yield_now().await` (back of the local queue), then spin in a later
+    /// poll: the op's continuation reaches an await point first.
+    Yield,
+}
+
+impl ParallelMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            ParallelMode::Spin => "spin",
+            ParallelMode::Yield => "yield",
+        }
+    }
+}
+
+/// The client's parallel work between two ops.
+async fn parallel_work(cfg: &Config) {
+    if cfg.parallel_mode == ParallelMode::Yield {
+        yield_now().await;
+    }
+    spin_cycles(cfg.parallel_work_cycles);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -174,6 +214,26 @@ pub struct ClientResult {
     pub run_latency: Histogram,
     /// All ops, including warm-up (sanity mode).
     pub total_ops: u64,
+    /// `co-*` locks: handle counters over the measurement window (from the
+    /// client's first op in the window to its exit); `None` otherwise.
+    pub co: Option<HandleStats>,
+}
+
+impl ClientResult {
+    fn new(id: usize, class: Class) -> Self {
+        ClientResult {
+            id,
+            class,
+            ops: 0,
+            service_cycles: 0,
+            usage_cycles: 0,
+            combining_cycles: 0,
+            combiner_yields: 0,
+            run_latency: Histogram::new(),
+            total_ops: 0,
+            co: None,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -204,6 +264,9 @@ pub struct WorkerReport {
     pub placements: PlacementCounts,
     /// Inline-resume chains that ended on this worker (count, p50, max).
     pub chain_lengths: LatencySummary,
+    /// Burden (`ces`, `co-*`): critical-section cycles executed here for
+    /// requests made on another worker (`stats::record_foreign_cs`).
+    pub foreign_cs_cycles: u64,
 }
 
 #[derive(Clone, Copy, Default, Serialize)]
@@ -251,6 +314,7 @@ impl WorkerReport {
             parks: s.parks,
             placements: PlacementCounts::from_array(&s.placements),
             chain_lengths: s.chain_lengths.summary(),
+            foreign_cs_cycles: 0,
         }
     }
 }
@@ -288,6 +352,22 @@ pub struct Report {
     pub placements: PlacementCounts,
     /// Inline-resume chain lengths merged over all workers.
     pub chain_lengths: LatencySummary,
+    /// Measurement window in TSC cycles (`measured_secs x tsc_hz`).
+    pub window_cycles: f64,
+    /// Sum over clients of harness `service_cycles` (critical sections
+    /// started in the window).
+    pub cs_cycles: u64,
+    /// Per-op lock cost `o = (window_cycles - cs_cycles) / total_ops`: the
+    /// time the lock (one serial resource) spent not executing a critical
+    /// section, per op (REVIEW I3). Per-class op counts are in `classes`.
+    pub o_cycles_per_op: Option<f64>,
+    /// Jain over per-worker `foreign_cs_cycles` (`ces`, `co-*`; `None` if
+    /// nothing was foreign).
+    pub burden_foreign_jain: Option<f64>,
+    pub total_foreign_cs_cycles: u64,
+    /// `co-*` only: handle counters summed over clients (window).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub co_mutex: Option<HandleStats>,
 }
 
 // ---------------------------------------------------------------------------
@@ -306,17 +386,7 @@ where
     };
     let mut client = lock.client();
     let mut rng = XorShift64(cfg.seed ^ ((id as u64 + 1) * 0x9E37_79B9_7F4A_7C15));
-    let mut res = ClientResult {
-        id,
-        class,
-        ops: 0,
-        service_cycles: 0,
-        usage_cycles: 0,
-        combining_cycles: 0,
-        combiner_yields: 0,
-        run_latency: Histogram::new(),
-        total_ops: 0,
-    };
+    let mut res = ClientResult::new(id, class);
     let mut counter: u64 = 0;
     loop {
         let ph = phase.load(Ordering::Relaxed);
@@ -344,11 +414,81 @@ where
             res.service_cycles += dt;
             res.run_latency.record(cycles().wrapping_sub(t0));
         }
-        spin_cycles(cfg.parallel_work_cycles);
+        parallel_work(&cfg).await;
     }
     res.usage_cycles = client.usage();
     res.combining_cycles = client.combining_cycles();
     res.combiner_yields = client.combiner_yields();
+    res
+}
+
+/// Harness-side access to `co-*` handle counters.
+pub trait CoExtras {
+    fn co_stats(&self) -> HandleStats;
+}
+
+impl<T: Send + 'static, Q: co_mutex::WaitList> CoExtras for co_mutex::CoHandle<T, Q> {
+    fn co_stats(&self) -> HandleStats {
+        self.stats()
+    }
+}
+
+/// `client_task` for coroutine-style locks: the same keys, costs, critical
+/// section body and measurements, written as the task's own continuation
+/// (`lock().await; insert + spin; unlock().await`). `run_latency` spans
+/// `lock()` to the return of `unlock().await`, like `run(cs).await`.
+async fn co_client_task<M>(
+    lock: Arc<M>,
+    id: usize,
+    cfg: Config,
+    phase: Arc<AtomicU8>,
+) -> ClientResult
+where
+    M: CoLock<Shared>,
+    M::Handle: CoExtras,
+{
+    let class = Class::of(id);
+    let cost = match class {
+        Class::Light => cfg.light_cs_cycles,
+        Class::Heavy => cfg.light_cs_cycles * cfg.heavy_ratio,
+    };
+    let h = lock.handle();
+    let mut rng = XorShift64(cfg.seed ^ ((id as u64 + 1) * 0x9E37_79B9_7F4A_7C15));
+    let mut res = ClientResult::new(id, class);
+    let mut window_start: Option<HandleStats> = None;
+    let mut counter: u64 = 0;
+    loop {
+        let ph = phase.load(Ordering::Relaxed);
+        if ph == PHASE_STOP {
+            break;
+        }
+        if ph == PHASE_MEASURE && window_start.is_none() {
+            window_start = Some(h.co_stats());
+        }
+        let key = if cfg.unique_keys {
+            ((id as u64) << 40) | counter
+        } else {
+            rng.next() % cfg.key_space
+        };
+        counter += 1;
+        let t0 = cycles();
+        let mut g = h.lock().await;
+        let s = cycles();
+        g.insert(key, s);
+        spin_cycles(cost);
+        let dt = cycles().wrapping_sub(s);
+        g.unlock().await;
+        res.total_ops += 1;
+        if ph == PHASE_MEASURE {
+            res.ops += 1;
+            res.service_cycles += dt;
+            res.run_latency.record(cycles().wrapping_sub(t0));
+        }
+        parallel_work(&cfg).await;
+    }
+    res.usage_cycles = h.usage();
+    let end = h.co_stats();
+    res.co = Some(end.since(&window_start.unwrap_or(end)));
     res
 }
 
@@ -370,6 +510,8 @@ pub struct RawRun {
     pub measured_secs: f64,
     /// `len()` of the shared map after all clients finished.
     pub final_len: usize,
+    /// Per worker: `stats::take_foreign_cs` after the run.
+    pub foreign_cs: Vec<u64>,
 }
 
 /// Run one configuration on a fresh executor with `lock`.
@@ -378,7 +520,52 @@ where
     L: DelegationLock<Shared>,
     L::Client: ClientExtras,
 {
+    let read_len = {
+        let lock = Arc::clone(&lock);
+        async move { lock.client().run(|m: &mut Shared| m.len()).await }
+    };
+    run_tasks(
+        cfg,
+        |id, phase| client_task(Arc::clone(&lock), id, cfg.clone(), phase),
+        read_len,
+    )
+}
+
+/// [`run_raw`] for a coroutine-style lock.
+pub fn run_raw_co<M>(cfg: &Config, lock: Arc<M>) -> RawRun
+where
+    M: CoLock<Shared>,
+    M::Handle: CoExtras,
+{
+    let read_len = {
+        let lock = Arc::clone(&lock);
+        async move {
+            let h = lock.handle();
+            let g = h.lock().await;
+            let n = g.len();
+            g.unlock().await;
+            n
+        }
+    };
+    run_tasks(
+        cfg,
+        |id, phase| co_client_task(Arc::clone(&lock), id, cfg.clone(), phase),
+        read_len,
+    )
+}
+
+/// Spawn `client(id, phase)` for every client plus the bystanders, run the
+/// warm-up and the window, drain, then `read_len` on a worker.
+fn run_tasks<C, F, R>(cfg: &Config, client: C, read_len: R) -> RawRun
+where
+    C: Fn(usize, Arc<AtomicU8>) -> F,
+    F: Future<Output = ClientResult> + Send + 'static,
+    R: Future<Output = usize> + Send + 'static,
+{
     stats::set_recording(false);
+    for w in 0..cfg.workers {
+        stats::take_foreign_cs(w);
+    }
     let exec = Executor::with_balance_interval(cfg.workers, cfg.balance_interval);
     let phase = Arc::new(AtomicU8::new(if cfg.warmup_ms == 0 {
         PHASE_MEASURE
@@ -394,7 +581,7 @@ where
             exec.spawn_on(
                 id % cfg.workers,
                 TaskKind::Client,
-                client_task(Arc::clone(&lock), id, cfg.clone(), Arc::clone(&phase)),
+                client(id, Arc::clone(&phase)),
             )
         })
         .collect();
@@ -437,18 +624,17 @@ where
 
     // Read the map length through the lock, on a worker (delegation locks may
     // need `worker_id()`).
-    let len_task = exec.spawn(TaskKind::Client, {
-        let lock = Arc::clone(&lock);
-        async move { lock.client().run(|m: &mut Shared| m.len()).await }
-    });
+    let len_task = exec.spawn(TaskKind::Client, read_len);
     let final_len = exec.block_on(len_task);
 
     let workers = exec.shutdown();
+    let foreign_cs = (0..cfg.workers).map(stats::take_foreign_cs).collect();
     RawRun {
         clients,
         workers,
         measured_secs,
         final_len,
+        foreign_cs,
     }
 }
 
@@ -494,7 +680,10 @@ pub fn make_report(lock_name: &str, cfg: &Config, raw: &RawRun, tsc_hz: f64) -> 
     let workers: Vec<WorkerReport> = raw
         .workers
         .iter()
-        .map(|w| WorkerReport::from_stats(w, censor_threshold))
+        .map(|w| WorkerReport {
+            foreign_cs_cycles: raw.foreign_cs.get(w.worker).copied().unwrap_or(0),
+            ..WorkerReport::from_stats(w, censor_threshold)
+        })
         .collect();
     let mut bystander = Histogram::new();
     for w in &raw.workers {
@@ -511,7 +700,14 @@ pub fn make_report(lock_name: &str, cfg: &Config, raw: &RawRun, tsc_hz: f64) -> 
         placements.add(&PlacementCounts::from_array(&w.placements));
         chains.merge(&w.chain_lengths);
     }
-
+    let window_cycles = raw.measured_secs * tsc_hz;
+    let cs_cycles: u64 = clients.iter().map(|c| c.service_cycles).sum();
+    let total_foreign_cs_cycles: u64 = workers.iter().map(|w| w.foreign_cs_cycles).sum();
+    let burden_foreign_jain = jain(workers.iter().map(|w| w.foreign_cs_cycles as f64));
+    let co_mutex = raw.clients.iter().filter_map(|c| c.co).reduce(|mut a, b| {
+        a.add(&b);
+        a
+    });
     Report {
         lock: lock_name.to_string(),
         config: cfg.clone(),
@@ -532,6 +728,13 @@ pub fn make_report(lock_name: &str, cfg: &Config, raw: &RawRun, tsc_hz: f64) -> 
         total_combiner_yields,
         placements,
         chain_lengths: chains.summary(),
+        window_cycles,
+        cs_cycles,
+        o_cycles_per_op: (total_ops > 0)
+            .then(|| (window_cycles - cs_cycles as f64) / total_ops as f64),
+        burden_foreign_jain,
+        total_foreign_cs_cycles,
+        co_mutex,
     }
 }
 
@@ -552,6 +755,22 @@ where
     make_report(label, cfg, &raw, tsc_hz)
 }
 
+/// [`run_benchmark`] for a coroutine-style lock.
+pub fn run_co_benchmark<M>(
+    cfg: &Config,
+    tsc_hz: f64,
+    label: &str,
+    make: impl FnOnce(Shared) -> M,
+) -> Report
+where
+    M: CoLock<Shared>,
+    M::Handle: CoExtras,
+{
+    let lock = Arc::new(make(Shared::new()));
+    let raw = run_raw_co(cfg, lock);
+    make_report(label, cfg, &raw, tsc_hz)
+}
+
 /// Mutual-exclusion check: unique keys per client, so the map length must
 /// equal the number of completed inserts. Returns `Err` with a description
 /// on failure.
@@ -565,10 +784,27 @@ where
         ..cfg.clone()
     };
     let lock = Arc::new(make(Shared::new()));
-    let raw = run_raw(&cfg, lock);
+    check_sanity(L::name(), &run_raw(&cfg, lock))
+}
+
+/// [`sanity`] for a coroutine-style lock.
+pub fn sanity_co<M>(cfg: &Config, make: impl FnOnce(Shared) -> M) -> Result<SanityOutcome, String>
+where
+    M: CoLock<Shared>,
+    M::Handle: CoExtras,
+{
+    let cfg = Config {
+        unique_keys: true,
+        ..cfg.clone()
+    };
+    let lock = Arc::new(make(Shared::new()));
+    check_sanity(M::name(), &run_raw_co(&cfg, lock))
+}
+
+fn check_sanity(lock: &'static str, raw: &RawRun) -> Result<SanityOutcome, String> {
     let total_ops: u64 = raw.clients.iter().map(|c| c.total_ops).sum();
     let outcome = SanityOutcome {
-        lock: L::name(),
+        lock,
         total_ops,
         final_len: raw.final_len,
     };
@@ -576,10 +812,8 @@ where
         Ok(outcome)
     } else {
         Err(format!(
-            "{}: map len {} != total ops {} (mutual exclusion violated)",
-            L::name(),
+            "{lock}: map len {} != total ops {total_ops} (mutual exclusion violated)",
             raw.final_len,
-            total_ops
         ))
     }
 }

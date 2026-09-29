@@ -9,11 +9,20 @@
 # SKIP_BUILD=1 (use BIN as is), PREFIX=<file prefix, default p3>,
 # REPEATS="1 2 3" (repeat indices to run), FCPQ_WAIT_STATS=1 (fcpq and
 # dispatch-pq runs add --fcpq-wait-stats: queue-wait histogram in the JSON),
-# HANDOFF_STATS=1 (dispatch-pq runs add --handoff-stats), CONTENTIONS="sus"
+# HANDOFF_STATS=1 (dispatch-pq / cfl runs add --handoff-stats), CONTENTIONS="sus"
 # (default "sus bur"), OUT=<output dir, relative to the workspace root;
-# default crates/coro_delegation/results>.
+# default crates/coro_delegation/results>, PARALLEL_MODE=yield (default spin:
+# client parallel work spun in the poll that released the lock; yield: one
+# yield_now() first; file name gets -p<mode> after the label when != spin).
 # dispatch-pq labels: dispatch-pq[-home|-remote][-c<N>][-n<init>] (clamp in
 # handoffs, default 16).
+# cfl labels: cfl[-noshfl][-nopre][-ovl][-remote][-c<N>][-spin<N>] (own
+# placement home; clamp in handoffs, default 256); HANDOFF_STATS applies.
+# co labels (coroutine-style mutex): co-fifo-s<step>-k<K>[-home|-remote] and
+# co-pq-s<step>-k<K>[-home|-remote]-c<N>, step in {remote,home,none} (where
+# unlock().await puts the releaser), K = chain bound (0 = unbounded),
+# -home/-remote = chain-break wake placement, c = clamp in handoffs; the
+# label coro-bench writes always carries -s, -k (and -c for co-pq).
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 BIN=${BIN:-target/release/coro-bench}
@@ -23,6 +32,9 @@ BALANCES=${BALANCES:-0 31}
 PREFIX=${PREFIX:-p3}
 REPEATS=${REPEATS:-1 2 3}
 CONTENTIONS=${CONTENTIONS:-sus bur}
+PARALLEL_MODE=${PARALLEL_MODE:-spin}
+if [ "$PARALLEL_MODE" = spin ]; then pm=""; pmargs=(); else
+  pm="-p$PARALLEL_MODE"; pmargs=(--parallel-mode "$PARALLEL_MODE"); fi
 LIGHT=1000
 DEFAULT_VARIANTS="dispatch dispatch-home \
 ces ces-home ces-k64 ces-k64-home ces-t64000 ces-t64000-home \
@@ -39,13 +51,17 @@ args_for() {
   case $v in
     actor-inline|actor-inline-*) base=actor-inline ;;
     dispatch-pq|dispatch-pq-*) base=dispatch-pq ;;
+    co-fifo|co-fifo-*) base=co-fifo ;;
+    co-pq|co-pq-*) base=co-pq ;;
   esac
   rest=${v#"$base"}
   a+=(--lock "$base")
-  case $base in fcpq|dispatch-pq)
+  case $base in fcpq|dispatch-pq|co-pq)
     if [ -n "${FCPQ_WAIT_STATS:-}" ]; then a+=(--fcpq-wait-stats); fi ;;
   esac
-  if [ "$base" = dispatch-pq ] && [ -n "${HANDOFF_STATS:-}" ]; then a+=(--handoff-stats); fi
+  case $base in dispatch-pq|cfl)
+    if [ -n "${HANDOFF_STATS:-}" ]; then a+=(--handoff-stats); fi ;;
+  esac
   # suffixes: -home -remote -k<K> -t<T> -h<H> -rotate -credit -elect -noyield
   #           -c<N> (fcpq starvation clamp, 0 = off) -n{mean,zero,min,median}
   local IFS='-'
@@ -60,6 +76,11 @@ args_for() {
       noyield) a+=(--no-combiner-yield) ;;
       c[0-9]*) a+=(--starvation-clamp "${s#c}") ;;
       nmean|nzero|nmin|nmedian) a+=(--newcomer-init "${s#n}") ;;
+      noshfl) a+=(--cfl-shuffle off) ;;
+      nopre)  a+=(--cfl-prewake off) ;;
+      ovl)    a+=(--cfl-scan overlap) ;;
+      spin[0-9]*) a+=(--head-spin-cycles "${s#spin}") ;;
+      sremote|shome|snone) a+=(--co-step-aside "${s#s}") ;;
       k*)     a+=(--ces-chain-bound "${s#k}") ;;
       h*)     a+=(--pass-limit "${s#h}") ;;
       t*)     if [ "$base" = ces ]; then a+=(--ces-chain-budget-cycles "${s#t}");
@@ -85,10 +106,10 @@ for r in $REPEATS; do
           sus) cl=64; pw=$((4 * LIGHT)) ;;
           bur) cl=16; pw=$((32 * LIGHT)) ;;
         esac
-        f="$OUT/$PREFIX-$v-w$WORKERS-h8-b$b-$c-r$r.json"
+        f="$OUT/$PREFIX-$v$pm-w$WORKERS-h8-b$b-$c-r$r.json"
         n=$((n + 1))
         if [ -f "$f" ]; then continue; fi
-        "$BIN" "${vargs[@]}" --workers "$WORKERS" --heavy-ratio 8 \
+        "$BIN" "${vargs[@]}" "${pmargs[@]}" --workers "$WORKERS" --heavy-ratio 8 \
           --balance-interval "$b" --clients "$cl" --parallel-work-cycles "$pw" \
           --light-cs-cycles "$LIGHT" --duration-ms 2000 --warmup-ms 200 \
           --out "$f" 2>/dev/null
