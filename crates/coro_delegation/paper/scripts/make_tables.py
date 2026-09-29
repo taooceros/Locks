@@ -33,6 +33,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(HERE, "..", "..", "scripts"))
 import summarize  # noqa: E402
 import summarize_fcpq_sweep as sweep  # noqa: E402
+import summarize_dispatch_pq as sdpq  # noqa: E402
 
 CAP_UNIX = 1790640474  # 2026-09-29 00:07:54 UTC: 3.0 GHz cap set on CPUs 0-15
 CENSORED_US = 1e6       # a bystander p99 above 1 s is a censored sample
@@ -453,6 +454,11 @@ def t_xrt(res, out, nums):
     nums["BurOnLo"], nums["BurOnHi"] = "%.2f" % min(bur_on), "%.2f" % max(bur_on)
     nums["SusOffLo"], nums["SusOffHi"] = "%.2f" % min(sus_off), "%.2f" % max(sus_off)
     nums["BurOffLo"], nums["BurOffHi"] = "%.2f" % min(bur_off), "%.2f" % max(bur_off)
+    # async-lock monopoly: runs in which exactly one client completed an operation.
+    nclients = {"sus": 64, "bur": 16}
+    al = [(c, m) for w, c in XRT_CELLS for m in runs_of("tokio", "async-lock", w, c)]
+    nums["AsyncMonoRuns"] = "%d" % sum(1 for c, m in al if m["starved_c"] == nclients[c] - 1)
+    nums["AsyncRuns"] = "%d" % len(al)
 
 
 def t_actor(res, out):
@@ -494,12 +500,121 @@ def t_actor(res, out):
     write(out, "tab-actor.typ", table("lllrrrrr", head, body))
 
 
+# dispatch-pq (usage-ordered handoff mutex) against dispatch and FC-PQ,
+# 09-29 window (FINDINGS 2026-09-29 "dispatch-pq"). Variant names are the
+# JSON `lock` labels; dispatch-pq without a clamp suffix is clamp 16.
+DPQ_CELLS = [("sus", 8, 31), ("sus", 8, 0), ("sus", 16, 31), ("bur", 8, 31)]
+DPQ_VARIANTS = ["dispatch", "dispatch-pq", "dispatch-pq-home", "dispatch-pq-remote", "dispatch-pq-c0",
+                "dispatch-pq-c256", "dispatch-pq-home-c256", "dispatch-pq-remote-c256", "fc-remote",
+                "fcpq-h16-home-c16"]
+DPQ_FAIR = ("dispatch-pq-c0", "dispatch-pq-c256", "dispatch-pq-home-c256", "dispatch-pq-remote-c256")
+DPQ_FCPQ = "fcpq-h16-home-c16"
+
+
+def load_handoff(results, pattern):
+    """{(cont, W, B, lock): [summarize_dispatch_pq.run_metrics]}: per-handoff cycle breakdown."""
+    cells = defaultdict(list)
+    files = sorted(glob.glob(os.path.join(results, pattern)))
+    if not files:
+        sys.exit("make_tables: no files match %s" % os.path.join(results, pattern))
+    for fn in files:
+        with open(fn) as fh:
+            r = json.load(fh)
+        if window_of(r) != "09-29":
+            sys.exit("make_tables: %s is not in the 09-29 window" % fn)
+        cfg = r["config"]
+        cells[(summarize.contention_label(cfg), cfg["workers"], cfg["balance_interval"], r["lock"])].append(
+            sdpq.run_metrics(r))
+    return cells
+
+
+def dpq_label(v):
+    """Short variant label: placement + clamp (c16 is dispatch-pq's default clamp)."""
+    if not v.startswith("dispatch-pq"):
+        return tt(v)
+    rest = [p for p in v[len("dispatch-pq"):].split("-") if p]
+    place = rest[0] if rest and rest[0] in ("home", "remote") else "default"
+    clamp = next((p for p in rest if p.startswith("c")), "c16")
+    return "#h(0.8em)%s %s" % (place, clamp)
+
+
+def t_dpq(res, out, nums):
+    c = load(res, "dpq-*.json")
+    for runs in c.values():
+        assert runs[0]["window"] == "09-29"
+    cellname = {("sus", 8, 31): "W8 b31 sus.", ("sus", 8, 0): "W8 b0 sus.", ("sus", 16, 31): "W16 b31 sus.",
+                ("bur", 8, 31): "W8 b31 bur."}
+    head = [["", span(cellname[DPQ_CELLS[0]], 3)] + [span(cellname[k], 2) for k in DPQ_CELLS[1:]],
+            rules((2, 4), (5, 6), (7, 8), (9, 10)),
+            ["variant", "Mops/s", "util (×pq)", "svc. $J$"] + ["util (×pq)", "svc. $J$"] * 3]
+    body = []
+    for v in DPQ_VARIANTS:
+        if v == "dispatch-pq":
+            body.append(MID)
+            body.append([tt("dispatch-pq") + ": wake, clamp"] + [""] * 9)
+        if v == "fc-remote":
+            body.append(MID)
+        row = [dpq_label(v)]
+        for i, k in enumerate(DPQ_CELLS):
+            runs = c.get(k + (v,))
+            ref = med(c[k + (DPQ_FCPQ,)], "util")
+            if i == 0:
+                row.append(f(agg(runs, "thr"), 3, 1e-6, rng=False) if runs else "")
+            row.append("%s (%s)" % (f(agg(runs, "util"), rng=False), ratio(med(runs, "util"), ref)) if runs else "")
+            row.append(f(agg(runs, "sj"), rng=False) if runs else "")
+        body.append(row)
+    write(out, "tab-dpq.typ", table("lrrrrrrrrr", head, body))
+
+    # Numbers the text quotes: fair dispatch-pq (clamp 0 / 256) against the same cell's references.
+    def rat(k, v, ref, name):
+        return med(c[k + (v,)], name) / med(c[k + (ref,)], name)
+
+    def rng2(xs, d=2):
+        return "%.*f" % (d, min(xs)), "%.*f" % (d, max(xs))
+
+    sus = [k for k in DPQ_CELLS if k[0] == "sus"]
+    fair = [(k, v) for k in sus for v in DPQ_FAIR if k + (v,) in c]
+    for tag, ref, name in (("UtilFc", DPQ_FCPQ, "util"), ("ThrFc", DPQ_FCPQ, "thr"),
+                           ("UtilDisp", "dispatch", "util"), ("ThrDisp", "dispatch", "thr")):
+        nums["Dpq%sLo" % tag], nums["Dpq%sHi" % tag] = rng2([rat(k, v, ref, name) for k, v in fair])
+    best = [max(rat(k, v, DPQ_FCPQ, "util") for v in DPQ_FAIR if k + (v,) in c) for k in sus]
+    nums["DpqBestUtilFcLo"], nums["DpqBestUtilFcHi"] = rng2(best)
+    bur = ("bur", 8, 31)
+    nums["DpqBurUtilFcLo"], nums["DpqBurUtilFcHi"] = rng2([rat(bur, v, DPQ_FCPQ, "util") for v in DPQ_FAIR])
+    nums["DpqFairJainMin"] = "%.3f" % min(m["sj"] for k, v in fair + [(bur, v) for v in DPQ_FAIR]
+                                          for m in c[k + (v,)])
+    nums["DpqPlainOLo"], nums["DpqPlainOHi"] = rng2([med(c[k + (v,)], "o") for k, v in fair], 0)
+    nums["DpqFairUtilLo"], nums["DpqFairUtilHi"] = rng2([med(c[k + (v,)], "util") for k, v in fair], 3)
+    nums["DpqFairLHLo"], nums["DpqFairLHHi"] = rng2([med(c[k + (v,)], "lh") for k, v in fair])
+    c16 = [med(c[("sus", 8, 31, v)], "sj") for v in ("dispatch-pq", "dispatch-pq-home", "dispatch-pq-remote",
+                                                     "dispatch-pq-c8")]
+    nums["DpqFifoJainLo"], nums["DpqFifoJainHi"] = rng2(c16, 3)
+
+    # Per-handoff breakdown, instrumented W8 b31 sustained runs, fair variants.
+    h = load_handoff(res, "dpqi-dispatch-pq*-w8-h8-b31-sus-*.json")
+
+    def hm(v, name):
+        return statistics.median(m[name] for m in h[("sus", 8, 31, v)])
+
+    nums["DpqGtsLo"], nums["DpqGtsHi"] = rng2([hm(v, "g2s") for v in DPQ_FAIR], 0)
+    nums["DpqQueueLo"], nums["DpqQueueHi"] = rng2([hm(v, "queue") for v in DPQ_FAIR], 0)
+    nums["DpqSpinLo"], nums["DpqSpinHi"] = rng2([hm(v, "spin") for v in DPQ_FAIR], 0)
+    nums["DpqOLo"], nums["DpqOHi"] = rng2([hm(v, "o") for v in DPQ_FAIR], 0)
+    nums["DpqGtsShareLo"], nums["DpqGtsShareHi"] = rng2([100 * hm(v, "g2s") / hm(v, "o") for v in DPQ_FAIR], 0)
+    fi = load(res, "dpqi-%s-w8-h8-b31-sus-*.json" % DPQ_FCPQ)[("sus", 8, 31, DPQ_FCPQ)]
+    nums["FcpqAdminInst"] = "%.0f" % med(fi, "admin")
+    nums["FcpqGapInst"] = "%.0f" % med(fi, "gap")
+    nums["FcpqOInst"] = "%.0f" % med(fi, "o")
+    nums["DpqOOverFcpqLo"], nums["DpqOOverFcpqHi"] = rng2([hm(v, "o") / med(fi, "o") for v in DPQ_FAIR], 1)
+
+
 LOC_GROUPS = [
     ("executor", ["coro_delegation/src/executor.rs"]),
     ("lock trait + `dispatch`", ["coro_delegation/src/lock.rs", "coro_delegation/src/locks/dispatch.rs"]),
     ("`ces`", ["coro_delegation/src/locks/ces.rs"]),
     ("`fc` (delegation core)", ["coro_delegation/src/locks/fc.rs"]),
-    ("`fcpq` policy", ["coro_delegation/src/locks/fc_pq.rs"]),
+    ("`UsageQueue` + `fcpq` policy", ["coro_delegation/src/locks/fc_pq.rs"]),
+    ("`dispatch-pq`", ["coro_delegation/src/locks/dispatch_pq.rs"]),
     ("`actor`, `actor-inline`", ["coro_delegation/src/locks/actor.rs"]),
     ("stats, workload, `coro-bench`", ["coro_delegation/src/stats.rs", "coro_delegation/src/workload.rs",
                                        "coro_delegation/src/bin/coro_bench.rs",
@@ -564,6 +679,7 @@ def main():
     t_service(res, out, nums)
     t_xrt(res, out, nums)
     t_actor(res, out)
+    t_dpq(res, out, nums)
     write(out, "numbers.typ", ['#let %s = "%s"' % (k, v) for k, v in sorted(nums.items())], imports=False)
     print("make_tables: wrote %s" % ", ".join(sorted(os.listdir(out))))
 

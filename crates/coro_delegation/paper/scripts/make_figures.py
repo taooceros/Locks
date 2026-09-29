@@ -162,62 +162,21 @@ def per_index(values):
 # ---------------------------------------------------------------- figures --
 
 def fig_motivation(res, out):
-    """Both subversions: (a,b) combiner burden at W8 sus b0; (c) FIFO service share."""
+    """Five subversion forms: (a) FIFO service share, (b) monopoly and worker seizure,
+    (c) LIFO-slot hand-off delay, (d, e) combiner burden and its bystander."""
     raw = load_raw(res, "p3-*-w8-h8-b0-sus-*.json")
     met = mt.load(res, "p3-*-w8-h8-b0-sus-*.json")
-    fig = plt.figure(figsize=(TWO, 2.0), layout="constrained")
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.35, 0.75, 1.9])
+    tk = mt.load(res, "tokio-*.json")
+    lifo = mt.load_lifo(res)
+    fig = plt.figure(figsize=(TWO, 2.95), layout="constrained")
+    gt = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.95])
+    g_top = gt[0].subgridspec(1, 2, width_ratios=[1.75, 1.25])
+    g_bot = gt[1].subgridspec(1, 3, width_ratios=[0.9, 1.35, 0.75])
+    cells = mt.XRT_CELLS
+    cell_lab = ["W%d\n%s" % (w, {"sus": "sus.", "bur": "bur."}[c]) for w, c in cells]
 
-    # (a) per-worker share of combining cycles, workers sorted by share
-    ax = fig.add_subplot(gs[0])
-    variants = ("ces", "ces-k64", "ces-k64-home", "fc-remote")
-    wd = 0.2
-    for i, v in enumerate(variants):
-        runs = raw[("sus", 8, 0, v)]
-        shares = []
-        for r in runs:
-            tot = sum(w["combining_cycles"] for w in r["workers"])
-            shares.append(sorted((w["combining_cycles"] / tot for w in r["workers"]), reverse=True))
-        pi = per_index(shares)
-        xs = [k + 1 + (i - 1.5) * wd for k in range(8)]
-        ax.bar(xs, [p[0] for p in pi], wd, color=COL[v], **EDGE,
-               label="%-12s J=%.3f" % (v, med(met[("sus", 8, 0, v)], "bj")),
-               yerr=[[p[0] - p[1] for p in pi], [p[2] - p[0] for p in pi]], error_kw=ERR)
-    ax.axhline(1 / 8, ls="--", color="black", lw=0.6)
-    ax.text(8.45, 1 / 8 + 0.02, "fair", ha="right", va="bottom", fontsize=7)
-    ax.set_xticks(range(1, 9))
-    ax.set_xlim(0.45, 8.55)
-    ax.set_ylim(0, 1.04)
-    ax.set_xlabel("worker, by combining share")
-    ax.set_ylabel("share of combining cycles")
-    ax.legend(prop=mono(7), loc="upper right", title="burden Jain", title_fontsize=7)
-    panel(ax, "a", "Combiner burden")
-
-    # (b) bystander p99 on the combiner worker vs. the other workers
-    ax = fig.add_subplot(gs[1])
-    top = 8e3
-    for i, v in enumerate(variants):
-        runs = met[("sus", 8, 0, v)]
-        c, o = agg(runs, "comb_p99"), agg(runs, "noncomb_p99")
-        ax.errorbar(i + 0.12, o[0], yerr=yerr(o), fmt="o", mfc="white", mec=COL[v], ms=4.5, **ERR)
-        if c[0] > mt.CENSORED_US:
-            ax.plot(i - 0.12, top, marker="^", color=COL[v], ms=5)
-            ax.text(i + 0.12, top, "never polled", fontsize=7, va="center", ha="left")
-        else:
-            ax.errorbar(i - 0.12, c[0], yerr=yerr(c), fmt="o", color=COL[v], ms=4.5, **ERR)
-    ax.set_yscale("log")
-    ax.set_ylim(1, 3e4)
-    ax.set_xlim(-0.5, len(variants) - 0.5)
-    ax.set_xticks(range(len(variants)))
-    ax.set_xticklabels(variants, fontproperties=mono(7), rotation=35, ha="right", rotation_mode="anchor")
-    ax.set_ylabel("bystander p99 (µs)")
-    ax.legend(handles=[Line2D([], [], ls="", marker="o", color="black", ms=4, label="combiner worker"),
-                       Line2D([], [], ls="", marker="o", mfc="white", mec="black", ms=4, label="max. other")],
-              loc="upper right", bbox_to_anchor=(1.0, 0.8), fontsize=7)
-    panel(ax, "b", "Its bystander")
-
-    # (c) per-client service under FIFO vs. usage ordering (W8 sus b31)
-    ax = fig.add_subplot(gs[2])
+    # (a) per-client service under FIFO vs. usage ordering (W8 sus b31)
+    ax = fig.add_subplot(g_top[0])
     series = [("dispatch", load_raw(res, "p3-dispatch-w8-h8-b31-sus-*.json")[("sus", 8, 31, "dispatch")],
                dict(marker="o", color=GREY, mfc=GREY, ms=2.4), -0.22),
               ("tokio-mutex", load_raw(res, "tokio-tokio-mutex-w8-h8-sus-*.json")[("sus", 8, None, "tokio-mutex")],
@@ -249,10 +208,10 @@ def fig_motivation(res, out):
     ax.plot([31.5, 63.5], [hi, hi], ls="--", color="black", lw=0.7, zorder=5)
     ax.axhline(1, ls=":", color="black", lw=0.7)
     ax.axvline(31.5, color="#BBBBBB", lw=0.5)
-    ax.text(15.5, lo - 0.07, "FIFO theory: $2C_L/(C_L+C_H)$", ha="center", va="top", fontsize=7)
+    ax.text(15.5, lo + 0.06, "FIFO theory: $2C_L/(C_L+C_H)$", ha="center", va="bottom", fontsize=7)
     ax.text(63.3, hi - 0.07, "FIFO theory: $2C_H/(C_L+C_H)$", ha="right", va="top", fontsize=7)
     ax.text(47.5, 0.97, "equal lock time", ha="center", va="top", fontsize=7)
-    ax.text(63.3, 0.5, "hollow: 09-29 window\n(3.0 GHz cap)", ha="right", va="center", fontsize=7)
+    ax.text(63.3, 0.1, "hollow: 09-29 window (3.0 GHz cap)", ha="right", va="bottom", fontsize=7)
     ax.set_xlim(-1, 64)
     ax.set_ylim(0, 3.0)
     ax.set_yticks([0, 0.5, 1, 1.5, 2, 2.5])
@@ -261,7 +220,103 @@ def fig_motivation(res, out):
     ax.tick_params(axis="x", length=0)
     ax.set_ylabel("client CS time / mean")
     ax.legend(handles=handles, prop=mono(7), loc="upper left", ncol=1, title="service Jain", title_fontsize=7)
-    panel(ax, "c", "Service unfairness (W8, sus., b31)")
+    panel(ax, "a", "FIFO service unfairness (W8, sus., b31)")
+
+    # (b) tokio-runtime locks: share of clients (bars) and bystanders (diamonds) starved
+    ax = fig.add_subplot(g_top[1])
+    locks = ("async-lock", "std-mutex", "parking-lot", "tokio-mutex")
+    wd = 0.2
+    nclients = {"sus": 64, "bur": 16}
+    for g, (w, cont) in enumerate(cells):
+        for i, lock in enumerate(locks):
+            runs = tk[(cont, w, None, lock)]
+            assert runs[0]["window"] == "09-28"
+            x = g + (i - 1.5) * wd
+            a = tuple(v / nclients[cont] for v in agg(runs, "starved_c"))
+            ax.bar(x, max(a[0], 0.004), wd, color=COL[lock], yerr=yerr(a), error_kw=ERR, **EDGE)
+            b = med(runs, "starved_b") / w
+            ax.plot(x, b, marker="D", color="white", mec="black", mew=0.7, ms=3.2, zorder=6)
+    ax.set_xticks(range(len(cells)))
+    ax.set_xticklabels(cell_lab)
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlim(-0.5, len(cells) - 0.5)
+    ax.set_ylim(0, 1.62)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
+    for g in range(1, len(cells)):
+        ax.axvline(g - 0.5, color="#BBBBBB", lw=0.5)
+    ax.set_ylabel("share starved (0 ops in 2 s)")
+    h = [Patch(facecolor=COL[l], label=l, **EDGE) for l in locks]
+    h.append(Line2D([], [], ls="", marker="D", color="white", mec="black", mew=0.7, ms=3.2, label="bystanders"))
+    leg = ax.legend(handles=h, prop=mono(7), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.03))
+    leg.get_texts()[-1].set_fontproperties(font_manager.FontProperties(family="serif", size=7))
+    panel(ax, "b", "Monopoly and worker seizure (tokio)")
+
+    # (c) tokio-mutex with the LIFO slot on / off
+    ax = fig.add_subplot(g_bot[0])
+    for g, (w, cont) in enumerate(cells):
+        for i, mode in enumerate(("on", "off")):
+            a = agg(lifo[(w, cont, "tokio-mutex", mode)], "thr")
+            a = tuple(v * 1e-6 for v in a)
+            ax.bar(g + (i - 0.5) * 0.36, a[0], 0.36, color=BLACK if mode == "on" else "white",
+                   hatch=None if mode == "on" else "xxxx", yerr=yerr(a), error_kw=ERR, **EDGE)
+    ax.set_xticks(range(len(cells)))
+    ax.set_xticklabels(cell_lab)
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlim(-0.5, len(cells) - 0.5)
+    ax.set_ylim(0, 0.34)
+    ax.set_ylabel("tokio-mutex Mops/s", fontproperties=None)
+    ax.legend(handles=[Patch(facecolor=BLACK, label="LIFO slot on", **EDGE),
+                       Patch(facecolor="white", hatch="xxxx", label="LIFO slot off", **EDGE)],
+              loc="upper center", ncol=2, fontsize=7, bbox_to_anchor=(0.5, 1.03))
+    panel(ax, "c", "LIFO hand-off delay")
+
+    # (d) per-worker share of combining cycles, workers sorted by share
+    ax = fig.add_subplot(g_bot[1])
+    variants = ("ces", "ces-k64", "ces-k64-home", "fc-remote")
+    wd = 0.2
+    for i, v in enumerate(variants):
+        runs = raw[("sus", 8, 0, v)]
+        shares = []
+        for r in runs:
+            tot = sum(w["combining_cycles"] for w in r["workers"])
+            shares.append(sorted((w["combining_cycles"] / tot for w in r["workers"]), reverse=True))
+        pi = per_index(shares)
+        xs = [k + 1 + (i - 1.5) * wd for k in range(8)]
+        ax.bar(xs, [p[0] for p in pi], wd, color=COL[v], **EDGE,
+               label="%-12s J=%.3f" % (v, med(met[("sus", 8, 0, v)], "bj")),
+               yerr=[[p[0] - p[1] for p in pi], [p[2] - p[0] for p in pi]], error_kw=ERR)
+    ax.axhline(1 / 8, ls="--", color="black", lw=0.6)
+    ax.text(1.5, 1 / 8 + 0.02, "fair", ha="left", va="bottom", fontsize=7)
+    ax.set_xticks(range(1, 9))
+    ax.set_xlim(0.45, 8.55)
+    ax.set_ylim(0, 1.04)
+    ax.set_xlabel("worker, by combining share")
+    ax.set_ylabel("share of combining cycles")
+    ax.legend(prop=mono(7), loc="upper right", title="burden Jain", title_fontsize=7)
+    panel(ax, "d", "Combiner burden (W8, sus., b0)")
+
+    # (e) bystander p99 on the combiner worker vs. the other workers
+    ax = fig.add_subplot(g_bot[2])
+    ceil = 8e3
+    for i, v in enumerate(variants):
+        runs = met[("sus", 8, 0, v)]
+        c, o = agg(runs, "comb_p99"), agg(runs, "noncomb_p99")
+        ax.errorbar(i + 0.12, o[0], yerr=yerr(o), fmt="o", mfc="white", mec=COL[v], ms=4.5, **ERR)
+        if c[0] > mt.CENSORED_US:
+            ax.plot(i - 0.12, ceil, marker="^", color=COL[v], ms=5)
+            ax.text(i + 0.12, ceil, "never polled", fontsize=7, va="center", ha="left")
+        else:
+            ax.errorbar(i - 0.12, c[0], yerr=yerr(c), fmt="o", color=COL[v], ms=4.5, **ERR)
+    ax.set_yscale("log")
+    ax.set_ylim(1, 3e4)
+    ax.set_xlim(-0.5, len(variants) - 0.5)
+    ax.set_xticks(range(len(variants)))
+    ax.set_xticklabels(variants, fontproperties=mono(7), rotation=35, ha="right", rotation_mode="anchor")
+    ax.set_ylabel("bystander p99 (µs)")
+    ax.legend(handles=[Line2D([], [], ls="", marker="o", color="black", ms=4, label="combiner worker"),
+                       Line2D([], [], ls="", marker="o", mfc="white", mec="black", ms=4, label="max. other")],
+              loc="upper right", bbox_to_anchor=(1.0, 0.8), fontsize=7)
+    panel(ax, "e", "Its bystander")
     save(fig, out, "fig-motivation.svg")
 
 
@@ -274,7 +329,7 @@ CELL_NAME = {("sus", 0): "sustained, b0", ("sus", 31): "sustained, b31",
 def fig_burden(res, out):
     """Burden Jain and combiner-worker bystander p99, variants x cells, W8 (+W16)."""
     c = mt.load(res, "p3-*-h8-*.json")
-    fig, axs = plt.subplots(2, 4, figsize=(TWO, 3.0), layout="constrained", sharex=True, sharey="row",
+    fig, axs = plt.subplots(2, 4, figsize=(TWO, 2.35), layout="constrained", sharex=True, sharey="row",
                             gridspec_kw=dict(height_ratios=[1, 1.15]))
     top, bot = 8e3, 0.05
     n = len(BURDEN_VARIANTS)
@@ -312,7 +367,7 @@ def fig_burden(res, out):
         a2.grid(axis="y", which="minor", visible=False)
     axs[0, 0].set_ylabel("burden Jain")
     axs[1, 0].set_ylabel("bystander p99 (µs)")
-    axs[0, 0].text(-0.5, 0.91, "G1", ha="left", va="bottom", fontsize=7)
+    axs[0, 0].text(-0.5, 0.91, "G3", ha="left", va="bottom", fontsize=7)
     axs[1, 0].text(0.35, top, "never polled", fontsize=7, va="center", ha="left")
     lh = [Patch(facecolor=COL[v], label=v, **EDGE) for v in BURDEN_VARIANTS]
     fig.legend(handles=lh, prop=mono(7.5), loc="outside upper center", ncol=7)
@@ -334,7 +389,7 @@ def fig_service(res, out):
     ab = mt.load(res, "p3ab-pre-*-w8-h8-b31-sus-*.json")
     allp3 = mt.load(res, "p3-fcpq-h16-home-c*-nmean-*.json")
     rawc = load_raw(res, "p3-fcpq-h16-home-c*-nmean-w8-h8-b31-sus-*.json")
-    fig, axs = plt.subplots(2, 3, figsize=(TWO, 3.05), layout="constrained")
+    fig, axs = plt.subplots(2, 3, figsize=(TWO, 2.35), layout="constrained")
     xs = list(range(len(CLAMPS)))
     xl = ["8", "16", "32", "off"]
     cl = [old[("sus", 8, 31, "fcpq-h16-home-c%d-nmean" % k)] for k in CLAMPS]
@@ -369,7 +424,7 @@ def fig_service(res, out):
         ax.bar(i, a[0], 0.7, color=COL["fc"] if v == "fc" else PURPLE, yerr=yerr(a), error_kw=ERR, **EDGE)
         ax.plot(i, model(runs), marker="_", color="black", ms=9, mew=1.2)
     ax.axhline(0.95, ls="--", color="black", lw=0.6)
-    ax.text(-0.45, 0.955, "G2", fontsize=7, va="bottom")
+    ax.text(-0.45, 0.955, "G1", fontsize=7, va="bottom")
     ax.set_xticks(range(len(hs)))
     ax.set_xticklabels([h[1] for h in hs], fontsize=7)
     ax.set_ylim(0.6, 1.02)
@@ -395,7 +450,7 @@ def fig_service(res, out):
     ax.set_ylim(0.6, 1.02)
     clamp_axis(ax)
     ax.set_ylabel("service Jain")
-    ax.legend(loc="lower right", fontsize=7, bbox_to_anchor=(1.0, 0.25))
+    ax.legend(loc="lower right", fontsize=7, bbox_to_anchor=(1.0, 0.18), ncol=2)
     panel(ax, "b", "Clamp sweep (09-29)")
 
     # (c) L:H vs clamp with the ratios the model needs
@@ -479,7 +534,7 @@ def fig_xrt(res, out):
     tk = mt.load(res, "tokio-*.json")
     co = mt.load(res, "xrt-*.json")
     lifo = mt.load_lifo(res)
-    fig, ax = plt.subplots(figsize=(TWO, 2.25), layout="constrained")
+    fig, ax = plt.subplots(figsize=(TWO, 1.75), layout="constrained")
     nb = len(XRT_BARS)
     wd = 0.8 / nb
     colors = {"tokio-mutex-lifo-off": "#FFFFFF", **COL}
@@ -533,7 +588,7 @@ def fig_actor(res, out):
     ref = mt.load(res, "actorref-*.json")
     p3 = mt.load(res, "p3-*-h8-*.json")
     xrt = mt.load(res, "xrt-*.json")
-    fig, axs = plt.subplots(1, 2, figsize=(ONE, 2.3), layout="constrained", sharey=True)
+    fig, axs = plt.subplots(1, 2, figsize=(ONE, 2.05), layout="constrained", sharey=True)
     cellmk = {(8, 31): "o", (8, 0): "s", (16, 31): "D"}
     for ax, cont in zip(axs, ("sus", "bur")):
         ax.add_patch(plt.Rectangle((0.9, 0.95), 0.15, 0.3, color="#E8F4EC", zorder=0, lw=0))
@@ -578,7 +633,7 @@ def fig_util(res, out):
     """Utilisation identity util = C / (C + o) with the measured FC-family points."""
     old = mt.load(res, "p3-*-w8-h8-b31-sus-*.json")
     ab = mt.load(res, "p3ab-pre-*-w8-h8-b31-sus-*.json")
-    fig, ax = plt.subplots(figsize=(ONE, 2.45), layout="constrained")
+    fig, ax = plt.subplots(figsize=(ONE, 2.3), layout="constrained")
     c16 = old[("sus", 8, 31, "fcpq-h16-home-c16-nmean")]
     csl, csh = med(c16, "cs_l"), med(c16, "cs_h")
     lh95 = mt.solve_x(0.95) * csh / csl
@@ -641,6 +696,111 @@ def fig_util(res, out):
                     ha="center", va="bottom" if above else "top")
     save(fig, out, "fig-util.svg")
 
+DPQ_PLACE_COL = {"default": "#FDB863", "home": "#E08214", "remote": "#B35806"}
+DPQ_CLAMP_HATCH = {"c16": "//////", "c0": "......", "c256": None}
+
+
+def dpq_style(v):
+    """(colour, hatch, legend label) for the dispatch-pq figure."""
+    if not v.startswith("dispatch-pq"):
+        return COL.get(v, PURPLE), None, v
+    rest = [p for p in v[len("dispatch-pq"):].split("-") if p]
+    place = rest[0] if rest and rest[0] in ("home", "remote") else "default"
+    clamp = next((p for p in rest if p.startswith("c")), "c16")
+    return DPQ_PLACE_COL[place], DPQ_CLAMP_HATCH[clamp], v + (" (c16)" if clamp == "c16" else "")
+
+
+def fig_dpq(res, out):
+    """Usage order without delegation: dispatch-pq vs. dispatch / FC-PQ (09-29), and the per-op cost."""
+    c = mt.load(res, "dpq-*.json")
+    inst = mt.load_handoff(res, "dpqi-dispatch-pq*-w8-h8-b31-sus-*.json")
+    fi = mt.load(res, "dpqi-%s-w8-h8-b31-sus-*.json" % mt.DPQ_FCPQ)[("sus", 8, 31, mt.DPQ_FCPQ)]
+    for runs in c.values():
+        assert runs[0]["window"] == "09-29"
+    fig = plt.figure(figsize=(TWO, 2.25), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.8, 1.0])
+    gl = gs[0].subgridspec(2, 1, height_ratios=[0.8, 1.25])
+    axj, axu = fig.add_subplot(gl[0]), fig.add_subplot(gl[1])
+    wd = 0.8
+    x, centres = 0.0, []
+    for g, k in enumerate(mt.DPQ_CELLS):
+        start = x
+        for v in mt.DPQ_VARIANTS:
+            runs = c.get(k + (v,))
+            if not runs:
+                continue
+            col, hatch, _ = dpq_style(v)
+            for ax, name in ((axj, "sj"), (axu, "util")):
+                a = agg(runs, name)
+                base = 0.6 if name == "sj" else 0.0
+                ax.bar(x, a[0] - base, wd, bottom=base, color=col, hatch=hatch, yerr=yerr(a), error_kw=ERR, **EDGE)
+            x += 1
+        centres.append((start + x - 1) / 2)
+        if g < len(mt.DPQ_CELLS) - 1:
+            for ax in (axj, axu):
+                ax.axvline(x, color="#BBBBBB", lw=0.5)
+        x += 1
+    for ax in (axj, axu):
+        ax.set_xlim(-0.8, x - 1.2)
+        ax.tick_params(axis="x", length=0)
+    axj.set_xticks([])
+    axj.set_ylim(0.6, 1.03)
+    axj.set_yticks([0.6, 0.7, 0.8, 0.9, 1.0])
+    axj.axhline(0.95, ls="--", color="black", lw=0.6)
+    axj.set_ylabel("service Jain")
+    panel(axj, "a", "Service fairness")
+    axu.set_xticks(centres)
+    axu.set_xticklabels(["W8 b31 sustained", "W8 b0 sus.", "W16 b31 sus.", "W8 b31 bursty"])
+    axu.set_ylim(0, 0.9)
+    axu.set_ylabel("utilisation")
+    panel(axu, "b", "Lock utilisation")
+
+    # (c) per-op cost, instrumented W8 b31 sustained runs
+    ax = fig.add_subplot(gs[1])
+    seg = [("spin", "spinlock", "#333333"), ("queue", "queue ops", VERM), ("g2s", "grant → CS start", SKY)]
+    labels = []
+    variants = ["dispatch-pq", "dispatch-pq-home", "dispatch-pq-remote", "dispatch-pq-c0", "dispatch-pq-c256",
+                "dispatch-pq-home-c256", "dispatch-pq-remote-c256"]
+    for i, v in enumerate(variants):
+        runs = inst[("sus", 8, 31, v)]
+        bottom = 0.0
+        for name, _, col in seg:
+            val = med(runs, name) / 1e3
+            ax.bar(i, val, 0.7, bottom=bottom, color=col, **EDGE)
+            bottom += val
+        rest = med(runs, "o") / 1e3 - bottom
+        ax.bar(i, rest, 0.7, bottom=bottom, color="white", **EDGE)
+        labels.append(mt.dpq_label(v).replace("#h(0.8em)", "").replace("default ", ""))
+    i = len(variants)
+    adm, gap = med(fi, "admin") / 1e3, med(fi, "gap") / 1e3
+    ax.bar(i, adm, 0.7, color=PURPLE, **EDGE)
+    ax.bar(i, gap, 0.7, bottom=adm, color="white", **EDGE)
+    labels.append("fcpq-c16")
+    cbar = med(c[("sus", 8, 31, mt.DPQ_FCPQ)], "cbar") / 1e3
+    ax.axhline(cbar, ls=":", color="black", lw=0.8)
+    ax.text(len(variants) + 0.45, cbar + 0.08, "fair-mix $\\bar{C}$", ha="right", va="bottom", fontsize=7)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=40, ha="right", rotation_mode="anchor", fontsize=7)
+    ax.tick_params(axis="x", length=0)
+    for t in ax.get_xticklabels()[-1:]:
+        t.set_fontproperties(mono(7))
+    ax.set_xlim(-0.6, len(labels) - 0.4)
+    ax.set_ylim(0, 9.4)
+    ax.set_yticks(range(0, 8))
+    ax.set_ylabel("non-CS cycles per op, $o$ (×1000)")
+    h = [Patch(facecolor=col, label=lab, **EDGE) for _, lab, col in seg]
+    h += [Patch(facecolor="white", label="other", **EDGE), Patch(facecolor=PURPLE, label="FC-PQ in-pass admin", **EDGE)]
+    ax.legend(handles=h, loc="upper right", ncol=2, fontsize=7, bbox_to_anchor=(1.0, 1.02))
+    panel(ax, "c", "Per-op cost (W8 b31 sus.)")
+
+    h = []
+    for v in mt.DPQ_VARIANTS:
+        col, hatch, lab = dpq_style(v)
+        h.append(Patch(facecolor=col, hatch=hatch, label=lab, **EDGE))
+    fig.legend(handles=h, prop=mono(7), loc="outside upper center", ncol=5)
+    save(fig, out, "fig-dpq.svg")
+
+
 
 def main():
     here_paper = os.path.join(HERE, "..")
@@ -648,7 +808,7 @@ def main():
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here_paper, "figures")
     os.makedirs(out, exist_ok=True)
     setup_style()
-    for f in (fig_motivation, fig_burden, fig_service, fig_xrt, fig_actor, fig_util):
+    for f in (fig_motivation, fig_burden, fig_service, fig_xrt, fig_actor, fig_util, fig_dpq):
         f(res, out)
     print("make_figures: wrote %s" % ", ".join(sorted(p for p in os.listdir(out) if p.startswith("fig-")
                                                      and p.endswith(".svg"))))

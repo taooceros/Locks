@@ -50,12 +50,14 @@ its own client on its own worker.
   without waiting for anyone to be scheduled. At the fair mix (C̄ ≈ 2 500
   cycles per op), util = C̄ / (C̄ + o) gives 0.69 with FC-PQ's o and
   0.30–0.36 with dispatch-pq's.
-- **(d)** Usage-ordered service fairness does not need delegation (the same
-  queue behind a plain handoff mutex reaches Jain 1.000), but *cheap*
-  fairness does. Without a combiner, every fairly ordered op pays a 3.9–5.6
-  k-cycle wake-to-run handoff, so the claim holds only as "delegation is
-  needed for service fairness at delegation-level utilisation", not as
-  "delegation is needed for service fairness".
+- **(d)** Usage-ordered service fairness does not need delegation: the same
+  queue behind a plain handoff mutex reaches Jain 1.000. What these runs
+  show is narrower than "cheap fairness needs delegation". On this
+  executor, a dispatched handoff (wake the grantee, wait for it to be
+  scheduled) costs 3.9–5.6 k cycles per op against FC-PQ's ~1.1 k, which
+  leaves fair dispatch-pq at about half of FC-PQ's throughput and
+  utilisation. A non-delegating inline handoff (the "ces-pq" of Next
+  question) is untested, so delegation has not been shown necessary.
 
 ### Design (`src/locks/dispatch_pq.rs`)
 
