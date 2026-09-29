@@ -6,12 +6,13 @@
 //!            --duration-ms 2000 --out results/ces-w8-h8-r1.json
 //! coro-bench --lock ces --ces-chain-bound 64 --wake-placement home ...
 //! coro-bench --lock fcpq --pass-limit 8 --rotate-combiner --wake-placement home ...
+//! coro-bench --lock dispatch-pq --starvation-clamp 8 --wake-placement home ...
 //! coro-bench --sanity
 //! ```
 //!
 //! Variant label written to the JSON (`lock` field): base id plus one suffix
 //! per non-default knob, e.g. `ces-k64-home`, `fcpq-h8-rotate`, `fc-remote`,
-//! `dispatch-home`, `fc-noyield`.
+//! `dispatch-home`, `fc-noyield`, `dispatch-pq-home-c8`.
 
 use std::path::PathBuf;
 
@@ -22,11 +23,20 @@ use coro_delegation::lock::DelegationLock;
 use coro_delegation::locks::actor::{Actor, ActorOptions};
 use coro_delegation::locks::ces::{Ces, CesOptions};
 use coro_delegation::locks::dispatch::Dispatch;
+use coro_delegation::locks::dispatch_pq::{self, DispatchPq, DispatchPqOptions, HandoffStats};
 use coro_delegation::locks::fc::{Fc, FcOptions, WakePlacement};
 use coro_delegation::locks::fc_pq::{self, FcPq, FcPqOptions, NewcomerInit, WaitStats};
 use coro_delegation::workload::{self, Config, Report, Shared};
 
-const LOCKS: &[&str] = &["dispatch", "ces", "fc", "fcpq", "actor", "actor-inline"];
+const LOCKS: &[&str] = &[
+    "dispatch",
+    "ces",
+    "fc",
+    "fcpq",
+    "actor",
+    "actor-inline",
+    "dispatch-pq",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum WakePlacementArg {
@@ -95,7 +105,7 @@ impl NewcomerInitArg {
     about = "Delegation locks on a coroutine executor"
 )]
 struct Cli {
-    /// Lock variant: dispatch | ces | fc | fcpq | actor | actor-inline
+    /// Lock variant: dispatch | ces | fc | fcpq | actor | actor-inline | dispatch-pq
     #[arg(long, default_value = "dispatch")]
     lock: String,
     /// Executor workers (each pinned to its own physical core)
@@ -141,10 +151,10 @@ struct Cli {
     sanity: bool,
 
     // --- placement (all locks) -------------------------------------------
-    /// Placement of lock-issued wakes: dispatch handoff, CES chain-break
-    /// handoff, every fc/fcpq wake (served waiters, next combiner, self-yield),
-    /// actor client completions (`default` keeps the variant's own: actor
-    /// default, actor-inline remote)
+    /// Placement of lock-issued wakes: dispatch / dispatch-pq handoff, CES
+    /// chain-break handoff, every fc/fcpq wake (served waiters, next
+    /// combiner, self-yield), actor client completions (`default` keeps the
+    /// variant's own: actor default, actor-inline remote)
     #[arg(long, value_enum, default_value_t = WakePlacementArg::Default)]
     wake_placement: WakePlacementArg,
 
@@ -177,18 +187,26 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     no_combiner_yield: bool,
     /// fcpq: passes a queued request may wait before its key is clamped to
-    /// the heap minimum, 0 = never (default 8; label -c<N>)
+    /// the heap minimum, 0 = never (default 8; label -c<N>). dispatch-pq:
+    /// the same in handoffs (default 16)
     #[arg(long)]
     starvation_clamp: Option<u64>,
-    /// fcpq: admission usage of a client's first request: mean (running
-    /// mean request cost, default), zero, or min / median of the queued
-    /// entries' usage (label -n<init>)
+    /// fcpq / dispatch-pq: admission usage of a client's first queued
+    /// request: mean (running mean request cost, default), zero, or min /
+    /// median of the queued entries' usage (label -n<init>)
     #[arg(long, value_enum)]
     newcomer_init: Option<NewcomerInitArg>,
-    /// fcpq: count queue waits in combining passes, written as `fcpq_wait`
-    /// in the JSON (instrumentation, no label suffix)
+    /// fcpq / dispatch-pq: count queue waits in combining passes (fcpq) or
+    /// handoffs (dispatch-pq), written as `fcpq_wait` in the JSON
+    /// (instrumentation, no label suffix)
     #[arg(long, default_value_t = false)]
     fcpq_wait_stats: bool,
+
+    // --- dispatch-pq -----------------------------------------------------
+    /// dispatch-pq: record acquisition paths and the handoff cycle breakdown,
+    /// written as `handoff` in the JSON (instrumentation, no label suffix)
+    #[arg(long, default_value_t = false)]
+    handoff_stats: bool,
 }
 
 impl Cli {
@@ -306,6 +324,37 @@ impl Cli {
         format!("dispatch{}", self.wake_placement.suffix())
     }
 
+    fn dispatch_pq_options(&self) -> DispatchPqOptions {
+        let defaults = DispatchPqOptions::default();
+        DispatchPqOptions {
+            wake_placement: self.wake_placement.executor(),
+            queue: FcPqOptions {
+                starvation_clamp: self
+                    .starvation_clamp
+                    .unwrap_or(defaults.queue.starvation_clamp),
+                newcomer_init: self
+                    .newcomer_init
+                    .map_or(defaults.queue.newcomer_init, NewcomerInitArg::fc_pq),
+                record_waits: self.fcpq_wait_stats,
+                ..defaults.queue
+            },
+            record_handoffs: self.handoff_stats,
+        }
+    }
+
+    /// Same suffix order as fcpq: placement, then clamp, then newcomer init.
+    fn dispatch_pq_label(&self) -> String {
+        let mut label = String::from("dispatch-pq");
+        label.push_str(self.wake_placement.suffix());
+        if let Some(c) = self.starvation_clamp {
+            label.push_str(&format!("-c{c}"));
+        }
+        if let Some(n) = self.newcomer_init {
+            label.push_str(&format!("-n{}", n.name()));
+        }
+        label
+    }
+
     /// `variant` (`ActorOptions::plain` / `inline`) with the CLI's
     /// non-default knobs applied.
     fn actor_options(&self, variant: ActorOptions) -> ActorOptions {
@@ -337,6 +386,12 @@ fn run_lock(cli: &Cli, cfg: &Config, tsc_hz: f64) -> Report {
             let placement = cli.wake_placement.executor();
             workload::run_benchmark(cfg, tsc_hz, &cli.dispatch_label(), move |data| {
                 Dispatch::with_placement(data, placement)
+            })
+        }
+        "dispatch-pq" => {
+            let opts = cli.dispatch_pq_options();
+            workload::run_benchmark(cfg, tsc_hz, &cli.dispatch_pq_label(), move |data| {
+                DispatchPq::with_options(data, opts)
             })
         }
         "ces" => {
@@ -389,6 +444,7 @@ fn sanity_lock(id: &str, cfg: &Config) -> Result<workload::SanityOutcome, String
             lock: "actor-inline",
             ..o
         }),
+        "dispatch-pq" => workload::sanity(cfg, DispatchPq::<Shared>::new),
         other => Err(format!("{other}: not available")),
     }
 }
@@ -427,20 +483,47 @@ fn main() {
     let cfg = cli.config();
     let report = run_lock(&cli, &cfg, tsc_hz);
     print_summary(&report);
-    let fcpq_wait = if cli.lock == "fcpq" {
+    let fcpq_wait = if cli.lock == "fcpq" || cli.lock == "dispatch-pq" {
         fc_pq::take_wait_stats()
     } else {
         None
     };
     if let Some(w) = &fcpq_wait {
         eprintln!(
-            "  fcpq wait (passes): served={} passes={} promoted={} max={}",
-            w.served, w.passes, w.promoted, w.max_wait
+            "  {} wait ({}): served={} passes={} promoted={} max={}",
+            cli.lock,
+            if cli.lock == "fcpq" {
+                "passes"
+            } else {
+                "handoffs"
+            },
+            w.served,
+            w.passes,
+            w.promoted,
+            w.max_wait
+        );
+    }
+    let handoff = if cli.lock == "dispatch-pq" {
+        dispatch_pq::take_handoff_stats()
+    } else {
+        None
+    };
+    if let Some(h) = &handoff {
+        let per = |c: u64| c as f64 / h.handoffs.max(1) as f64;
+        eprintln!(
+            "  handoff: fast={} free={} handoffs={} per handoff: spin={:.0} queue={:.0} grant->start={:.0} cycles",
+            h.fast,
+            h.free,
+            h.handoffs,
+            per(h.release_spin_cycles),
+            per(h.release_queue_cycles),
+            per(h.grant_to_start_cycles)
         );
     }
     let out = Output {
         report: &report,
         fcpq_wait: fcpq_wait.map(wait_json),
+        handoff: handoff.map(handoff_json),
     };
     let json = serde_json::to_string_pretty(&out).expect("serialize report");
     match &cli.out {
@@ -463,11 +546,15 @@ fn main() {
 struct Output<'a> {
     #[serde(flatten)]
     report: &'a Report,
-    /// fcpq only: queue waits in combining passes (`fc_pq::WaitStats`;
-    /// `wait_hist[i]` = requests served after exactly i passes, the last
-    /// bucket open-ended).
+    /// fcpq / dispatch-pq: queue waits in combining passes / handoffs
+    /// (`fc_pq::WaitStats`; `passes` counts ticks; `wait_hist[i]` = requests
+    /// served after exactly i ticks, the last bucket open-ended).
     #[serde(skip_serializing_if = "Option::is_none")]
     fcpq_wait: Option<serde_json::Value>,
+    /// dispatch-pq only: acquisition paths and handoff cycle sums
+    /// (`dispatch_pq::HandoffStats`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff: Option<serde_json::Value>,
 }
 
 fn wait_json(w: WaitStats) -> serde_json::Value {
@@ -477,6 +564,19 @@ fn wait_json(w: WaitStats) -> serde_json::Value {
         "promoted": w.promoted,
         "max_wait": w.max_wait,
         "wait_hist": w.wait_hist.to_vec(),
+    })
+}
+
+fn handoff_json(h: HandoffStats) -> serde_json::Value {
+    serde_json::json!({
+        "fast": h.fast,
+        "free": h.free,
+        "handoffs": h.handoffs,
+        "release_spin_cycles": h.release_spin_cycles,
+        "release_queue_cycles": h.release_queue_cycles,
+        "grant_to_start_cycles": h.grant_to_start_cycles,
+        "enqueues": h.enqueues,
+        "enqueue_cycles": h.enqueue_cycles,
     })
 }
 

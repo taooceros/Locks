@@ -60,6 +60,7 @@ All implement `lock::DelegationLock` / `lock::LockClient` (`src/lock.rs`).
 | `fcpq-*` | `fc_pq.rs` feature knobs | mitigations for H-D, each independently switchable via constructor options: `pass_budget_cycles`, `rotate_combiner`, `credit_combining`, `elect_max_usage`; H-C knobs `starvation_clamp` (passes, 0 = off; label `-c<N>`) and `newcomer_init` (`mean`/`zero`/`min`/`median`; label `-n<init>`); `record_waits` (`--fcpq-wait-stats`, queue-wait histogram in the JSON) | same |
 | `actor` | `actor.rs` | closure delegation to one dedicated server task per lock (spawned lazily by the first request): drain the request stack, serve ≤ H=64 in FIFO order, yield; park when empty | server woken, yields and wakes clients with default placement |
 | `actor-inline` | `actor.rs` | as `actor` | server woken into the publisher's run-next slot (`wake_inline`), yields `home`, clients woken `remote` |
+| `dispatch-pq` | `dispatch_pq.rs` | usage-ordered mutex *without* delegation (u-SCL style): the owner runs its own closure (charged `cycles()`); waiters sit in FC-PQ's heap (`fc_pq::UsageQueue`, shared code: same accounting, newcomer init, clamp); release hands ownership to the min-usage waiter; clamp counted in handoffs (default 16, label `-c<N>`); uncontended acquire = one CAS; `--handoff-stats` records the handoff cycle breakdown | handoff wake per `--wake-placement` (`default` = `dispatch`'s local-queue wake) |
 
 ## Executor contract (`src/executor.rs`)
 

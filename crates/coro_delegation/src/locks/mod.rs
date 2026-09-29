@@ -3,5 +3,6 @@
 pub mod actor;
 pub mod ces;
 pub mod dispatch;
+pub mod dispatch_pq;
 pub mod fc;
 pub mod fc_pq;

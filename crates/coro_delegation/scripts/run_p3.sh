@@ -7,16 +7,22 @@
 # Repeats are the outermost loop; existing files are skipped (restartable).
 # Further overrides: BALANCES="31" (balance intervals), BIN=<coro-bench path>,
 # SKIP_BUILD=1 (use BIN as is), PREFIX=<file prefix, default p3>,
-# REPEATS="1 2 3" (repeat indices to run), FCPQ_WAIT_STATS=1 (fcpq runs add
-# --fcpq-wait-stats: queue-wait histogram in the JSON).
+# REPEATS="1 2 3" (repeat indices to run), FCPQ_WAIT_STATS=1 (fcpq and
+# dispatch-pq runs add --fcpq-wait-stats: queue-wait histogram in the JSON),
+# HANDOFF_STATS=1 (dispatch-pq runs add --handoff-stats), CONTENTIONS="sus"
+# (default "sus bur"), OUT=<output dir, relative to the workspace root;
+# default crates/coro_delegation/results>.
+# dispatch-pq labels: dispatch-pq[-home|-remote][-c<N>][-n<init>] (clamp in
+# handoffs, default 16).
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 BIN=${BIN:-target/release/coro-bench}
-OUT=crates/coro_delegation/results
+OUT=${OUT:-crates/coro_delegation/results}
 WORKERS=${WORKERS:-8}
 BALANCES=${BALANCES:-0 31}
 PREFIX=${PREFIX:-p3}
 REPEATS=${REPEATS:-1 2 3}
+CONTENTIONS=${CONTENTIONS:-sus bur}
 LIGHT=1000
 DEFAULT_VARIANTS="dispatch dispatch-home \
 ces ces-home ces-k64 ces-k64-home ces-t64000 ces-t64000-home \
@@ -30,10 +36,16 @@ args_for() {
   local v=$1 base rest a=()
   base=${v%%-*}
   # multi-word base ids
-  case $v in actor-inline|actor-inline-*) base=actor-inline ;; esac
+  case $v in
+    actor-inline|actor-inline-*) base=actor-inline ;;
+    dispatch-pq|dispatch-pq-*) base=dispatch-pq ;;
+  esac
   rest=${v#"$base"}
   a+=(--lock "$base")
-  if [ "$base" = fcpq ] && [ -n "${FCPQ_WAIT_STATS:-}" ]; then a+=(--fcpq-wait-stats); fi
+  case $base in fcpq|dispatch-pq)
+    if [ -n "${FCPQ_WAIT_STATS:-}" ]; then a+=(--fcpq-wait-stats); fi ;;
+  esac
+  if [ "$base" = dispatch-pq ] && [ -n "${HANDOFF_STATS:-}" ]; then a+=(--handoff-stats); fi
   # suffixes: -home -remote -k<K> -t<T> -h<H> -rotate -credit -elect -noyield
   #           -c<N> (fcpq starvation clamp, 0 = off) -n{mean,zero,min,median}
   local IFS='-'
@@ -62,13 +74,13 @@ args_for() {
 mkdir -p "$OUT"
 nv=$(wc -w <<<"$VARIANTS")
 nb=$(wc -w <<<"$BALANCES")
-total=$(($(wc -w <<<"$REPEATS") * nv * nb * 2))
+total=$(($(wc -w <<<"$REPEATS") * nv * nb * $(wc -w <<<"$CONTENTIONS")))
 n=0
 for r in $REPEATS; do
   for v in $VARIANTS; do
     mapfile -t vargs < <(args_for "$v")
     for b in $BALANCES; do
-      for c in sus bur; do
+      for c in $CONTENTIONS; do
         case $c in
           sus) cl=64; pw=$((4 * LIGHT)) ;;
           bur) cl=16; pw=$((32 * LIGHT)) ;;

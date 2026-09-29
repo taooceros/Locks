@@ -1,0 +1,681 @@
+{
+  "lock": "dispatch-pq-home-c256",
+  "config": {
+    "workers": 8,
+    "clients": 16,
+    "bystanders": 8,
+    "heavy_ratio": 8,
+    "light_cs_cycles": 1000,
+    "parallel_work_cycles": 32000,
+    "bystander_work_cycles": 1000,
+    "key_space": 65536,
+    "duration_ms": 2000,
+    "warmup_ms": 200,
+    "seed": 42,
+    "unique_keys": false,
+    "balance_interval": 31
+  },
+  "timestamp": "unix:1790703672",
+  "tsc_hz": 2200171031.478601,
+  "measured_secs": 2.000070751,
+  "total_ops": 277336,
+  "throughput_ops_per_s": 138663.0947236926,
+  "service_jain": 0.9998329347322719,
+  "burden_jain": null,
+  "clients": [
+    {
+      "id": 0,
+      "class": "light",
+      "ops": 29288,
+      "service_cycles": 44855312,
+      "usage_cycles": 51701202,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29288,
+        "mean": 118109.08324228352,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 904488
+      }
+    },
+    {
+      "id": 1,
+      "class": "heavy",
+      "ops": 5362,
+      "service_cycles": 46026590,
+      "usage_cycles": 51710674,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5362,
+        "mean": 788661.358075345,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1926344
+      }
+    },
+    {
+      "id": 2,
+      "class": "light",
+      "ops": 29232,
+      "service_cycles": 44855002,
+      "usage_cycles": 51698810,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29232,
+        "mean": 118344.84674329501,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 2845858
+      }
+    },
+    {
+      "id": 3,
+      "class": "heavy",
+      "ops": 5365,
+      "service_cycles": 46030212,
+      "usage_cycles": 51710344,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5365,
+        "mean": 788250.745945946,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 2056914
+      }
+    },
+    {
+      "id": 4,
+      "class": "light",
+      "ops": 29458,
+      "service_cycles": 44844040,
+      "usage_cycles": 51699690,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29458,
+        "mean": 117186.35223029398,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 877094
+      }
+    },
+    {
+      "id": 5,
+      "class": "heavy",
+      "ops": 5365,
+      "service_cycles": 46027618,
+      "usage_cycles": 51714802,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5365,
+        "mean": 788254.9726001864,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1915138
+      }
+    },
+    {
+      "id": 6,
+      "class": "light",
+      "ops": 29179,
+      "service_cycles": 44867288,
+      "usage_cycles": 51708708,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29179,
+        "mean": 118685.19935570101,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 4828302
+      }
+    },
+    {
+      "id": 7,
+      "class": "heavy",
+      "ops": 5373,
+      "service_cycles": 46031692,
+      "usage_cycles": 51713642,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5373,
+        "mean": 786985.4662199889,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1718538
+      }
+    },
+    {
+      "id": 8,
+      "class": "light",
+      "ops": 29360,
+      "service_cycles": 44850890,
+      "usage_cycles": 51700928,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29360,
+        "mean": 117690.53058583106,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 1774308
+      }
+    },
+    {
+      "id": 9,
+      "class": "heavy",
+      "ops": 5366,
+      "service_cycles": 46029422,
+      "usage_cycles": 51709342,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5366,
+        "mean": 787979.2061125606,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1585610
+      }
+    },
+    {
+      "id": 10,
+      "class": "light",
+      "ops": 29320,
+      "service_cycles": 44846636,
+      "usage_cycles": 51701410,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29320,
+        "mean": 117920.16596180081,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 1311218
+      }
+    },
+    {
+      "id": 11,
+      "class": "heavy",
+      "ops": 5364,
+      "service_cycles": 46027064,
+      "usage_cycles": 51710050,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5364,
+        "mean": 788228.2539149888,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1700104
+      }
+    },
+    {
+      "id": 12,
+      "class": "light",
+      "ops": 29255,
+      "service_cycles": 44854814,
+      "usage_cycles": 51699012,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29255,
+        "mean": 118189.45957955904,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 1075394
+      }
+    },
+    {
+      "id": 13,
+      "class": "heavy",
+      "ops": 5364,
+      "service_cycles": 46023826,
+      "usage_cycles": 51706097,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5364,
+        "mean": 788043.5805369128,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 1530198
+      }
+    },
+    {
+      "id": 14,
+      "class": "light",
+      "ops": 29315,
+      "service_cycles": 44852264,
+      "usage_cycles": 51699636,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 29315,
+        "mean": 117933.07426232305,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 858310
+      }
+    },
+    {
+      "id": 15,
+      "class": "heavy",
+      "ops": 5370,
+      "service_cycles": 46027678,
+      "usage_cycles": 51710790,
+      "combining_cycles": 0,
+      "combiner_yields": 0,
+      "run_latency": {
+        "count": 5370,
+        "mean": 787483.7113594041,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 2058858
+      }
+    }
+  ],
+  "classes": {
+    "heavy": {
+      "clients": 8,
+      "ops": 42929,
+      "service_cycles": 368224102,
+      "run_latency": {
+        "count": 42929,
+        "mean": 787985.6125695916,
+        "p50": 753664,
+        "p99": 1114112,
+        "max": 2058858
+      }
+    },
+    "light": {
+      "clients": 8,
+      "ops": 234407,
+      "service_cycles": 358826246,
+      "run_latency": {
+        "count": 234407,
+        "mean": 118006.20434543338,
+        "p50": 110592,
+        "p99": 237568,
+        "max": 4828302
+      }
+    }
+  },
+  "workers": [
+    {
+      "worker": 0,
+      "cpu": 0,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2396964,
+        "mean": 731.9801557303322,
+        "p50": 144,
+        "p99": 4608,
+        "max": 81216
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1117331382,
+      "client_polls": 30066,
+      "bystander_poll_cycles": 3040620890,
+      "bystander_polls": 2396965,
+      "steals": 14726,
+      "balance_steals": 24485,
+      "parks": 6,
+      "placements": {
+        "default": 2621038,
+        "inline": 0,
+        "remote": 0,
+        "home": 33960
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 1,
+      "cpu": 1,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2142854,
+        "mean": 784.9625154116893,
+        "p50": 144,
+        "p99": 16384,
+        "max": 78812
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1478084520,
+      "client_polls": 40054,
+      "bystander_poll_cycles": 2698338174,
+      "bystander_polls": 2142854,
+      "steals": 16675,
+      "balance_steals": 22223,
+      "parks": 3,
+      "placements": {
+        "default": 2397291,
+        "inline": 0,
+        "remote": 0,
+        "home": 42918
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 2,
+      "cpu": 2,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2255435,
+        "mean": 757.2383154469094,
+        "p50": 144,
+        "p99": 10752,
+        "max": 78224
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1318503968,
+      "client_polls": 35487,
+      "bystander_poll_cycles": 2849839100,
+      "bystander_polls": 2255433,
+      "steals": 15948,
+      "balance_steals": 23104,
+      "parks": 3,
+      "placements": {
+        "default": 2490568,
+        "inline": 0,
+        "remote": 0,
+        "home": 39027
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 3,
+      "cpu": 3,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2403100,
+        "mean": 714.882224626524,
+        "p50": 144,
+        "p99": 4096,
+        "max": 79562
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1128380572,
+      "client_polls": 30555,
+      "bystander_poll_cycles": 3032302204,
+      "bystander_polls": 2403100,
+      "steals": 14292,
+      "balance_steals": 24369,
+      "parks": 5,
+      "placements": {
+        "default": 2640521,
+        "inline": 0,
+        "remote": 0,
+        "home": 34017
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 4,
+      "cpu": 4,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2269010,
+        "mean": 757.5714263048642,
+        "p50": 144,
+        "p99": 10240,
+        "max": 80586
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1304258064,
+      "client_polls": 35121,
+      "bystander_poll_cycles": 2862684046,
+      "bystander_polls": 2269010,
+      "steals": 15539,
+      "balance_steals": 23351,
+      "parks": 4,
+      "placements": {
+        "default": 2512226,
+        "inline": 0,
+        "remote": 0,
+        "home": 38358
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 5,
+      "cpu": 5,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2147717,
+        "mean": 783.3802917237234,
+        "p50": 144,
+        "p99": 14336,
+        "max": 87300
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1463757456,
+      "client_polls": 39417,
+      "bystander_poll_cycles": 2712155492,
+      "bystander_polls": 2147717,
+      "steals": 16332,
+      "balance_steals": 22323,
+      "parks": 3,
+      "placements": {
+        "default": 2383348,
+        "inline": 0,
+        "remote": 0,
+        "home": 42876
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 6,
+      "cpu": 6,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2364671,
+        "mean": 743.2678677076008,
+        "p50": 144,
+        "p99": 6656,
+        "max": 81594
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1175719232,
+      "client_polls": 31688,
+      "bystander_poll_cycles": 2986204796,
+      "bystander_polls": 2364671,
+      "steals": 15006,
+      "balance_steals": 23910,
+      "parks": 2,
+      "placements": {
+        "default": 2583218,
+        "inline": 0,
+        "remote": 0,
+        "home": 35838
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    },
+    {
+      "worker": 7,
+      "cpu": 7,
+      "combining_cycles": 0,
+      "bystander_latency": {
+        "count": 2269887,
+        "mean": 760.0885682855578,
+        "p50": 144,
+        "p99": 11264,
+        "max": 108540
+      },
+      "bystander_censored": 0,
+      "client_poll_cycles": 1298769456,
+      "client_polls": 34961,
+      "bystander_poll_cycles": 2870187212,
+      "bystander_polls": 2269888,
+      "steals": 16083,
+      "balance_steals": 23073,
+      "parks": 3,
+      "placements": {
+        "default": 2488153,
+        "inline": 0,
+        "remote": 0,
+        "home": 39070
+      },
+      "chain_lengths": {
+        "count": 0,
+        "mean": 0.0,
+        "p50": 0,
+        "p99": 0,
+        "max": 0
+      }
+    }
+  ],
+  "bystander_latency": {
+    "count": 18249638,
+    "mean": 753.2610162459113,
+    "p50": 144,
+    "p99": 9728,
+    "max": 108540
+  },
+  "total_combining_cycles": 0,
+  "starved_clients": 0,
+  "starved_bystanders": 0,
+  "total_combiner_yields": 0,
+  "placements": {
+    "default": 20116363,
+    "inline": 0,
+    "remote": 0,
+    "home": 306064
+  },
+  "chain_lengths": {
+    "count": 0,
+    "mean": 0.0,
+    "p50": 0,
+    "p99": 0,
+    "max": 0
+  },
+  "fcpq_wait": {
+    "max_wait": 207,
+    "passes": 277348,
+    "promoted": 0,
+    "served": 277348,
+    "wait_hist": [
+      896,
+      2484,
+      6934,
+      16639,
+      30035,
+      43154,
+      46437,
+      39214,
+      25498,
+      13319,
+      5698,
+      2304,
+      839,
+      335,
+      182,
+      73,
+      35,
+      26,
+      18,
+      11,
+      14,
+      12,
+      5,
+      14,
+      14,
+      12,
+      16,
+      22,
+      23,
+      22,
+      21,
+      26,
+      28,
+      17,
+      28,
+      30,
+      20,
+      45,
+      76,
+      125,
+      265,
+      438,
+      887,
+      1415,
+      2109,
+      2979,
+      4059,
+      5303,
+      6149,
+      6038,
+      5250,
+      3881,
+      2244,
+      1031,
+      363,
+      97,
+      37,
+      9,
+      6,
+      6,
+      6,
+      3,
+      3,
+      69
+    ]
+  },
+  "handoff": {
+    "enqueue_cycles": 108642202,
+    "enqueues": 277336,
+    "fast": 0,
+    "free": 0,
+    "grant_to_start_cycles": 3490906742,
+    "handoffs": 277348,
+    "release_queue_cycles": 127287148,
+    "release_spin_cycles": 43319670
+  }
+}

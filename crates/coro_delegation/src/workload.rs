@@ -37,6 +37,7 @@ pub trait ClientExtras {
 }
 
 impl<T: Send + 'static> ClientExtras for dispatch::DispatchClient<T> {}
+impl<T: Send + 'static> ClientExtras for crate::locks::dispatch_pq::DispatchPqClient<T> {}
 impl<T: Send + 'static> ClientExtras for ces::CesClient<T> {}
 impl<T: Send + 'static, P: fc::Policy<T>> ClientExtras for fc::Client<T, P> {
     fn combiner_yields(&self) -> u64 {

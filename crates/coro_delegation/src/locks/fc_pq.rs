@@ -2,7 +2,8 @@
 //! of [`super::fc`], mirroring `crates/libdlock/src/dlock2/fc_pq/lock.rs`:
 //!
 //! - the combiner serves the pending request with the lowest cumulative
-//!   charged cycles first (binary min-heap keyed by `(usage, arrival)`);
+//!   charged cycles first (binary min-heap keyed by `(usage, arrival)`,
+//!   [`UsageQueue`], which the non-delegating `dispatch-pq` reuses);
 //! - each closure is charged `cycles()` around its execution; the charge
 //!   persists in the client's node across requests;
 //! - a newcomer (a client whose request has never been served) enters at
@@ -180,7 +181,37 @@ impl FcPqOptions {
     }
 }
 
-struct Entry<T> {
+/// Per-client accounting that a [`UsageQueue`] reads at admission and that
+/// its user updates on charge: [`Node`] for FC-PQ (charged by the combiner),
+/// [`super::dispatch_pq::Waiter`] for `dispatch-pq` (charged by the client
+/// itself after its own critical section).
+pub trait UsageNode {
+    /// Cumulative charged cycles.
+    fn usage(&self) -> u64;
+    /// Requests served so far; 0 marks a newcomer.
+    fn served(&self) -> u64;
+    /// Overwrite the charged cycles and count one service.
+    fn charge(&self, usage: u64);
+    /// Overwrite the charged cycles without counting a service (credits).
+    fn set_usage(&self, usage: u64);
+}
+
+impl<T> UsageNode for Node<T> {
+    fn usage(&self) -> u64 {
+        Node::usage(self)
+    }
+    fn served(&self) -> u64 {
+        Node::served(self)
+    }
+    fn charge(&self, usage: u64) {
+        Node::charge(self, usage)
+    }
+    fn set_usage(&self, usage: u64) {
+        Node::set_usage(self, usage)
+    }
+}
+
+struct Entry<N> {
     /// Scheduling key: `base`, possibly clamped by the anti-starvation rule.
     key: u64,
     /// Accounting base: the node's usage at admission, or the running mean
@@ -188,38 +219,45 @@ struct Entry<T> {
     base: u64,
     /// Arrival sequence; FIFO among equal keys.
     seq: u64,
-    /// Pass in which the entry was admitted.
+    /// Tick (combining pass; handoff for `dispatch-pq`) of admission.
     pass_entered: u64,
-    node: NonNull<Node<T>>,
+    node: NonNull<N>,
 }
 
-impl<T> PartialEq for Entry<T> {
+impl<N> PartialEq for Entry<N> {
     fn eq(&self, other: &Self) -> bool {
         self.key == other.key && self.seq == other.seq
     }
 }
-impl<T> Eq for Entry<T> {}
-impl<T> PartialOrd for Entry<T> {
+impl<N> Eq for Entry<N> {}
+impl<N> PartialOrd for Entry<N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<T> Ord for Entry<T> {
+impl<N> Ord for Entry<N> {
     fn cmp(&self, other: &Self) -> Ordering {
         (self.key, self.seq).cmp(&(other.key, other.seq))
     }
 }
 
-/// Usage-ordered service policy.
-pub struct UsagePq<T> {
-    heap: BinaryHeap<Reverse<Entry<T>>>,
+/// Usage-ordered waiter queue: the FC-PQ binary min-heap keyed by
+/// `(usage, arrival)` with its newcomer init, starvation clamp and optional
+/// wait accounting. Generic over the node so that the non-delegating
+/// `dispatch-pq` lock reuses it unchanged. Its clock is an abstract *tick*:
+/// the combining pass for FC-PQ, the handoff for `dispatch-pq` (clamp and
+/// waits are then counted in handoffs). The user serialises every call (the
+/// combiner flag, or the `dispatch-pq` queue spinlock).
+pub struct UsageQueue<N> {
+    heap: BinaryHeap<Reverse<Entry<N>>>,
     opts: FcPqOptions,
     /// Running totals over served requests, for newcomer initialisation.
     total_usage: u64,
     served: u64,
     seq: u64,
-    /// Request handed out by the last `next`, with its key.
-    current: Option<(NonNull<Node<T>>, u64)>,
+    /// Request handed out by the last `Policy::next`, with its accounting
+    /// base (FC-PQ only).
+    current: Option<(NonNull<N>, u64)>,
     /// Newcomer-median workspace and wait accounting, boxed so the fields
     /// the combiner touches on every request stay on as few cache lines as
     /// before they were added (inline, they cost ~0.5 % throughput even
@@ -227,18 +265,23 @@ pub struct UsagePq<T> {
     cold: Box<Cold>,
 }
 
+/// FC-PQ's usage-ordered service policy: the queue over delegation nodes.
+pub type UsagePq<T> = UsageQueue<Node<T>>;
+
 struct Cold {
-    /// Pass most recently begun (maintained only with `record_waits`).
+    /// Tick most recently begun (maintained only with `record_waits`).
     pass: u64,
     /// Sized with the heap.
     scratch: Vec<u64>,
     wait: WaitStats,
 }
 
-// SAFETY: the queued pointers are dereferenced only by the combiner.
-unsafe impl<T> Send for UsagePq<T> {}
+// SAFETY: the queued pointers are dereferenced only by the queue's
+// serialised user (the combiner, or the `dispatch-pq` spinlock holder);
+// `N: Sync` lets that user run on any thread.
+unsafe impl<N: Sync> Send for UsageQueue<N> {}
 
-impl<T> UsagePq<T> {
+impl<N> UsageQueue<N> {
     pub fn new(opts: FcPqOptions) -> Self {
         Self {
             // Bounded by the number of concurrently pending requests (one per
@@ -261,9 +304,13 @@ impl<T> UsagePq<T> {
         self.opts
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
     /// Rewrite keys in place and restore the heap. `BinaryHeap::from(Vec)`
     /// reuses the allocation, so this is O(n) without allocating.
-    fn rekey(&mut self, mut f: impl FnMut(&mut Entry<T>)) {
+    fn rekey(&mut self, mut f: impl FnMut(&mut Entry<N>)) {
         let mut v = std::mem::take(&mut self.heap).into_vec();
         for e in &mut v {
             f(&mut e.0);
@@ -291,46 +338,30 @@ impl<T> UsagePq<T> {
             }
         }
     }
-}
 
-impl<T> Drop for UsagePq<T> {
-    fn drop(&mut self) {
-        if self.cold.wait.served > 0 {
-            *LAST_WAIT_STATS.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.cold.wait);
-        }
-    }
-}
-
-impl<T> Default for UsagePq<T> {
-    fn default() -> Self {
-        Self::new(FcPqOptions::default())
-    }
-}
-
-impl<T: Send + 'static> Policy<T> for UsagePq<T> {
-    const NAME: &'static str = "fcpq";
-
-    fn admit(&mut self, node: NonNull<Node<T>>, pass: u64) {
-        // SAFETY: admitted nodes are PENDING and live as long as the lock.
-        let n = unsafe { node.as_ref() };
-        let mut base = n.usage();
-        if n.served() == 0 {
-            base = self.newcomer_base(base);
-        }
-        let seq = self.seq;
-        self.seq += 1;
-        self.heap.push(Reverse(Entry {
-            key: base,
-            base,
-            seq,
-            pass_entered: pass,
-            node,
-        }));
+    /// Overwrite the running totals that [`NewcomerInit::Mean`] divides, for
+    /// a user that charges outside the queue (`dispatch-pq`).
+    pub(crate) fn set_totals(&mut self, total_usage: u64, served: u64) {
+        self.total_usage = total_usage;
+        self.served = served;
     }
 
-    fn begin_pass(&mut self, pass: u64) {
+    /// Remove a queued `node` (cancellation). O(n), no allocation. Returns
+    /// whether it was queued.
+    pub(crate) fn remove(&mut self, node: NonNull<N>) -> bool {
+        let mut v = std::mem::take(&mut self.heap).into_vec();
+        let before = v.len();
+        v.retain(|e| e.0.node != node);
+        let removed = v.len() != before;
+        self.heap = BinaryHeap::from(v);
+        removed
+    }
+
+    /// Start of tick `tick` (FC-PQ: `Policy::begin_pass`): wait accounting,
+    /// then the starvation clamp.
+    pub(crate) fn promote_starving(&mut self, tick: u64) {
         if self.opts.record_waits {
-            self.cold.pass = pass;
+            self.cold.pass = tick;
             if !self.heap.is_empty() && stats::recording() {
                 self.cold.wait.passes += 1;
             }
@@ -342,7 +373,7 @@ impl<T: Send + 'static> Policy<T> for UsagePq<T> {
         let Some(min) = self.heap.peek().map(|e| e.0.key) else {
             return;
         };
-        let starving = |e: &Entry<T>| pass - e.pass_entered > clamp;
+        let starving = |e: &Entry<N>| tick - e.pass_entered > clamp;
         if self.heap.iter().any(|e| starving(&e.0)) {
             self.rekey(|e| {
                 if starving(e) {
@@ -352,14 +383,68 @@ impl<T: Send + 'static> Policy<T> for UsagePq<T> {
         }
     }
 
-    fn next(&mut self) -> Option<NonNull<Node<T>>> {
+    /// Remove the minimum; returns it with its accounting base and counts
+    /// its wait (`record_waits`).
+    pub(crate) fn pop(&mut self) -> Option<(NonNull<N>, u64)> {
         let Reverse(e) = self.heap.pop()?;
         if self.opts.record_waits && stats::recording() {
             let wait = self.cold.pass.saturating_sub(e.pass_entered);
             self.cold.wait.record(wait, e.key < e.base);
         }
-        self.current = Some((e.node, e.base));
-        Some(e.node)
+        Some((e.node, e.base))
+    }
+}
+
+impl<N: UsageNode> UsageQueue<N> {
+    /// Admit `node` at tick `tick` (FC-PQ: `Policy::admit`).
+    pub(crate) fn push(&mut self, node: NonNull<N>, tick: u64) {
+        // SAFETY: admitted nodes are pending and outlive their queue stay.
+        let n = unsafe { node.as_ref() };
+        let mut base = n.usage();
+        if n.served() == 0 {
+            base = self.newcomer_base(base);
+        }
+        let seq = self.seq;
+        self.seq += 1;
+        self.heap.push(Reverse(Entry {
+            key: base,
+            base,
+            seq,
+            pass_entered: tick,
+            node,
+        }));
+    }
+}
+
+impl<N> Drop for UsageQueue<N> {
+    fn drop(&mut self) {
+        if self.cold.wait.served > 0 {
+            *LAST_WAIT_STATS.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.cold.wait);
+        }
+    }
+}
+
+impl<N> Default for UsageQueue<N> {
+    fn default() -> Self {
+        Self::new(FcPqOptions::default())
+    }
+}
+
+impl<T: Send + 'static> Policy<T> for UsagePq<T> {
+    const NAME: &'static str = "fcpq";
+
+    fn admit(&mut self, node: NonNull<Node<T>>, pass: u64) {
+        self.push(node, pass);
+    }
+
+    fn begin_pass(&mut self, pass: u64) {
+        self.promote_starving(pass);
+    }
+
+    fn next(&mut self) -> Option<NonNull<Node<T>>> {
+        let (node, base) = self.pop()?;
+        self.current = Some((node, base));
+        Some(node)
     }
 
     fn charge(&mut self, cs: u64) {

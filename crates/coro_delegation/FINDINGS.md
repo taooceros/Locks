@@ -5,6 +5,298 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-29 — dispatch-pq: usage-ordered fairness without delegation
+
+Kill test for "delegation is needed for cheap service fairness": FC-PQ's
+usage queue behind a plain handoff mutex, with every critical section run by
+its own client on its own worker.
+
+### One-line verdicts
+
+- **(a) Jain ≥ 0.95 and ≥ 0.99: yes, both, but only once the clamp is out
+  of the way.** With the starvation clamp at 256 handoffs or off, service
+  Jain is 1.000 [1.000, 1.000] in all 12 such cells: W = 8 balance 31, W = 8
+  balance 0 and W = 16 sustained, and W = 8 bursty. Light:heavy ops are
+  5.30–5.84. With the requested clamps 16 and 8, which count *handoffs*, it
+  is FIFO. Sustained Jain is 0.666–0.673: every request is promoted, and
+  every request waits exactly 62 handoffs. Bursty Jain is 0.680–0.774.
+  Clamp 16 handoffs is about one FC-PQ pass of 16 ops, while
+  `fcpq-h16-home-c16` bounds a wait at 16 passes ≈ 256 ops. That is why
+  `-c256` was added.
+- **(b) Throughput.** Fair dispatch-pq runs 1.27–1.51× `dispatch` in ops/s
+  in the sustained cells, because fairness shifts the mix to cheap light
+  ops. Its critical-section utilisation, the like-for-like work measure, is
+  0.62–0.79× `dispatch`'s. That is the fairness tax without delegation.
+  With the same code and placement, usage order (c256) against its own
+  FIFO-equivalent (c16) costs 0.67 / 0.74 / 0.74× util for default / home /
+  remote wakes. FC-PQ lost only 0.96× for the same mix shift. Against
+  same-window `fcpq-h16-home-c16`, fair dispatch-pq reaches 0.44–0.52× ops/s
+  and 0.43–0.54× util sustained. The best variant per cell is 0.51–0.52× /
+  0.52–0.54×: `-home-c256` at W = 8, `-remote-c256` at W = 16. Bursty it
+  reaches 0.21–0.62× ops/s and 0.12–0.36× util, where FC-PQ is itself
+  unfair (Jain 0.697).
+- **(c) The per-op cost is in the handoff wake, not in the PQ.** In the
+  instrumented sustained runs, each handoff is timed from the releaser's
+  critical-section end to the grantee's critical-section start. The
+  spinlock takes 163–219 cycles and the queue operations (clamp scan, heap
+  pop, grant) 256–660 when the clamp does not bind (672–1484 when it binds
+  and rekeys at every handoff). Grant to critical-section start takes
+  3816–5612 cycles (3885–5612 in the fair cells): the grantee still has to
+  be scheduled and polled. These three parts cover 98.6–99.3 % of o, the
+  non-CS lock time per op. In the
+  fair cells, PQ + spinlock is 7–18 % of o, and grant to start is 80–92 %.
+  FC-PQ spends 1103 cycles/op of in-pass admin (drain, heap, trampoline,
+  wake issue) plus 40 cycles/op of gap. The combiner runs the next closure
+  without waiting for anyone to be scheduled. At the fair mix (C̄ ≈ 2 500
+  cycles per op), util = C̄ / (C̄ + o) gives 0.69 with FC-PQ's o and
+  0.30–0.36 with dispatch-pq's.
+- **(d)** Usage-ordered service fairness does not need delegation (the same
+  queue behind a plain handoff mutex reaches Jain 1.000), but *cheap*
+  fairness does. Without a combiner, every fairly ordered op pays a 3.9–5.6
+  k-cycle wake-to-run handoff, so the claim holds only as "delegation is
+  needed for service fairness at delegation-level utilisation", not as
+  "delegation is needed for service fairness".
+
+### Design (`src/locks/dispatch_pq.rs`)
+
+- The lock word is `UNLOCKED | LOCKED | LOCKED+QUEUED`. An uncontended
+  acquire is one CAS; the queue is not touched. A contended acquire takes a
+  TTAS spinlock. If the lock is free by then it takes it; otherwise it sets
+  `QUEUED` and pushes its waiter. Release is one CAS if `QUEUED` is clear.
+  Otherwise it takes the spinlock, advances the handoff clock, runs the
+  clamp and pops the minimum. Ownership passes directly: the lock stays
+  held, `granted` is set with Release, and the waker fires with
+  `--wake-placement` (`default` = `dispatch`'s local-queue wake). The
+  enqueuer's `QUEUED` CAS is AcqRel and the releaser's failing CAS is
+  Acquire. That orders the push before the releaser's spinlock section, so
+  a release cannot miss an enqueue (module docs).
+- Queue: FC-PQ's heap, reused rather than copied. `fc_pq::UsagePq<T>` is now
+  `UsageQueue<fc::Node<T>>`, a queue generic over a `UsageNode` accounting
+  trait. The admit / begin_pass / next bodies became `push` /
+  `promote_starving` / `pop`, with no logic change, plus `set_totals` and
+  `remove` for dispatch-pq. The accounting, newcomer init (`mean`) and clamp
+  semantics are FC-PQ's; the tick is the handoff. The owner charges its own
+  closure (`cycles()` around it) as `base + cs` and updates the
+  running-mean totals. Differences from FC-PQ:
+  - a request that never queues keeps its own usage as base and never gets
+    the newcomer init (no request here took that path, see Checks);
+  - the charge window covers only the closure, not FC's trampoline, hence
+    Jain 1.000 rather than 0.997 [INFERENCE, from the 2026-09-29 FC-PQ
+    entry's 193-cycle trampoline estimate].
+- Waiters are heap-allocated once per client. Dropping a queued request
+  unlinks it; dropping a granted one passes the lock on. CLI: `--lock
+  dispatch-pq`, `--starvation-clamp N` (default 16, handoffs; label
+  `-c<N>`), `--newcomer-init`, `--fcpq-wait-stats` (waits in handoffs),
+  `--handoff-stats` (JSON `handoff`: acquisition paths plus a per-handoff
+  cycle breakdown). `scripts/run_p3.sh` labels
+  `dispatch-pq[-home|-remote][-c<N>]` and new env `OUT`, `CONTENTIONS`,
+  `HANDOFF_STATS`; `--sanity` includes it.
+
+### Checks
+
+- Unit tests (`dispatch_pq.rs`, 6):
+  - release grants the minimum-usage waiter (order 1, 3, 0, 2 for usages
+    300, 100, 400, 200);
+  - the clamp counts handoffs: a 1e6-usage entry is served 3rd / 4th /
+    last at clamp 1 / 2 / 0 behind four cheap ones;
+  - dropping a queued or a granted request passes the lock on;
+  - no lost wakeup, on wake-driven executors that stall on a stranded
+    waiter. Dense (4 threads × 3 clients × 20 k ops): about 240 k
+    handoffs. Sparse (1 client per thread): about 76 k fast, 700 free
+    under the spinlock and 1.5–3 k handoffs per run. Both sides of the
+    release/enqueue race occur;
+  - two cost classes (8:1), clamp off: light:heavy ops 7.7, charged usage
+    ratio 1.006;
+  - mutual exclusion and completion on the real executor: 3 placements × 3
+    clamps × {sustained, sparse gaps}, overlap-detecting critical section.
+- `fc_pq` tests pass unchanged. Release runs pass, and TSan passes once
+  (nightly 2026-04-28, `-Zsanitizer=thread -Zbuild-std`): 6/6 tests, 0
+  reports. `coro-bench --sanity` passes for all seven locks (dispatch-pq
+  96 817 ops).
+- Allocation probe (throwaway counting global allocator, 1 s after a
+  300 ms warm-up). On OS threads with a wake-driven executor: 0
+  allocations over 143–171 k ops at clamp 16 / 0 / 1. On the executor
+  (W = 8, balance 31, 64 clients): 0 over 180 k ops with default wakes.
+  With home / remote wakes it is 0.0159 per op, identical to
+  `dispatch-home` / `-remote` (0.0159): one executor `Injector` block per
+  63 pushes. The lock itself allocates nothing.
+- The shared-queue refactor leaves FC-PQ unchanged within the spread.
+  Same window, `fcpq-h16-home-c16` W = 8 b31: frozen binary 0.612 [0.611,
+  0.613] sustained (0.612 [0.611, 0.614] in the instrumented stage), Jain
+  0.997, L:H 5.49 [5.48, 5.49]. Pre-change sweep binary `5e4cfd35…`:
+  0.615 [0.613, 0.617], Jain 0.997, L:H 5.54 [5.48, 5.54]. Bursty is 0.358
+  [0.357, 0.358] for both. The ranges overlap, so the difference is not
+  interpreted. `results/dpqab-pre-*`.
+
+### Setup
+
+Frozen binary `target/dispatch-pq/coro-bench`, sha256 `558a62a0…`. Driver:
+`scripts/run_dispatch_pq.sh` (stages sanity, main, w16, b0, inst, ab), run
+under `~/.cache/locks-experiments/measurement.lock`. Unix window
+1790703428–1790703786: 150 runs, sequential, repeats outermost within each
+stage, 2 s window after a 200 ms warm-up, n = 3 per cell, TSC 2.2002 GHz.
+CPUs 0–15 were at `scaling_max_freq` 3.0 GHz, the same state as the earlier
+2026-09-29 entries. The references reproduce them: `fc-remote` 0.378 [0.378,
+0.378] (clamp-sweep ab window 0.378 [0.377, 0.379]), `dispatch` 0.212 [0.208,
+0.212] (actorref 0.213 [0.212, 0.213]), `fcpq-h16-home-c16` 0.612 (sweep
+0.612 [0.611, 0.614]).
+
+Cells: W = 8 balance 31 sustained and bursty, 11 variants. W = 16 balance 31
+and W = 8 balance 0, sustained only: `dispatch`, both fair dispatch-pq
+candidates and `fcpq-h16-home-c16`. The candidates had to be fixed before the
+window, so both run in every cell. Files: `results/dpq-*` (plain) and
+`results/dpqi-*`, the same W = 8 b31 cells with `--handoff-stats
+--fcpq-wait-stats`, 3–4 % slower (below). Tables: `python3
+scripts/summarize_dispatch_pq.py results 'dpq-*.json'` and `… 'dpqi-*.json'`;
+admin / gap for FC-PQ from `scripts/summarize_fcpq_sweep.py`. `dispatch-pq`
+without a suffix is clamp 16.
+
+util = Σ harness CS cycles / (window × TSC Hz), as in earlier entries. o =
+(window cycles − CS) / ops is the non-CS lock time per op; for FC-PQ it
+equals admin/op + gap/op. The ratio columns use the same cell's medians.
+Burden Jain is "–" for dispatch and dispatch-pq: they never combine, and
+each critical section runs in its owner's poll. "Byst p99" is the worst
+worker's bystander p99.
+
+### Results (medians [min, max], n = 3, same window)
+
+| cell | variant | Mops/s | ×dispatch | ×fcpq-c16 | util (×dispatch / ×fcpq-c16) | service Jain | L:H ops | light / heavy p99 (µs) | burden Jain | byst p99 (µs) | starved c / b |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| w8 b31 sus | dispatch | 0.212 [0.208, 0.212] | 1.00 | 0.35 | 0.477 (1.00 / 0.70) | 0.665 [0.665, 0.670] | 1.00 | 312.8 / 312.8 | – | 0.8 | 0 / 0 |
+| w8 b31 sus | dispatch-pq (c16) | 0.197 | 0.93 | 0.32 | 0.446 (0.94 / 0.65) | 0.667 | 1.00 | 327.7 / 327.7 | – | 0.8 | 0 / 0 |
+| w8 b31 sus | dispatch-pq-c8 | 0.198 [0.197, 0.198] | 0.93 | 0.32 | 0.445 (0.93 / 0.65) | 0.666 [0.665, 0.666] | 1.00 | 327.7 / 327.7 | – | 0.8 | 0 / 0 |
+| w8 b31 sus | dispatch-pq-remote | 0.198 [0.198, 0.199] | 0.93 | 0.32 | 0.454 (0.95 / 0.66) | 0.673 [0.672, 0.674] | 1.00 | 342.5 / 342.5 | – | 4.2 [4.0, 4.2] | 0 / 0 |
+| w8 b31 sus | dispatch-pq-home | 0.212 [0.212, 0.213] | 1.00 | 0.35 | 0.486 (1.02 / 0.71) | 0.672 [0.671, 0.673] | 1.00 | 297.9 / 297.9 | – | 4.2 | 0 / 0 |
+| w8 b31 sus | dispatch-pq-c0 | 0.270 [0.269, 0.270] | 1.27 | 0.44 | 0.299 (0.63 / 0.44) | 1.000 | 5.83 [5.82, 5.84] | 186.2 / 834.0 | – | 0.9 | 0 / 0 |
+| w8 b31 sus | dispatch-pq-c256 | 0.268 [0.268, 0.269] | 1.27 | 0.44 | 0.297 (0.62 / 0.43) | 1.000 | 5.84 | 186.2 / 863.8 | – | 0.9 [0.8, 0.9] | 0 / 0 |
+| w8 b31 sus | **dispatch-pq-home-c256** | 0.311 [0.309, 0.312] | 1.47 | 0.51 | 0.358 (0.75 / 0.52) | 1.000 | 5.63 [5.61, 5.63] | 163.8 [156.4, 163.8] / 714.9 | – | 3.7 | 0 / 0 |
+| w8 b31 sus | dispatch-pq-remote-c256 | 0.288 [0.287, 0.288] | 1.36 | 0.47 | 0.335 (0.70 / 0.49) | 1.000 | 5.57 [5.56, 5.58] | 178.7 / 774.5 | – | 3.7 | 0 / 0 |
+| w8 b31 sus | fc-remote | 0.378 | 1.78 | 0.62 | 0.839 (1.76 / 1.23) | 0.660 | 1.00 | 178.7 / 178.7 | 0.985 [0.963, 0.989] | 3.1 | 0 / 0 |
+| w8 b31 sus | fcpq-h16-home-c16 | 0.612 [0.611, 0.613] | 2.89 | 1.00 | 0.684 (1.43 / 1.00) | 0.997 | 5.49 [5.48, 5.49] | 342.5 / 625.5 | 1.000 | 3.0 | 0 / 0 |
+| w8 b31 bur | dispatch | 0.069 | 1.00 | 0.19 | 0.160 (1.00 / 0.22) | 0.678 [0.678, 0.681] | 1.00 | 253.2 [238.3, 253.2] / 238.3 | – | 0.9 | 0 / 0 |
+| w8 b31 bur | dispatch-pq (c16) | 0.070 | 1.01 | 0.20 | 0.143 (0.89 / 0.19) | 0.750 | 1.44 | 268.1 / 297.9 | – | 0.9 | 0 / 0 |
+| w8 b31 bur | dispatch-pq-c8 | 0.069 [0.068, 0.069] | 0.99 | 0.19 | 0.159 (0.99 / 0.22) | 0.680 | 1.00 | 253.2 / 253.2 | – | 0.9 [0.8, 0.9] | 0 / 0 |
+| w8 b31 bur | dispatch-pq-remote | 0.184 [0.184, 0.185] | 2.66 | 0.51 | 0.350 (2.18 / 0.47) | 0.774 [0.773, 0.777] | 1.67 | 100.5 [100.5, 104.3] / 134.0 | – | 15.8 | 0 / 0 |
+| w8 b31 bur | dispatch-pq-home | 0.136 [0.133, 0.136] | 1.96 | 0.38 | 0.259 (1.62 / 0.35) | 0.771 [0.771, 0.772] | 1.64 | 148.9 [148.9, 163.8] / 201.1 [193.6, 230.8] | – | 6.7 [6.3, 7.2] | 0 / 0 |
+| w8 b31 bur | dispatch-pq-c0 | 0.074 | 1.07 | 0.21 | 0.091 (0.57 / 0.12) | 1.000 | 5.30 | 193.6 / 774.5 | – | 0.9 | 0 / 0 |
+| w8 b31 bur | dispatch-pq-c256 | 0.074 | 1.07 | 0.21 | 0.090 (0.56 / 0.12) | 1.000 | 5.32 [5.29, 5.32] | 193.6 / 774.5 | – | 0.9 | 0 / 0 |
+| w8 b31 bur | dispatch-pq-home-c256 | 0.138 [0.137, 0.139] | 2.00 | 0.39 | 0.166 (1.04 / 0.22) | 1.000 | 5.43 [5.40, 5.43] | 108.0 / 506.4 [506.4, 536.2] | – | 6.1 [5.1, 6.1] | 0 / 0 |
+| w8 b31 bur | **dispatch-pq-remote-c256** | 0.223 | 3.22 | 0.62 | 0.264 (1.65 / 0.36) | 1.000 | 5.48 [5.46, 5.50] | 55.9 [55.8, 57.7] / 253.2 | – | 16.8 | 0 / 0 |
+| w8 b31 bur | fc-remote | 0.299 [0.298, 0.300] | 4.33 | 0.84 | 0.671 (4.19 / 0.91) | 0.662 | 1.00 | 57.7 / 57.7 | 1.000 | 29.8 | 0 / 0 |
+| w8 b31 bur | fcpq-h16-home-c16 | 0.358 [0.357, 0.358] | 5.17 | 1.00 | 0.740 (4.62 / 1.00) | 0.697 [0.696, 0.697] | 1.23 | 67.0 / 78.2 | 1.000 | 29.8 | 0 / 0 |
+| w16 b31 sus | dispatch | 0.212 [0.212, 0.213] | 1.00 | 0.35 | 0.478 (1.00 / 0.70) | 0.667 | 1.00 | 312.8 / 312.8 | – | 1.0 | 0 / 0 |
+| w16 b31 sus | dispatch-pq-home-c256 | 0.310 [0.308, 0.310] | 1.46 | 0.51 | 0.365 (0.76 / 0.54) | 1.000 | 5.51 [5.43, 5.52] | 163.8 / 685.1 [685.1, 714.9] | – | 3.4 [3.3, 3.4] | 0 / 0 |
+| w16 b31 sus | **dispatch-pq-remote-c256** | 0.314 [0.314, 0.315] | 1.48 | 0.52 | 0.371 (0.78 / 0.54) | 1.000 | 5.50 [5.48, 5.52] | 163.8 / 714.9 | – | 3.7 | 0 / 0 |
+| w16 b31 sus | fcpq-h16-home-c16 | 0.603 [0.603, 0.604] | 2.85 | 1.00 | 0.681 (1.42 / 1.00) | 0.997 | 5.43 [5.42, 5.43] | 134.0 / 565.9 | 0.998 [0.998, 0.999] | 2.6 | 0 / 0 |
+| w8 b0 sus | dispatch | 0.205 [0.203, 0.205] | 1.00 | 0.33 | 0.450 (1.00 / 0.66) | 0.655 [0.654, 0.655] | 1.00 | 312.8 / 312.8 | – | 5.8 [5.8, 6.1] | 0 / 0 |
+| w8 b0 sus | **dispatch-pq-home-c256** | 0.310 [0.309, 0.311] | 1.51 | 0.51 | 0.354 (0.79 / 0.52) | 1.000 | 5.71 [5.69, 5.72] | 163.8 [163.8, 171.3] / 714.9 | – | 4.0 [3.7, 4.0] | 0 / 0 |
+| w8 b0 sus | dispatch-pq-remote-c256 | 0.289 [0.286, 0.290] | 1.41 | 0.47 | 0.335 (0.74 / 0.49) | 1.000 | 5.59 [5.54, 5.61] | 178.7 [171.3, 178.7] / 774.5 | – | 3.7 | 0 / 0 |
+| w8 b0 sus | fcpq-h16-home-c16 | 0.614 [0.613, 0.618] | 3.00 | 1.00 | 0.684 (1.52 / 1.00) | 0.997 | 5.50 [5.49, 5.50] | 134.0 / 625.5 [625.5, 655.3] | 0.965 [0.963, 0.967] | 4.7 | 0 / 0 |
+
+Bold marks the best fair dispatch-pq variant per cell, and each is outside
+the other candidate's spread. Every run of this entry starved no client and
+no bystander. Heavy p99 is higher than FC-PQ's (685–864 vs 566–626 µs
+sustained). Light p99 is 164–186 µs, against FC-PQ's 343 µs at W = 8 b31 and
+134 µs at W = 16 and b0.
+
+### Where the per-op cost goes (instrumented runs, W = 8 b31)
+
+Per handoff, in TSC cycles. "Spin" runs from the releaser's CS end to the
+queue spinlock being held. "Queue" runs from there to the grant: handoff
+tick, clamp scan and rekey, heap pop, waker take. "Grant → start" runs from
+the grant to the grantee's CS start: spinlock release, wake call, run-queue
+wait, poll, grant check. Every acquisition in these cells was a handoff
+(fast / free share 0.000). Waits are in handoffs; the histogram's last
+bucket is open, so "≥ 63" means 63 or more.
+
+| cont | variant | Mops/s inst / plain | o inst | spin | queue | grant → start | (spin + queue) / o | wait p50 / p99 / max | promoted |
+|---|---|---|---|---|---|---|---|---|---|
+| sus | dispatch-pq (c16) | 0.191 / 0.197 | 6552 | 166 | 741 | 5592 | 14 % | 62 / 62 / 62 | 1.000 |
+| sus | dispatch-pq-c8 | 0.193 / 0.198 | 6470 | 163 | 672 | 5586 | 13 % | 62 / 62 / 62 | 1.000 |
+| sus | dispatch-pq-home (c16) | 0.208 / 0.212 | 5557 | 216 | 1484 | 3816 | 31 % | 62 / 62 / 62 | 1.000 |
+| sus | dispatch-pq-remote (c16) | 0.193 / 0.198 | 6350 | 219 | 1433 | 4649 | 26 % | 62 / 62 / 62 | 1.000 |
+| sus | dispatch-pq-c0 | 0.257 / 0.270 | 6123 | 163 | 298 | 5612 | 8 % | 36 / ≥ 63 / 1385 [1016, 2743] | 0.000 |
+| sus | dispatch-pq-c256 | 0.259 / 0.268 | 6049 | 163 | 256 | 5582 | 7 % | 36 / ≥ 63 / 257 | 0.000 [0.000, 0.001] |
+| sus | dispatch-pq-home-c256 | 0.298 / 0.311 | 4830 | 216 | 660 | 3885 | 18 % | 36 / ≥ 63 / 257 | 0.000 |
+| sus | dispatch-pq-remote-c256 | 0.280 / 0.288 | 5295 | 211 | 651 | 4394 | 16 % | 36 / ≥ 63 / 257 | 0.000 [0.000, 0.001] |
+| sus | fcpq-h16-home-c16 | 0.612 / 0.612 | 1144 | admin 1103 + gap 40 per op | | | | 2 / 14 / 17 passes | 0.000 |
+| bur | dispatch-pq (c16) | 0.069 / 0.070 | 27295 | 170 | 435 | 26646 | 2 % | 14 / 18 / 19 | 0.424 [0.424, 0.426] |
+| bur | dispatch-pq-c256 | 0.073 / 0.074 | 27420 | 183 | 347 | 26839 | 2 % | 7 / 52 / 167 [112, 178] | 0.000 |
+| bur | dispatch-pq-home-c256 | 0.137 / 0.138 | 13395 | 159 | 436 | 12754 | 4 % | 6 / 52 / 207 [146, 257] | 0.000 |
+| bur | dispatch-pq-remote-c256 | 0.221 / 0.223 | 7385 | 205 | 473 | 6635 | 9 % | 5 / 51 / 257 [136, 257] | 0.000 |
+| bur | fcpq-h16-home-c16 | 0.358 / 0.358 | 1599 | admin 1002 + gap 600 per op | | | | 1 / 1 / 1 passes | 0.000 |
+
+Grant → start varies by ≤ 1.5 % between repeats; spin and queue vary by up
+to 10 % (e.g. `-home-c256` queue 660 [648, 724]). Spin + queue + grant →
+start leaves 39–69 cycles of o
+unaccounted sustained (CS end to release CAS, totals update). The
+instrumentation adds two `cycles()` reads to the release path. It slows
+sustained runs by 2.8–4.2 % and raises o by 220–294 cycles, so the spin
+and queue columns are upper bounds [INFERENCE].
+
+### Mechanism
+
+- **Why clamp 8 / 16 handoffs is FIFO.** Under usage order the waits
+  settle where charged usage is equal. The sustained light wait is 36
+  handoffs (p50). A heavy client is served once per round of 32 heavy +
+  32 × 5.84 light ops ≈ 219 handoffs, and the maximum wait is 257 at c256
+  [computed]. Any clamp below the light wait therefore promotes every
+  entry. Promoted keys collapse to the running minimum, and ties go by
+  arrival, so service is FIFO: 62 handoffs of wait for every request, and
+  L:H 1.00. [INFERENCE, untested] A clamp between 36 and about 218 would
+  cap only the heavies, at L:H ≈ (c + 1) / 32 − 1. Jain 0.95 / 0.99 would
+  need c ≳ 149 / 184 (using this lock's CS_H / CS_L = 5.84, where Jain is
+  1.000 at L:H 5.84), the counterpart of the FC-PQ entry's clamp-9–11
+  frontier. Bursty (16 clients) the rounds are about 50 handoffs long:
+  clamp 16 promotes 42 % (Jain 0.750) and clamp 8 all of them (0.680).
+- **Fairness tax = mix shift at a large o.** util = C̄ / (C̄ + o)
+  reproduces the table. `dispatch` has C̄ = 4 947 and o = 5 424 (util
+  0.477); `dispatch-pq-c256` has C̄ = 2 433 and o = 5 759 (0.297). With
+  `dispatch`'s o at the fair mix, util would be 0.310, so 93 % of the drop
+  comes from the mix alone. The same shift cost FC-PQ 4 % (0.708 → 0.681)
+  because its o is 1 137. `-home-c256`'s mix (C̄ = 2 529) at FC-PQ's o
+  would give util 0.690, against FC-PQ's measured 0.684: o accounts for
+  the entire gap to FC-PQ [computed].
+- **Placement.** Grant → start is 5 582 cycles with default wakes: the
+  grantee waits in the releaser's local queue behind the releaser's own
+  4 000-cycle parallel work [INFERENCE]. It is 3 885 with home wakes and
+  4 394 with remote ones. The queue step costs 256 cycles with default
+  wakes and 651–660 with home or remote ones. [INFERENCE, not measured]
+  With default wakes consecutive owners tend to run on the releasing
+  worker, which keeps the heap's lines local. Per-worker client poll
+  cycles are even (Jain ≥ 0.999 for `dispatch`, `dispatch-pq`, `-c256`,
+  `-home-c256` and `-remote-c256`, W = 8 b31 sustained), so they cannot
+  show where the owners ran. Home is best at W = 8 sustained, remote at
+  W = 16 and bursty. Bursty grant → start with default wakes (26.8 k
+  cycles) is of the order of the 32 k-cycle parallel work [INFERENCE].
+
+### Caveats
+
+1. The clamp unit is the handoff, as specified. `-c256` and `-c0` go beyond
+   the requested grid; they were added once an exploratory n = 1 pass (in
+   `.worktree/`, with a pre-fix binary whose only difference was a stale
+   grant timestamp in the instrumentation) showed that clamps 8 and 16
+   make the queue FIFO.
+2. In these cells no acquisition took the uncontended fast path or found
+   the lock free: the lock is always in handoff. The fast path is
+   exercised only by the unit tests (sparse regime: 95–97 % fast).
+3. Bystanders are always runnable (standing limitation: no steal-when-idle).
+4. The spin and queue columns come from runs that are 3–4 % slower than the
+   plain ones (above). The home / remote queue-cost mechanism is untested.
+5. `ops/s` counts cheap light ops; util is the like-for-like work measure.
+   "×fcpq-c16" ratios in bursty compare against a lock whose own service
+   Jain there is 0.697.
+
+### Next question
+
+Grant → start, not the queue, is what separates dispatch-pq from FC-PQ.
+Does an executor-level handoff that resumes the min-usage grantee inline on
+the releasing worker, i.e. CES with a usage-ordered successor ("ces-pq",
+chain bound 64, `home` break), remove it without closure delegation? CES
+already matches `fc-remote` throughput under FIFO. Secondary: whether
+clamps 150–220 handoffs trace the predicted Jain frontier with a heavy wait
+bound between 150 and 220 handoffs.
+
 ## 2026-09-29 — FC-PQ starvation clamp / newcomer-init sweep
 
 ### One-line verdicts
