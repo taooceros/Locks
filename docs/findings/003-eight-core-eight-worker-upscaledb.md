@@ -34,8 +34,8 @@ Paired speedup vs native: FC 2.17x, FC-PQ 1.99x, USCL 2.13x.
 
 ## Interpretation
 
-- With one physical core per worker the oversubscription penalty of finding
-  002 is gone: delegation is 1.7x (FC) / 1.5x (FC-PQ) over the native mutex
+- With one physical core per worker (threads <= CPUs, the rule from finding
+  002), delegation is 1.7x (FC) / 1.5x (FC-PQ) over the native mutex
   in fixed work and about 2x in sustained load.
 - The native mutex itself degrades from 645K op/s (4W) to 440K op/s (8W);
   part of the relative delegation advantage is native getting worse, not
@@ -45,8 +45,12 @@ Paired speedup vs native: FC 2.17x, FC-PQ 1.99x, USCL 2.13x.
   waiters spin, U-SCL waiters block; see finding 002), not a delegation
   cost. Under sustained load USCL falls to about half of FC (362K/255K vs
   603K/607K).
-- FC-PQ is 13% below FC at identical CPU-s (8.42 vs 8.43): the constant
-  per-request tax of the priority queue, not a scheduling effect.
+- FC-PQ is 13% below FC at identical CPU-s (8.42 vs 8.43). This run predates
+  `fcpq_fast_path`, which does not close the saturated gap: E0(b)
+  ([PR #48](https://github.com/taooceros/Locks/pull/48)) still measures 32W
+  FC-PQ/FC 0.65 at cs 1 and 0.88 at cs 1000, and the fast path changes
+  saturated per-op cost by only 2-5 ns. [INFERENCE] The gap is saturated per-op
+  serial cost, not a scheduling effect.
 - FC-PQ shifts the sustained mix toward finds (844K find/s vs 521K
   insert/s, against FC's 603K/607K): fairness by request selection changes
   which work completes, not just how much.

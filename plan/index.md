@@ -42,6 +42,10 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 ## By Date
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 
+### 2026-09-28
+
+- [Evidence prune](./2026-09-28/evidence-prune.md) (withdrawn results and their provenance)
+
 ### 2026-09-26
 
 - [Research plan](../README.md) (thesis, experiments E0-E4)

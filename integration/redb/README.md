@@ -9,8 +9,10 @@ real-database correctness gate and the existing fresh-process runner.
 It replaces the earlier harness that wrapped whole transactions of unmodified
 redb in external locks. In that design redb's own single-writer lock still
 decided admission and was never contended, so it did not test delegation inside
-the database. That harness and its claims are gone; its historical results and
-worktrees (for example `experiment-redb-fair-transactions`) are untouched.
+the database. That harness and its claims are gone; its results are withdrawn
+and survive only on bookmark `experiment/redb-fair-transactions` and in
+`~/Locks-artifacts/experiment-redb-fair-transactions/` (see
+[Withdrawn](../../docs/evidence/README.md#withdrawn)).
 
 ## Design decision recorded before implementation: admission-only replacement
 
