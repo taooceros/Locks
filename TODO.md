@@ -122,6 +122,14 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
 - [ ] **UpScaleDB single-operation integration.** Preload size (1K vs 1M
   records) as the W knob, plus perf counters.
 - [ ] **redb 1/64 write-transaction mix** as the application endpoint.
+  - [x] Harness ready for the rerun ([plan](plan/2026-09-28/redb-internal-rerun.md)):
+    service-time Jain, `None` primary, 1/2/4/8 clients, `uscl`, FC-PQ fast path;
+    gate 64/64, 165 upstream tests, 336-cell smoke. Follow-up done: 168-cell
+    perf cohort (MCS ≈100 HITM loads/tx from 2 clients, FC-PQ flat 10-20) and the
+    504-cell formal matrix (FC-PQ service_jain 0.96-1.00 in half1_half64). Open:
+    pin/record CPU frequency, then rerun.
+  - [x] perf-02 clock normalisation ([plan](plan/2026-09-28/redb-perf-02-clock.md)): ref_tsc + client clock; at 2.2 GHz FC-PQ ≈ FC ≈ U-SCL, MCS 0.78-0.84×; counters cost ≈ 0; formal matrix rerun with clock still open.
+  - [x] Fixed 3.0 GHz rerun ([plan](plan/2026-09-28/redb-perf-02-clock.md)): power setups + preflight, sampler in timed cells; 168 perf + 360 formal cells, 0 failed; FC-PQ/U-SCL at 4-8 clients 0.92-1.27× (S0 raw 2.4-3.5×); U-SCL body 120-200 → 31-51 µs. S2 (C6 off) open.
 - [ ] **Run both via [`integration/README.md`](integration/README.md) workflows.**
 
 ---

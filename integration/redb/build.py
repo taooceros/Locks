@@ -8,8 +8,16 @@ applied in order. The patched tree is placed at the fixed Cargo path dependency
 application or the build stops. Three binaries are built with --locked:
 
   native      upstream crates.io redb, untouched          (variant native)
-  patched     patched redb                                (refactored, bridge_mutex, mcs, fc, fc_pq)
+  patched     patched redb                                (refactored, bridge_mutex, mcs, uscl, fc, fc_pq)
   test_hooks  patched redb + dlock_test_hooks probes      (correctness gate only)
+
+Every binary is instrumented (service_time: rdtscp around each write body) and the
+patched ones build FC-PQ with the E0(b) fast path and its hit counter
+(fcpq_fast_path, fcpq_fast_path_stat). --uninstrumented drops service_time and
+fcpq_fast_path_stat (fast path kept) for the instrumentation-overhead check only;
+run.py refuses such builds. build.json records each binary's requested harness
+features, the libdlock/redb features Cargo resolved for it, and the features the
+binary reports itself (--build-info).
 """
 import argparse
 import hashlib
@@ -32,15 +40,16 @@ OUT = ROOT / '.worktree/redb'
 CRATE = 'redb-3.1.0.crate'
 CRATE_URL = 'https://static.crates.io/crates/redb/' + CRATE
 CRATE_SHA256 = 'ae323eb086579a3769daa2c753bb96deb95993c534711e0dbe881b5192906a06'
+PATCHED_VARIANTS = ['refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq']
+INSTRUMENTATION = ['service_time', 'fcpq_fast_path_stat']
 BINARIES = {
-    'native': {'features': 'native', 'variants': ['native']},
-    'patched': {'features': 'patched',
-                'variants': ['refactored', 'bridge_mutex', 'mcs', 'fc', 'fc_pq']},
-    'test_hooks': {'features': 'test_hooks',
-                   'variants': ['refactored', 'bridge_mutex', 'mcs', 'fc', 'fc_pq']},
+    'native': {'features': ['native', 'service_time'], 'variants': ['native']},
+    'patched': {'features': ['patched', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat'],
+                'variants': PATCHED_VARIANTS},
+    'test_hooks': {'features': ['test_hooks', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat'],
+                   'variants': PATCHED_VARIANTS},
 }
-VARIANT_BINARY = {'native': 'native', 'refactored': 'patched', 'bridge_mutex': 'patched',
-                  'mcs': 'patched', 'fc': 'patched', 'fc_pq': 'patched'}
+VARIANT_BINARY = {'native': 'native', **{variant: 'patched' for variant in PATCHED_VARIANTS}}
 
 
 def sha256(data):
@@ -143,7 +152,28 @@ def output(command):
     return subprocess.check_output(command, cwd=ROOT, text=True).strip()
 
 
-def build(out, jobs):
+def resolved_features(features):
+    """Features Cargo resolves for libdlock and redb (patched or upstream) in this build."""
+    metadata = json.loads(output(['cargo', 'metadata', '--manifest-path', str(MANIFEST), '--locked',
+                                  '--filter-platform', 'x86_64-unknown-linux-gnu', '--format-version', '1', '--features', ','.join(features)]))
+    names = {package['id']: package['name'] for package in metadata['packages']}
+    resolved = {}
+    for node in metadata['resolve']['nodes']:
+        name = names[node['id']]
+        if name in ('libdlock', 'redb', 'redb_transactions'):
+            key = name if name != 'redb' or 'path+' in node['id'] else 'redb_upstream'
+            resolved[key] = sorted(node['features'])
+    # cargo metadata resolves the whole graph; keep only dependencies this build enables.
+    enabled = set(resolved.get('redb_transactions', []))
+    if 'native' in enabled:
+        resolved.pop('libdlock', None)
+        resolved.pop('redb', None)
+    else:
+        resolved.pop('redb_upstream', None)
+    return resolved
+
+
+def build(out, jobs, instrumented=True):
     out = out.resolve()
     if out.exists() and any(out.iterdir()):
         raise RuntimeError(f'{out} is not empty; use a fresh build directory')
@@ -152,8 +182,9 @@ def build(out, jobs):
     (out / 'logs').mkdir()
     binaries = {}
     for name, spec in BINARIES.items():
+        features = [f for f in spec['features'] if instrumented or f not in INSTRUMENTATION]
         command = ['cargo', 'build', '--manifest-path', str(MANIFEST), '--release', '--locked',
-                   '--bin', 'redb_transactions', '--features', spec['features'],
+                   '--bin', 'redb_transactions', '--features', ','.join(features),
                    '--target-dir', str(out / 'target' / name), '-j', str(jobs)]
         print('+', ' '.join(command), flush=True)
         log = out / 'logs' / (name + '.log')
@@ -164,10 +195,17 @@ def build(out, jobs):
         snapshot = out / 'bin' / ('redb-' + name)
         shutil.copy2(out / 'target' / name / 'release/redb_transactions', snapshot)
         snapshot.chmod(0o555)
-        binaries[name] = {**spec, 'file': str(snapshot.relative_to(out)),
-                          'sha256': digest(snapshot), 'command': command}
+        reported = json.loads(output([str(snapshot), '--build-info']))
+        if sorted(k for k, on in reported.items() if on) != sorted(
+                {f for f in features} | ({'patched'} if 'test_hooks' in features else set())):
+            raise RuntimeError(f'{name}: binary reports features {reported}, requested {features}')
+        binaries[name] = {**spec, 'features': features, 'file': str(snapshot.relative_to(out)),
+                          'sha256': digest(snapshot), 'command': command,
+                          'resolved_features': resolved_features(features),
+                          'reported_features': reported}
     manifest = {
-        'schema': 1,
+        'schema': 2,
+        'instrumented': instrumented,
         'redb_source': source,
         'harness_sources_sha256': harness_sources(),
         'binaries': binaries,
@@ -185,8 +223,8 @@ def load_build(out):
     """Load build.json and verify it still describes the current sources and binaries."""
     out = out.resolve()
     manifest = json.loads((out / 'build.json').read_text())
-    if manifest.get('schema') != 1:
-        raise RuntimeError('unsupported build manifest')
+    if manifest.get('schema') != 2:
+        raise RuntimeError('unsupported build manifest (rebuild with the current build.py)')
     with tempfile.TemporaryDirectory(prefix='redb-verify-') as temp:
         _, fresh = apply_patches(temp)
     recorded = manifest['redb_source']
@@ -207,9 +245,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--output-dir', type=Path, default=OUT)
     parser.add_argument('--jobs', type=int, default=8)
+    parser.add_argument('--uninstrumented', action='store_true',
+                        help='overhead check only: no service_time / fcpq_fast_path_stat')
     args = parser.parse_args()
-    manifest = build(args.output_dir, args.jobs)
+    manifest = build(args.output_dir, args.jobs, instrumented=not args.uninstrumented)
     print(json.dumps({'status': 'ok', 'output_dir': str(args.output_dir.resolve()),
+                      'instrumented': manifest['instrumented'],
                       'patched_tree_sha256': manifest['redb_source']['patched_tree_sha256'],
                       'binaries': {k: v['sha256'] for k, v in manifest['binaries'].items()}}))
 

@@ -13,7 +13,7 @@ use std::time::Instant;
 use redb::{Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata};
 use serde_json::{json, Value};
 
-use crate::writer::{Variant, WriteError, Writer, MAX_RECORDS_PER_REQUEST, TABLE};
+use crate::writer::{Variant, WriteError, Writer, Written, MAX_RECORDS_PER_REQUEST, TABLE};
 use crate::{create_database, key, option, parse_durability, records, value};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -77,9 +77,9 @@ fn reopen_exact(path: &PathBuf, expected: &BTreeMap<u64, u64>) -> TestResult {
 
 fn write_ok(writer: &Writer<'_>, request: &[(u64, u64)], durability: Durability,
             expected: &mut BTreeMap<u64, u64>) -> TestResult<Option<u64>> {
-    let id = writer.write(request, durability).map_err(|e| e.to_string())?;
+    let written = writer.write(request, durability).map_err(|e| e.to_string())?;
     expected.extend(request.iter().copied());
-    Ok(id)
+    Ok(written.transaction_id)
 }
 
 /// Transaction IDs must be strictly increasing in submission order.
@@ -90,12 +90,16 @@ fn ensure_increasing(ids: &[Option<u64>]) -> TestResult {
 }
 
 /// Run `work` on another thread; fail instead of hanging if the lock leaked.
+/// The thread is joined explicitly (pthread_join) on success, so per-thread
+/// lock state (U-SCL's pthread TLS) is torn down before the lock can be dropped.
 fn with_deadline<T: Send>(label: &str, work: impl FnOnce() -> T + Send) -> TestResult<T> {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
-        scope.spawn(move || { let _ = sender.send(work()); });
-        receiver.recv_timeout(DEADLINE)
-            .map_err(|_| format!("{label}: no progress within {DEADLINE:?}; lock not released?").into())
+        let handle = scope.spawn(move || { let _ = sender.send(work()); });
+        let outcome = receiver.recv_timeout(DEADLINE)
+            .map_err(|_| format!("{label}: no progress within {DEADLINE:?}; lock not released?"))?;
+        handle.join().map_err(|_| format!("{label}: worker panicked"))?;
+        Ok(outcome)
     })
 }
 
@@ -104,6 +108,7 @@ fn contents(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value>
     let mut ids = Vec::new();
     let mut buffer = [(0, 0); MAX_RECORDS_PER_REQUEST];
     let mut next = 0;
+    let fast_path_hits;
     {
         let writer = Writer::new(&db, variant)?;
         for i in 0..90 {
@@ -115,6 +120,16 @@ fn contents(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value>
             next += count as u64;
             verify_exact(&db, &expected)?;
         }
+        // A lone requester never finds another request pending, so every FC-PQ
+        // request must take the E0(b) fast path when it is compiled in.
+        fast_path_hits = writer.fast_path_hits();
+        if variant == Variant::FcPq && cfg!(feature = "fcpq_fast_path") {
+            ensure!(fast_path_hits.is_some() || !cfg!(feature = "fcpq_fast_path_stat"),
+                    "fast-path counter missing");
+            if let Some(hits) = fast_path_hits {
+                ensure!(hits == 90, "lone FC-PQ requester took the fast path {hits}/90 times");
+            }
+        }
     }
     ensure_increasing(&ids)?;
     if variant != Variant::Native {
@@ -123,7 +138,8 @@ fn contents(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value>
     }
     drop(db);
     reopen_exact(path, &expected)?;
-    Ok(json!({"requests": 90, "records": expected.len(), "reopened_exact": true}))
+    Ok(json!({"requests": 90, "records": expected.len(), "reopened_exact": true,
+              "fast_path_hits": fast_path_hits}))
 }
 
 fn stress(db: Database, path: &PathBuf, variant: Variant, durability: Durability) -> TestResult<Value> {
@@ -133,6 +149,7 @@ fn stress(db: Database, path: &PathBuf, variant: Variant, durability: Durability
     let done = AtomicBool::new(false);
     let reads_during_writes = AtomicU64::new(0);
     let writer = Writer::new(&db, variant)?;
+    let wall_begin = crate::tsc();
     let (worker_ids, reader_errors) = thread::scope(|scope| {
         let readers: Vec<_> = (0..READERS).map(|r| {
             let (db, done, reads) = (&db, &done, &reads_during_writes);
@@ -167,17 +184,17 @@ fn stress(db: Database, path: &PathBuf, variant: Variant, durability: Durability
         }).collect();
         let writers: Vec<_> = (0..WRITERS).map(|w| {
             let writer = &writer;
-            scope.spawn(move || -> Result<Vec<Option<u64>>, String> {
+            scope.spawn(move || -> Result<Vec<Written>, String> {
                 let mut buffer = [(0, 0); MAX_RECORDS_PER_REQUEST];
                 let mut next = 0;
-                let mut ids = Vec::new();
+                let mut written = Vec::new();
                 for i in 0..per_writer as usize {
                     let count = [1, 8, 64][(w + i) % 3];
                     let request = records(&mut buffer, w, next, count, SEED);
-                    ids.push(writer.write(request, durability).map_err(|e| format!("writer {w}: {e}"))?);
+                    written.push(writer.write(request, durability).map_err(|e| format!("writer {w}: {e}"))?);
                     next += count as u64;
                 }
-                Ok(ids)
+                Ok(written)
             })
         }).collect();
         let ids: Vec<_> = writers.into_iter().map(|h| h.join().unwrap_or(Err("writer panic".into()))).collect();
@@ -186,8 +203,25 @@ fn stress(db: Database, path: &PathBuf, variant: Variant, durability: Durability
             .filter_map(|h| h.join().unwrap_or(Err("reader panic".into())).err()).collect();
         (ids, reader_errors)
     });
+    let wall_tsc = crate::tsc() - wall_begin;
     ensure!(reader_errors.is_empty(), "reader failures: {reader_errors:?}");
-    let worker_ids = worker_ids.into_iter().collect::<Result<Vec<_>, _>>()?;
+    let written = worker_ids.into_iter().collect::<Result<Vec<_>, _>>()?;
+    let worker_ids: Vec<Vec<Option<u64>>> = written.iter()
+        .map(|w| w.iter().map(|x| x.transaction_id).collect()).collect();
+    // Service time: every body is charged to its requester; bodies are
+    // serialised, so their total cannot exceed the phase's wall time, and it
+    // must equal the total seen on the executing threads (test hooks).
+    let service: Vec<u64> = written.iter().map(|w| w.iter().map(|x| x.service_tsc).sum()).collect();
+    let service_total: u64 = service.iter().sum();
+    if cfg!(feature = "service_time") {
+        ensure!(written.iter().flatten().all(|x| x.service_tsc > 0), "a committed body was charged no service time");
+        ensure!(service_total <= wall_tsc,
+                "charged service {service_total} exceeds wall {wall_tsc} ticks: bodies overlapped or were double-charged");
+    }
+    #[cfg(feature = "test_hooks")]
+    ensure!(service_total == redb::dlock_private::test_hooks::service_tsc_total(),
+            "service charged to requesters {service_total} != executed {}",
+            redb::dlock_private::test_hooks::service_tsc_total());
     let mut expected = BTreeMap::new();
     let mut buffer = [(0, 0); MAX_RECORDS_PER_REQUEST];
     for w in 0..WRITERS {
@@ -219,12 +253,15 @@ fn stress(db: Database, path: &PathBuf, variant: Variant, durability: Durability
     #[cfg(feature = "test_hooks")]
     match variant {
         Variant::Fc | Variant::FcPq => ensure!(remote.as_u64() > Some(0), "no body ran on a combiner"),
-        _ => ensure!(remote.as_u64() == Some(0), "a non-combining variant ran a body on another thread"),
+        Variant::Refactored | Variant::BridgeMutex | Variant::Mcs | Variant::Uscl =>
+            ensure!(remote.as_u64() == Some(0), "a requester-run variant ran a body on another thread"),
+        Variant::Native => unreachable!("native has no test-hook binary"),
     }
     drop(writer);
     drop(db);
     reopen_exact(path, &expected)?;
     Ok(json!({"writers": WRITERS, "bodies_run_on_other_thread": remote, "transactions": WRITERS as u64 * per_writer,
+              "service_tsc_per_writer": service, "service_over_wall": service_total as f64 / wall_tsc as f64,
               "records": expected.len(), "durability": format!("{durability:?}"),
               "reads_during_writes": reads, "transaction_ids": id_check,
               "max_body_occupancy": occupancy(), "reopened_exact": true}))
@@ -318,7 +355,8 @@ fn errors_gated(db: &Database, expected: &mut BTreeMap<u64, u64>) -> TestResult 
     use redb::dlock_private::{DelegatedWriteGate, FixedInsert, FixedInsertTarget};
     let target = FixedInsertTarget::new(db, TABLE)?;
     let tracker_write = |k: u64| -> TestResult<u64> {
-        Ok(target.execute_native(&FixedInsert { records: &[(k, value(SEED, k))], durability: Durability::Immediate })?)
+        Ok(target.execute_native(&FixedInsert { records: &[(k, value(SEED, k))], durability: Durability::Immediate })
+            .outcome?)
     };
     let before = tracker_write(key(4, 0))?;
     expected.insert(key(4, 0), value(SEED, key(4, 0)));
@@ -328,7 +366,7 @@ fn errors_gated(db: &Database, expected: &mut BTreeMap<u64, u64>) -> TestResult 
     for i in 1..4 {
         let k = key(4, i);
         delegated.push(gate.execute(&FixedInsert { records: &[(k, value(SEED, k))], durability: Durability::None },
-                                    |call| call.run())?);
+                                    |call| call.run()).outcome?);
         expected.insert(k, value(SEED, k));
     }
     ensure!(delegated[0] == before + 1 && delegated.windows(2).all(|p| p[1] == p[0] + 1),

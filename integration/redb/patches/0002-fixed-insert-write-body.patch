@@ -1,22 +1,24 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 74eb267..4d95a71 100644
+index 74eb267..a6a5316 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -30,6 +30,8 @@ repository = "https://github.com/cberner/redb"
+@@ -30,6 +30,10 @@ repository = "https://github.com/cberner/redb"
  
  [features]
  cache_metrics = []
 +# Locks integration: correctness-gate probes inside the private write body.
 +dlock_test_hooks = []
++# Locks integration: rdtscp service time around the private write body.
++dlock_service_time = []
  logging = ["dep:log"]
  
  [lib]
 diff --git a/src/dlock_private.rs b/src/dlock_private.rs
 new file mode 100644
-index 0000000..7ae6dfe
+index 0000000..009f76d
 --- /dev/null
 +++ b/src/dlock_private.rs
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,447 @@
 +//! Locks integration: private, deliberately narrow write path. NOT a redb public API.
 +//!
 +//! `fixed_insert_body` is the single write-operation body: begin, a fixed number of
@@ -35,6 +37,12 @@ index 0000000..7ae6dfe
 +//! executing thread. Only the plain request (a borrowed slice of pairs plus one
 +//! durability mode) and the plain outcome cross threads. A panic inside a delegated
 +//! body aborts the process; it never unwinds across the combiner.
++//!
++//! Service time (`dlock_service_time`): the body reads the TSC with `rdtscp` when
++//! `begin` has returned (admission is complete) and again when commit or abort has
++//! returned, on the executing thread. The difference travels back with the outcome
++//! to the requester, which is charged. The same span is used for both entry points,
++//! so the tracker's admission wait (inside `begin_write`) is never counted.
 +
 +use crate::{
 +    CommitError, Database, Durability, Error, ReadableDatabase, SetDurabilityError,
@@ -138,10 +146,44 @@ index 0000000..7ae6dfe
 +
 +    /// `refactored` control: the shared body under redb's original tracker
 +    /// Mutex/Condvar writer lock, on the calling thread. Returns the transaction ID.
-+    pub fn execute_native(&self, request: &FixedInsert<'_>) -> Result<u64, FixedInsertError> {
-+        validate(request)?;
-+        fixed_insert_body(self, request, Admission::Tracker)
++    pub fn execute_native(&self, request: &FixedInsert<'_>) -> Served {
++        if let Err(error) = validate(request) {
++            return Served {
++                outcome: Err(error),
++                service_tsc: 0,
++            };
++        }
++        let mut service_tsc = 0;
++        let outcome = fixed_insert_body(self, request, Admission::Tracker, &mut service_tsc);
++        Served {
++            outcome,
++            service_tsc,
++        }
 +    }
++}
++
++/// Body outcome (the transaction ID on commit) and its service time: TSC ticks
++/// from `begin` returning to commit/abort returning, measured on the thread that
++/// ran the body. Always 0 without `dlock_service_time`, for rejected requests and
++/// for bodies whose `begin` failed.
++#[derive(Debug)]
++pub struct Served {
++    pub outcome: Result<u64, FixedInsertError>,
++    pub service_tsc: u64,
++}
++
++#[cfg(feature = "dlock_service_time")]
++#[inline(always)]
++fn service_clock() -> u64 {
++    let mut aux = 0_u32;
++    // SAFETY: rdtscp only writes `aux`; this integration targets x86_64.
++    unsafe { std::arch::x86_64::__rdtscp(&mut aux) }
++}
++
++#[cfg(not(feature = "dlock_service_time"))]
++#[inline(always)]
++fn service_clock() -> u64 {
++    0
 +}
 +
 +enum Admission {
@@ -153,11 +195,27 @@ index 0000000..7ae6dfe
 +    target: &FixedInsertTarget<'_>,
 +    request: &FixedInsert<'_>,
 +    admission: Admission,
++    service_tsc: &mut u64,
 +) -> Result<u64, FixedInsertError> {
-+    let mut txn = match admission {
++    let txn = match admission {
 +        Admission::Tracker => target.db.begin_write()?,
 +        Admission::Delegated => target.db.begin_delegated_write()?,
 +    };
++    let admitted = service_clock();
++    // The transaction is dropped (aborted) inside on every error path, so the
++    // span below covers every exit of the write.
++    let outcome = fixed_insert_transaction(target, request, txn);
++    *service_tsc = service_clock().saturating_sub(admitted);
++    #[cfg(feature = "dlock_test_hooks")]
++    test_hooks::charge(*service_tsc);
++    outcome
++}
++
++fn fixed_insert_transaction(
++    target: &FixedInsertTarget<'_>,
++    request: &FixedInsert<'_>,
++    mut txn: crate::WriteTransaction,
++) -> Result<u64, FixedInsertError> {
 +    let transaction_id = txn.dlock_transaction_id();
 +    #[cfg(feature = "dlock_test_hooks")]
 +    let occupancy = test_hooks::Occupancy::enter();
@@ -207,25 +265,32 @@ index 0000000..7ae6dfe
 +    /// `submit` must serialise every call it runs against every other call on this
 +    /// gate (that is the delegation lock) and may run `DelegatedCall::run` on any
 +    /// thread before returning. A call that is dropped unrun yields `NotExecuted`.
-+    pub fn execute<S>(
-+        &self,
-+        request: &FixedInsert<'_>,
-+        submit: S,
-+    ) -> Result<u64, FixedInsertError>
++    pub fn execute<S>(&self, request: &FixedInsert<'_>, submit: S) -> Served
 +    where
 +        S: FnOnce(DelegatedCall<'_>),
 +    {
-+        validate(request)?;
++        if let Err(error) = validate(request) {
++            return Served {
++                outcome: Err(error),
++                service_tsc: 0,
++            };
++        }
 +        let mut context = CallContext {
 +            target: &self.target,
 +            request,
 +            outcome: None,
++            service_tsc: 0,
 +        };
 +        submit(DelegatedCall {
 +            context: std::ptr::from_mut(&mut context).cast(),
 +            _borrow: PhantomData,
 +        });
-+        context.outcome.unwrap_or(Err(FixedInsertError::NotExecuted))
++        Served {
++            outcome: context
++                .outcome
++                .unwrap_or(Err(FixedInsertError::NotExecuted)),
++            service_tsc: context.service_tsc,
++        }
 +    }
 +}
 +
@@ -239,6 +304,8 @@ index 0000000..7ae6dfe
 +    target: &'t FixedInsertTarget<'t>,
 +    request: &'r FixedInsert<'r>,
 +    outcome: Option<Result<u64, FixedInsertError>>,
++    // Written by the executing thread, read by the requester after `submit`.
++    service_tsc: u64,
 +}
 +
 +/// One pending delegated body, borrowed from a blocked requester.
@@ -296,7 +363,12 @@ index 0000000..7ae6dfe
 +unsafe fn invoke(context: *mut ()) {
 +    let context = unsafe { &mut *context.cast::<CallContext<'_, '_>>() };
 +    let outcome = catch_unwind(AssertUnwindSafe(|| {
-+        fixed_insert_body(context.target, context.request, Admission::Delegated)
++        fixed_insert_body(
++            context.target,
++            context.request,
++            Admission::Delegated,
++            &mut context.service_tsc,
++        )
 +    }));
 +    match outcome {
 +        Ok(outcome) => context.outcome = Some(outcome),
@@ -317,6 +389,17 @@ index 0000000..7ae6dfe
 +    static PANIC_NEXT: AtomicBool = AtomicBool::new(false);
 +    static OCCUPANCY: AtomicU64 = AtomicU64::new(0);
 +    static MAX_OCCUPANCY: AtomicU64 = AtomicU64::new(0);
++    static SERVICE_TSC: AtomicU64 = AtomicU64::new(0);
++
++    /// Service ticks summed on the executing threads, independently of the
++    /// per-request values returned to requesters (a conservation check).
++    pub fn service_tsc_total() -> u64 {
++        SERVICE_TSC.load(Ordering::SeqCst)
++    }
++
++    pub(super) fn charge(ticks: u64) {
++        SERVICE_TSC.fetch_add(ticks, Ordering::SeqCst);
++    }
 +
 +    /// The next body pauses after its inserts, before commit, while it is the
 +    /// live writer, until `release_pause`.
