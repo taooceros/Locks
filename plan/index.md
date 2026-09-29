@@ -33,6 +33,15 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
   - Scope: `integration/redb/**`
 - [redb perf-02: clock-normalised counters](./2026-09-28/redb-perf-02-clock.md) — done: ref_tsc + per-client clock; FC/FC-PQ two levels = clock; perf overhead ≈ 1 %; fixed 3.0 GHz rerun: FC-PQ/U-SCL 2.4-3.4× → 0.92-1.27×; S2 (C6 off) open
 
+### redb closure-style delegated write API (implemented 2026-09-29)
+
+- [redb closure write API](./2026-09-29/redb-closure-write-api.md)
+  - Scope: replace the fixed-insert body with `write(|tx: &mut WriteTransaction| …)`
+    run by the delegation lock; panics re-raised on the requester; transfer cohort;
+    the rerun harness above (service time, client sweep, `uscl`, FC-PQ fast path,
+    perf cohort, power setups) ported onto the closure body
+  - Status: gate, upstream tests and smoke pass; parity note (LTO) in the plan outcome
+
 ### Theoretical analysis (formal version of the thesis)
 
 - [Publication Analysis Plan](./2026-09-23/logp-publication-analysis.md)
@@ -61,6 +70,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     (2026-09-23) is superseded by the publication analysis above
 
 ## By Date
+- 2026-09-29: [redb closure write API](./2026-09-29/redb-closure-write-api.md)
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 
 ### 2026-09-28

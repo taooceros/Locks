@@ -2,26 +2,45 @@
 """Real-database correctness gate for every redb write variant.
 
 Every case is a fresh process on a fresh database file, using the binaries whose
-identity build.json records. Per variant (primary binary):
+identity build.json records. Every write is a closure submitted to the variant
+(begin -> closure -> commit on Ok / abort on Err). Reopen checks also run redb's
+integrity check, which reports leaked pages of a transaction that was not rolled
+back. Per variant (primary binary):
   contents        exact contents after every request, both durabilities, close/reopen;
                   fc_pq: a lone requester takes the E0(b) fast path on all 90 requests
   errors          shape rejections, duplicate-key abort, abort releases the lock,
                   transaction-ID order; bridge variants also: one gate per DB, public
-                  begin_write waits for the gate, ID order across gate entry/exit
-  savepoints      persistent + ephemeral savepoints across the write phase, restore
+                  begin_write waits for the gate, ID order across gate entry/exit,
+                  an unrun call reports NotExecuted
+  savepoints      persistent + ephemeral savepoints across the write phase, restore;
+                  savepoints created and restored inside closures
   stress-*        16 writers + 2 readers, Immediate and None separately: exact contents,
                   contiguous per-writer-increasing IDs, reads completed during writes,
-                  close/reopen; every body charged nonzero service time to its
-                  requester and the charged total <= wall time (bodies serialised)
+                  close/reopen; FC/FC-PQ closures observed on a combiner, others never;
+                  every committed body charged nonzero service time to its requester
+                  and the charged total <= wall time (bodies serialised)
+  closure-error   closure Err (and redb errors via ?) after writes aborts everything,
+                  incl. a table it created; lock released; aborts consume IDs; bridge
+                  variants: nested submission from a closure is NotExecuted
+  closure-panic   panics (typed and string payloads, table handle open or dropped)
+                  re-raised on the requester, no partial writes, lock usable,
+                  integrity clean; FC/FC-PQ re-raised panics that ran on a combiner
+  read-own-writes reads inside a closure see its own writes; closure values returned;
+                  tables created/deleted inside closures
+  transfer-*      16 writers + 2 readers of a 64-account table, both durabilities:
+                  every reader snapshot conserves the total, final/reopened totals
+                  conserved, log rows == committed transfers (no double run),
+                  ID-order replay equals the final balances, aborts consume IDs
 Patched variants additionally run the test_hooks binary:
-  stress-*        plus in-body occupancy assertion (max 1), service conservation
-                  (charged to requesters == measured on executors) and combiner
-                  evidence (FC/FC-PQ ran bodies on other threads; refactored, Mutex,
-                  MCS and U-SCL never did)
+  stress-*, transfer-*, closure-panic
+                  plus in-body occupancy assertion (max 1) and bridge-level combiner
+                  evidence (FC/FC-PQ ran calls on other threads; refactored, Mutex,
+                  MCS and U-SCL never did); stress-* also checks service conservation
+                  (charged to requesters == measured on executors)
   paused-writer   reads proceed and see the committed snapshot while a writer is
                   paused inside the lock; a second writer stays blocked
-  injected-error  error after inserts: aborted, unchanged, lock released
-  panic           (bridge variants) panic inside the body aborts the process
+  body-panic      (bridge variants) a panic in the body outside the closure aborts
+                  the process
 """
 import argparse
 import json
@@ -33,10 +52,11 @@ from integration.upscaledb.runner.process_execution import capture_command
 
 ROOT = Path(__file__).resolve().parents[2]
 VARIANTS = ('native', 'refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
-PRIMARY_CASES = (('contents', ()), ('errors', ()), ('savepoints', ()),
-                 ('stress', ('--durability', 'immediate')), ('stress', ('--durability', 'none')))
-HOOK_CASES = (('stress', ('--durability', 'immediate')), ('stress', ('--durability', 'none')),
-              ('paused-writer', ()), ('injected-error', ()))
+STRESS = (('stress', ('--durability', 'immediate')), ('stress', ('--durability', 'none')))
+TRANSFER = (('transfer', ('--durability', 'immediate')), ('transfer', ('--durability', 'none')))
+PRIMARY_CASES = (('contents', ()), ('errors', ()), ('savepoints', ()), *STRESS,
+                 ('closure-error', ()), ('closure-panic', ()), ('read-own-writes', ()), *TRANSFER)
+HOOK_CASES = (*STRESS, *TRANSFER, ('closure-panic', ()), ('paused-writer', ()))
 TIMEOUT_SECONDS = 180
 
 
@@ -90,7 +110,7 @@ def main():
         if variant != 'native':
             plan += [('test_hooks', case, extra, False) for case, extra in HOOK_CASES]
             if variant != 'refactored':
-                plan.append(('test_hooks', 'panic', (), True))
+                plan.append(('test_hooks', 'body-panic', (), True))
         for binary_name, case, extra, failstop in plan:
             ok, record = run_case(binaries[binary_name], binary_name, variant, case, extra, output, failstop)
             summary = {'variant': variant, 'binary': binary_name, 'case': case_name(case, extra),

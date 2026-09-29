@@ -1,0 +1,519 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 74eb267..a6a5316 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -30,6 +30,10 @@ repository = "https://github.com/cberner/redb"
+ 
+ [features]
+ cache_metrics = []
++# Locks integration: correctness-gate probes inside the private write body.
++dlock_test_hooks = []
++# Locks integration: rdtscp service time around the private write body.
++dlock_service_time = []
+ logging = ["dep:log"]
+ 
+ [lib]
+diff --git a/src/dlock_private.rs b/src/dlock_private.rs
+new file mode 100644
+index 0000000..3c96bd9
+--- /dev/null
++++ b/src/dlock_private.rs
+@@ -0,0 +1,484 @@
++//! Locks integration: private closure-style write path. NOT a redb public API.
++//!
++//! A caller submits one whole write transaction as a closure
++//! `FnOnce(&mut WriteTransaction) -> Result<R, E>`. One body runs it for both
++//! entry points: begin, the closure, then commit on `Ok` or abort on `Err`.
++//!
++//! - [`execute_native`] admits the writer through redb's original
++//!   `TransactionTracker` Mutex/Condvar writer lock, on the calling thread (the
++//!   `refactored` control).
++//! - [`DelegatedWriteGate::execute`] hands the same body to an external delegation
++//!   lock through a synchronous submit closure. The body may run on another thread
++//!   (an FC/FC-PQ combiner). It never takes the tracker's writer lock; the gate
++//!   occupies the tracker's writer slot for its lifetime and the body allocates
++//!   transaction IDs from the delegated slot inside the delegation lock.
++//!
++//! Contract for closures:
++//!
++//! - The closure may call `set_durability`, `set_two_phase_commit`,
++//!   `set_quick_repair`, savepoint methods and open/delete tables. It cannot
++//!   `commit` or `abort` (both take the transaction by value): the body commits
++//!   on `Ok` and aborts on `Err`. Commit errors surface as `E` via
++//!   `From<CommitError>`.
++//! - The requester blocks until its closure has finished, so the closure may
++//!   borrow the requester's stack (no `'static` bound). `F`, `R` and `E` are
++//!   `Send` because the closure may run, and its result may be produced, on a
++//!   combiner. `R: Send` plus the closure's lifetime keep table handles and the
++//!   transaction itself inside the body.
++//! - A panic inside the closure is caught on the executing thread; the body then
++//!   aborts the transaction explicitly (redb's `Drop` skips the abort while a
++//!   thread is panicking) and the payload is re-raised on the **requester** with
++//!   `resume_unwind`. A combiner never unwinds and the lock stays usable. A panic
++//!   anywhere else in a delegated body (begin, commit, abort, the one-writer
++//!   assertion, the bridge) aborts the process.
++//! - Documented, not enforced: no `begin_write` inside a closure (it waits on the
++//!   gate forever, or on itself for `execute_native`, as a second upstream
++//!   `begin_write` would); no nested submission (the bridge refuses it, see
++//!   [`DelegatedWriteError::NotExecuted`]); no waiting on other threads' progress
++//!   (it stalls the lock, and a combiner serving other requesters). Closures run
++//!   by an FC/FC-PQ combiner run on the combiner's thread and see its
++//!   thread-locals.
++//!
++//! Service time (`dlock_service_time`): the body reads the TSC with `rdtscp` when
++//! `begin` has returned (admission is complete) and again when commit or abort
++//! has returned, on the executing thread. The difference travels back with the
++//! outcome to the requester ([`Served::service_tsc`]), which is charged. The same
++//! span is used for both entry points, so the tracker's admission wait (inside
++//! `begin_write`), the delegation lock and the bridge are never counted.
++
++use crate::{CommitError, Database, StorageError, TransactionError, WriteTransaction};
++use std::any::Any;
++use std::fmt;
++use std::marker::PhantomData;
++use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
++
++/// Failure of one submitted write transaction. Nothing was committed.
++#[derive(Debug)]
++pub enum DelegatedWriteError<E> {
++    /// The closure returned `Err` (the transaction was aborted), or commit failed
++    /// (converted with `From<CommitError>`).
++    Write(E),
++    /// Beginning the transaction failed; the closure did not run.
++    Begin(TransactionError),
++    /// The closure returned `Err`, and the following abort failed as well.
++    AbortFailed { error: E, abort: StorageError },
++    /// The submit closure returned without running the delegated call (for
++    /// example a nested submission refused by the bridge). The closure was
++    /// dropped unrun on the requester.
++    NotExecuted,
++}
++
++impl<E: fmt::Display> fmt::Display for DelegatedWriteError<E> {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Write(error) => write!(f, "{error}"),
++            Self::Begin(error) => write!(f, "cannot begin write transaction: {error}"),
++            Self::AbortFailed { error, abort } => {
++                write!(f, "{error}; aborting the transaction also failed: {abort}")
++            }
++            Self::NotExecuted => write!(f, "delegated call was not executed by the bridge"),
++        }
++    }
++}
++
++impl<E: fmt::Debug + fmt::Display> std::error::Error for DelegatedWriteError<E> {}
++
++/// `refactored` control: the shared body under redb's original tracker
++/// Mutex/Condvar writer lock, on the calling thread. Returns the transaction ID
++/// and the closure's value. A panic in the closure aborts the transaction and is
++/// then resumed on the caller.
++/// The bounds match [`DelegatedWriteGate::execute`], so one closure type is
++/// accepted by every patched variant.
++pub fn execute_native<F, R, E>(db: &Database, f: F) -> Result<(u64, R), DelegatedWriteError<E>>
++where
++    F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
++    R: Send,
++    E: Send + From<CommitError>,
++{
++    execute_native_served(db, f).outcome
++}
++
++/// [`execute_native`] plus the body's service time.
++pub fn execute_native_served<F, R, E>(db: &Database, f: F) -> Served<R, E>
++where
++    F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
++    R: Send,
++    E: Send + From<CommitError>,
++{
++    match write_body(db, Admission::Tracker, f) {
++        Outcome::Returned(outcome, service_tsc) => Served {
++            outcome,
++            service_tsc,
++        },
++        Outcome::Panicked(payload) => resume_unwind(payload),
++    }
++}
++
++/// A body's outcome and its service time: TSC ticks from `begin` returning to
++/// commit or abort returning, read with `rdtscp` on the thread that ran the body
++/// (a combiner for FC/FC-PQ) and carried back to the requester with the outcome.
++/// The span excludes admission waiting, the delegation lock, the bridge and
++/// `WriteTransaction` construction inside `begin`; it includes the closure and
++/// commit I/O. Always 0 without `dlock_service_time`, and for a body whose
++/// `begin` failed. A body whose closure panicked yields no `Served` (the
++/// requester receives the payload) and is not charged.
++#[derive(Debug)]
++pub struct Served<R, E> {
++    pub outcome: Result<(u64, R), DelegatedWriteError<E>>,
++    pub service_tsc: u64,
++}
++
++#[cfg(feature = "dlock_service_time")]
++#[inline(always)]
++fn service_clock() -> u64 {
++    let mut aux = 0_u32;
++    // SAFETY: rdtscp only writes `aux`; this integration targets x86_64.
++    unsafe { std::arch::x86_64::__rdtscp(&mut aux) }
++}
++
++#[cfg(not(feature = "dlock_service_time"))]
++#[inline(always)]
++fn service_clock() -> u64 {
++    0
++}
++
++enum Admission {
++    Tracker,
++    Delegated,
++}
++
++enum Outcome<R, E> {
++    /// The body's result and its service time (see [`Served`]).
++    Returned(Result<(u64, R), DelegatedWriteError<E>>, u64),
++    Panicked(Box<dyn Any + Send + 'static>),
++}
++
++/// The one write body: begin -> closure -> commit on `Ok` / abort on `Err`.
++/// A closure panic is caught here, before any lock code can see it.
++fn write_body<F, R, E>(db: &Database, admission: Admission, f: F) -> Outcome<R, E>
++where
++    F: FnOnce(&mut WriteTransaction) -> Result<R, E>,
++    E: From<CommitError>,
++{
++    let begun = match admission {
++        Admission::Tracker => db.begin_write(),
++        Admission::Delegated => db.begin_delegated_write(),
++    };
++    let mut txn = match begun {
++        Ok(txn) => txn,
++        Err(error) => return Outcome::Returned(Err(DelegatedWriteError::Begin(error)), 0),
++    };
++    // Admission is complete: the service span starts here and ends when commit
++    // or abort has returned, on this thread, whichever way the closure exits.
++    let admitted = service_clock();
++    let transaction_id = txn.dlock_transaction_id();
++    #[cfg(feature = "dlock_test_hooks")]
++    let occupancy = test_hooks::Occupancy::enter();
++    // AssertUnwindSafe: `f` is consumed here and its captures belong to the
++    // requester, which receives the payload and so observes the panic; the
++    // transaction is only aborted afterwards, never committed.
++    let returned = catch_unwind(AssertUnwindSafe(|| f(&mut txn)));
++    let finished = match returned {
++        Ok(Ok(value)) => {
++            #[cfg(feature = "dlock_test_hooks")]
++            {
++                test_hooks::before_commit();
++                drop(occupancy);
++            }
++            Ok(match txn.commit() {
++                Ok(()) => Ok((transaction_id, value)),
++                Err(error) => Err(DelegatedWriteError::Write(E::from(error))),
++            })
++        }
++        Ok(Err(error)) => {
++            #[cfg(feature = "dlock_test_hooks")]
++            drop(occupancy);
++            Ok(match txn.abort() {
++                Ok(()) => Err(DelegatedWriteError::Write(error)),
++                Err(abort) => Err(DelegatedWriteError::AbortFailed { error, abort }),
++            })
++        }
++        Err(payload) => {
++            #[cfg(feature = "dlock_test_hooks")]
++            drop(occupancy);
++            // Unwinding has finished, so this is a real abort (roll back
++            // uncommitted pages, release the writer slot). A failed abort marks the
++            // database as needing recovery, as upstream; the panic still wins.
++            let _ = txn.abort();
++            Err(payload)
++        }
++    };
++    let service_tsc = service_clock().saturating_sub(admitted);
++    match finished {
++        Ok(result) => {
++            #[cfg(feature = "dlock_test_hooks")]
++            test_hooks::charge(service_tsc);
++            Outcome::Returned(result, service_tsc)
++        }
++        Err(payload) => Outcome::Panicked(payload),
++    }
++}
++
++/// Delegated-writer mode for one database. While the gate is alive, the external
++/// delegation lock is the write-serialisation mechanism: public `begin_write`
++/// callers wait (on the unchanged tracker Condvar) until the gate is dropped.
++/// Read transactions are unaffected and never pass through the gate.
++pub struct DelegatedWriteGate<'db> {
++    db: &'db Database,
++}
++
++/// A second [`DelegatedWriteGate`] was requested for the same database.
++#[derive(Debug)]
++pub struct DelegatedModeActive;
++
++impl fmt::Display for DelegatedModeActive {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "delegated write mode already active on this database")
++    }
++}
++
++impl std::error::Error for DelegatedModeActive {}
++
++impl<'db> DelegatedWriteGate<'db> {
++    /// Waits for any live public writer, then occupies the tracker's writer slot.
++    /// Rejects a second gate on the same database.
++    pub fn enter(db: &'db Database) -> Result<Self, DelegatedModeActive> {
++        if !db.enter_delegated_write_mode() {
++            return Err(DelegatedModeActive);
++        }
++        Ok(Self { db })
++    }
++
++    /// Calls `submit` exactly once with the pending transaction. `submit` must
++    /// serialise every call it runs against every other call on this gate (that
++    /// is the delegation lock) and may run [`DelegatedCall::run`] on any thread
++    /// before returning. A call that is dropped unrun yields `NotExecuted`. A
++    /// closure panic is re-raised here, on the requester, after `submit` returned
++    /// (so after the lock was released).
++    pub fn execute<F, R, E, S>(&self, f: F, submit: S) -> Result<(u64, R), DelegatedWriteError<E>>
++    where
++        F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
++        R: Send,
++        E: Send + From<CommitError>,
++        S: FnOnce(DelegatedCall<'_>),
++    {
++        self.execute_served(f, submit).outcome
++    }
++
++    /// [`DelegatedWriteGate::execute`] plus the body's service time, measured on
++    /// the thread that ran the body and charged to this requester.
++    pub fn execute_served<F, R, E, S>(&self, f: F, submit: S) -> Served<R, E>
++    where
++        F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
++        R: Send,
++        E: Send + From<CommitError>,
++        S: FnOnce(DelegatedCall<'_>),
++    {
++        let mut context = CallContext {
++            db: self.db,
++            closure: Some(f),
++            outcome: None,
++        };
++        // The erased context holds `Option<F>`, the outcome (`R`, `E` or a `Send`
++        // payload) and `&Database` (`Database: Sync`): the `Send` bounds above are
++        // the whole justification for `DelegatedCall: Send`. `context` is not
++        // touched again until `submit` has returned.
++        submit(DelegatedCall {
++            context: std::ptr::from_mut(&mut context).cast(),
++            trampoline: invoke::<CallContext<'_, F, R, E>>,
++            _borrow: PhantomData,
++        });
++        match context.outcome.take() {
++            Some(Outcome::Returned(outcome, service_tsc)) => Served {
++                outcome,
++                service_tsc,
++            },
++            Some(Outcome::Panicked(payload)) => resume_unwind(payload),
++            None => Served {
++                outcome: Err(DelegatedWriteError::NotExecuted),
++                service_tsc: 0,
++            },
++        }
++    }
++}
++
++impl Drop for DelegatedWriteGate<'_> {
++    fn drop(&mut self) {
++        self.db.exit_delegated_write_mode();
++    }
++}
++
++/// Requester-owned state of one delegated call: the closure (taken exactly once
++/// by the executor) and the outcome slot the executor fills before returning.
++struct CallContext<'db, F, R, E> {
++    db: &'db Database,
++    closure: Option<F>,
++    outcome: Option<Outcome<R, E>>,
++}
++
++trait RunDelegated {
++    fn run_delegated(&mut self);
++}
++
++impl<F, R, E> RunDelegated for CallContext<'_, F, R, E>
++where
++    F: FnOnce(&mut WriteTransaction) -> Result<R, E>,
++    E: From<CommitError>,
++{
++    fn run_delegated(&mut self) {
++        // A second run would race the requester's read of the outcome.
++        let f = self.closure.take().unwrap_or_else(|| std::process::abort());
++        self.outcome = Some(write_body(self.db, Admission::Delegated, f));
++    }
++}
++
++/// Type-erased trampoline for one `CallContext` type. Closure panics are already
++/// caught inside `write_body`; anything that still unwinds here comes from redb
++/// or the one-writer assertion and poisons the combiner, so it aborts.
++unsafe fn invoke<C: RunDelegated>(context: *mut ()) {
++    // SAFETY: `context` is the `C` that `execute` erased, still alive and
++    // exclusively reachable through this call (see `DelegatedCall`).
++    let context = unsafe { &mut *context.cast::<C>() };
++    if catch_unwind(AssertUnwindSafe(|| context.run_delegated())).is_err() {
++        std::process::abort();
++    }
++}
++
++/// One pending delegated transaction, borrowed from a blocked requester.
++pub struct DelegatedCall<'a> {
++    context: *mut (),
++    trampoline: unsafe fn(*mut ()),
++    _borrow: PhantomData<&'a mut ()>,
++}
++
++// SAFETY: `execute` requires the closure, its value and its error to be `Send`, the
++// outcome slot holds only those (or a `Send` panic payload), and `&Database` is
++// `Send` because `Database: Sync`. The requester is blocked in `execute` for 'a.
++unsafe impl Send for DelegatedCall<'_> {}
++
++impl DelegatedCall<'_> {
++    /// Runs the transaction on the current thread and fills the outcome slot.
++    pub fn run(self) {
++        // SAFETY: the borrow lifetime keeps the context alive and exclusive.
++        unsafe { (self.trampoline)(self.context) }
++    }
++
++    /// Erases the borrow so a lock that requires `'static` requests can carry it.
++    ///
++    /// # Safety
++    /// The returned call must be run or dropped before the `submit` closure that
++    /// received this call returns (or unwinds), and must be run at most once.
++    pub unsafe fn into_raw(self) -> RawDelegatedCall {
++        RawDelegatedCall {
++            context: self.context,
++            trampoline: self.trampoline,
++        }
++    }
++}
++
++/// Lifetime-erased [`DelegatedCall`]; see [`DelegatedCall::into_raw`].
++pub struct RawDelegatedCall {
++    context: *mut (),
++    trampoline: unsafe fn(*mut ()),
++}
++
++// SAFETY: see DelegatedCall. `Sync` is required by FC-PQ's request bounds; it is
++// sound because `&RawDelegatedCall` exposes nothing (only `run(self)`, by value,
++// dereferences the pointer).
++unsafe impl Send for RawDelegatedCall {}
++unsafe impl Sync for RawDelegatedCall {}
++
++impl fmt::Debug for RawDelegatedCall {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RawDelegatedCall").finish_non_exhaustive()
++    }
++}
++
++impl RawDelegatedCall {
++    /// # Safety
++    /// Only within the contract of [`DelegatedCall::into_raw`].
++    pub unsafe fn run(self) {
++        unsafe { (self.trampoline)(self.context) }
++    }
++}
++
++/// Test-hook build only (`dlock_test_hooks`): process-global probes inside the body.
++#[cfg(feature = "dlock_test_hooks")]
++pub mod test_hooks {
++    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++
++    static PAUSE: AtomicBool = AtomicBool::new(false);
++    static PAUSED: AtomicBool = AtomicBool::new(false);
++    static PANIC_NEXT: AtomicBool = AtomicBool::new(false);
++    static OCCUPANCY: AtomicU64 = AtomicU64::new(0);
++    static MAX_OCCUPANCY: AtomicU64 = AtomicU64::new(0);
++    static SERVICE_TSC: AtomicU64 = AtomicU64::new(0);
++
++    /// Service ticks summed on the executing threads over every body that
++    /// returned an outcome (a conservation check against the per-request values
++    /// delivered to requesters; panicked closures are on neither side).
++    pub fn service_tsc_total() -> u64 {
++        SERVICE_TSC.load(Ordering::SeqCst)
++    }
++
++    pub(super) fn charge(ticks: u64) {
++        SERVICE_TSC.fetch_add(ticks, Ordering::SeqCst);
++    }
++
++    /// The next body pauses after its closure returned `Ok`, before commit, while
++    /// it is the live writer, until `release_pause`.
++    pub fn arm_pause() {
++        PAUSED.store(false, Ordering::SeqCst);
++        PAUSE.store(true, Ordering::SeqCst);
++    }
++
++    pub fn is_paused() -> bool {
++        PAUSED.load(Ordering::SeqCst)
++    }
++
++    pub fn release_pause() {
++        PAUSE.store(false, Ordering::SeqCst);
++    }
++
++    /// The next body panics after its closure returned `Ok`, before commit, i.e.
++    /// outside the closure: a delegated body must then abort the process.
++    pub fn panic_next() {
++        PANIC_NEXT.store(true, Ordering::SeqCst);
++    }
++
++    /// Largest number of bodies observed between begin and commit at once.
++    pub fn max_occupancy() -> u64 {
++        MAX_OCCUPANCY.load(Ordering::SeqCst)
++    }
++
++    pub(super) struct Occupancy;
++
++    impl Occupancy {
++        pub(super) fn enter() -> Self {
++            let now = OCCUPANCY.fetch_add(1, Ordering::SeqCst) + 1;
++            MAX_OCCUPANCY.fetch_max(now, Ordering::SeqCst);
++            Self
++        }
++    }
++
++    impl Drop for Occupancy {
++        fn drop(&mut self) {
++            OCCUPANCY.fetch_sub(1, Ordering::SeqCst);
++        }
++    }
++
++    pub(super) fn before_commit() {
++        if PAUSE.swap(false, Ordering::SeqCst) {
++            PAUSED.store(true, Ordering::SeqCst);
++            PAUSE.store(true, Ordering::SeqCst);
++            while PAUSE.load(Ordering::SeqCst) {
++                std::thread::yield_now();
++            }
++            PAUSED.store(false, Ordering::SeqCst);
++        }
++        assert!(
++            !PANIC_NEXT.swap(false, Ordering::SeqCst),
++            "injected panic inside the write body, outside the closure"
++        );
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index fd3d9c2..c3cd813 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -89,6 +89,9 @@ pub type Result<T = (), E = StorageError> = std::result::Result<T, E>;
+ pub mod backends;
+ mod complex_types;
+ mod db;
++// Locks integration: private closure-style write path; not part of redb's public API.
++#[doc(hidden)]
++pub mod dlock_private;
+ mod error;
+ mod legacy_tuple_types;
+ mod multimap_table;

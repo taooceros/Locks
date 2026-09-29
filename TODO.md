@@ -54,6 +54,18 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   control tripping the writer assertion, and 72 fresh-process smoke cells with
   provenance (refactored vs native within repeat noise). No formal matrix run.
 
+- [x] **redb: closure-style delegated write API.**
+  [Plan](plan/2026-09-29/redb-closure-write-api.md), [guide](integration/redb/README.md).
+  Patch 0002 now runs `FnOnce(&mut WriteTransaction) -> Result<R, E>` (commit on Ok,
+  abort on Err; closure panics aborted explicitly and re-raised on the requester);
+  fixed insert is a harness closure; new `transfer` smoke cohort. Verified: 94/94 gate
+  cases (new: closure Err/panic for all six variants, transfer stress with conserved
+  snapshots + ID-order replay, read-your-own-writes, reopen `check_integrity`), 165
+  upstream redb tests, 108 smoke cells (0 failures). Parity vs the fixed-body build:
+  equal under fat LTO; default builds 2-4% lower on patched variants from crate-boundary
+  codegen (native unchanged). No formal matrix run. redb-internal rerun harness folded
+  (uscl, service time, sweep, perf, power setups).
+
 - [x] **Implement CFL baseline (required comparison).**
   *(Done: `ee262bf` — CFL-MCS implemented as `DLock2Wrapper<RawCflLock>`.
   Per-thread vLHT tracking with O(N) queue reordering during unlock.

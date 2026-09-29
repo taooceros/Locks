@@ -217,17 +217,23 @@ not confidence intervals.
 redb 3.1.0 is MVCC. Readers take the last committed transaction ID and never
 take the writer lock. Writers are serialised by one admission point, the
 tracker's writer slot. Two numbered patches make the lock *be* that admission.
-A fixed-shape body (begin → `set_durability` → `open_table` → 1-64 inserts →
-commit) is handed to the lock through a synchronous submit closure. The
-critical section is therefore the whole write transaction, including commit
-`[R1]`. A 1-record transaction costs ≈30 µs at 3.0 GHz: 33,563 tx/s for
-uncontended FC-PQ, and U-SCL's measured body is 29 µs `[R3]`.
+The patched body `write_body` (begin → the caller's closure → commit on `Ok`,
+abort on `Err`) is handed to the lock through a synchronous submit closure; the
+insert workload (`set_durability` → `open_table` → 1-64 inserts) is a harness
+closure. The critical section is therefore the whole write transaction,
+including commit `[R1]`. A 1-record transaction costs ≈30 µs at 3.0 GHz: 33,563
+tx/s for uncontended FC-PQ, and U-SCL's measured body is 29 µs `[R3]`. All redb
+numbers in this report were measured on the fixed-insert body build without
+LTO (redb-internal, change `mnkkkmky`); in an A/B against a fixed-insert body
+build (the six variants before U-SCL), the closure build measured parity at
+1.001-1.004× with thin LTO on both, with patched variants 2-4 % lower without
+LTO `[R6]`.
 
 ```mermaid
 flowchart LR
   C[client thread] -->|validate request| G[DelegatedWriteGate]
   G -->|submit closure| L{lock variant}
-  L -->|MCS / U-SCL / Mutex: on requester| B[fixed_insert_body<br/>begin → inserts → commit]
+  L -->|MCS / U-SCL / Mutex: on requester| B[write_body<br/>begin → closure → commit or abort]
   L -->|FC / FC-PQ: possibly on combiner| B
   B -->|rdtscp span, outcome| C
   R[reader thread] -->|begin_read, never locked| T[(tracker: last committed ID)]
@@ -587,6 +593,7 @@ committed.
 - `[R3]` `~/Locks-artifacts/redb-fixed3g/scripts/fixed3g_tables.md` (generated from the perf-02, formal-01, perf-03 and formal-03 roots).
 - `[R4]` `~/Locks-artifacts/redb-fixed3g/redb-formal-03-fixed3g/analysis/summary.md`.
 - `[R5]` `~/Locks-artifacts/redb-fixed3g/redb-perf-03-fixed3g/analysis-perf/summary.md`.
+- `[R6]` `plan/2026-09-29/redb-closure-write-api.md` (redb-closure, PR #54; "Outcome", parity A/B).
 - `[U1]` `docs/evidence/README.md` (evidence-prune; the table, "Gaps" and "## Withdrawn").
 - `[U2]` `docs/evidence/all-experiments-2026-09-25.md` (evidence-prune; pruned ledger, section numbers as cited).
 - `[U3]` `experiment/upscaledb-fc-pq-integration@dcbfacb:docs/reports/upscaledb-hypotheses/report.md` (H1, H2).

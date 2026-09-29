@@ -5,6 +5,12 @@ edition = "2021"
 
 [workspace]
 
+# Cross-crate thin LTO for native, patched and test_hooks alike: without it the
+# insert closure (monomorphised here, not in redb) measured 2-4% slower than the
+# former in-redb fixed body; with it all variants match (README "Known limits").
+[profile.release]
+lto = "thin"
+
 # Exactly one of `native` and `patched` per binary; build.py selects them and
 # records the resolved feature sets in build.json.
 [features]
@@ -12,7 +18,7 @@ native = ["dep:redb_upstream"]
 patched = ["dep:redb", "dep:libdlock"]
 test_hooks = ["patched", "redb/dlock_test_hooks"]
 # rdtscp service time of each write body, charged to its requester (native: the
-# same span in this harness; patched: inside redb's shared body).
+# same span in this harness; patched: inside redb's shared closure body).
 service_time = ["redb?/dlock_service_time"]
 # E0(b) FC-PQ fast path and its per-thread hit counter (libdlock features).
 fcpq_fast_path = ["libdlock?/fcpq_fast_path"]

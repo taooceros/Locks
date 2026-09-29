@@ -3,9 +3,10 @@
 
 --prepare-only snapshots binaries from a verified, instrumented build (build.py)
 and freezes their source/patch/binary identity and CPU/NUMA placement. --smoke
-runs a small timed cohort (all variants, the client sweep, 3 repetitions) whose
-analysis includes the refactored-vs-native control check. --run runs the formal
-matrix only when explicitly requested. Every failure is retained.
+runs a small timed cohort (all variants, the client sweep, 3 repetitions,
+including the transfer workload) whose analysis includes the refactored-vs-native
+control check. --run runs the formal matrix only when explicitly requested.
+Every failure is retained.
 
 Clients: a cell with c clients runs c pinned requesters on the first c prepared
 CPUs, and the trial process is restricted to exactly those CPUs (never more
@@ -14,7 +15,10 @@ bridge_mutex block (Mutex/Condvar, futex), U-SCL may yield, futex-wait or sleep.
 (any c); half1_halfK = half the requests carry 1 record and half K: with c even
 the first c/2 clients write 1 record and the other c/2 write K (2 clients = one
 of each); a single client alternates 1, K, 1, K, ... (the same request mix
-without contention; per-client fairness is trivially 1).
+without contention; per-client fairness is trivially 1). transfer (smoke only;
+any c) = every client submits one transfer closure per request (2 reads + 2
+updates of a fixed account table, aborted on insufficient balance); the cell
+fails unless the total is conserved live and after close/reopen.
 
 Durability: None is the primary regime; Immediate (fsync inside the critical
 section) is a control, reported second.
@@ -61,7 +65,10 @@ from integration.redb.build import OUT, load_build
 HERE = Path(__file__).resolve().parents[2]
 VARIANTS = ('native', 'refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
 COHORTS = ('all1', 'half1_half8', 'half1_half64')
-SMOKE_COHORTS = ('all1', 'half1_half64')
+# Transfer: 2 reads + 2 updates per closure, abort on insufficient balance. Smoke only.
+TRANSFER_COHORT = 'transfer'
+SMOKE_COHORTS = ('all1', 'half1_half64', TRANSFER_COHORT)
+ORDER_COHORTS = COHORTS + (TRANSFER_COHORT,)  # stable cohort index: variant-order seed, row order
 CLIENTS = (1, 2, 4, 8)
 DURABILITIES = ('none', 'immediate')  # primary regime first; Immediate is the control
 DEFAULT_CPUS = tuple(range(8, 16))
@@ -138,7 +145,7 @@ def parse_cpus(value):
 
 def cohort_runs(cohort, clients):
     """Whether a cohort is defined at a client count (see module docstring)."""
-    return cohort == "all1" or clients == 1 or clients % 2 == 0
+    return cohort in ("all1", TRANSFER_COHORT) or clients == 1 or clients % 2 == 0
 
 
 def sweep_clients(cpus):
@@ -260,7 +267,7 @@ def prepare(root, build_dir, cpus, numa_node, power_setup, fixed_ghz, variants):
         "duration_ms": DURATION_MS, "time_limit_seconds": TRIAL_TIMEOUT_SECONDS,
         "durability_note": "None is the primary regime, Immediate a control; distinct redb API modes; close/reopen is not a power-failure test",
         "service_note": "service = rdtscp ticks from begin returning to commit/abort returning, on the executing thread, charged to the requester",
-        "boundary_note": "Critical section = begin + inserts + commit (incl. commit I/O) of one fixed-shape request; reads are outside every write lock",
+        "boundary_note": "Critical section = one whole write transaction submitted as a closure (begin + closure + commit/abort, incl. commit I/O); reads are outside every write lock",
         "db_retention": "DB bytes+SHA256 and raw stdout/stderr retained per cell; DB files removed after hashing to bound disk",
         "seeds": SEEDS,
     }
@@ -512,6 +519,11 @@ def trial(root, identity, cohort, clients, durability, variant, repeat, seed, ki
                 raise ValueError("database file capacity guard mismatch")
             if not result["reopened_exact"] and durability == "immediate":
                 raise ValueError("Immediate close/reopen mismatch")
+            transfer = result["transfer"]
+            if (transfer is not None) != (cohort == TRANSFER_COHORT):
+                raise ValueError("transfer check present for the wrong cohort")
+            if transfer is not None and not (transfer["conserved_live"] and transfer["reopened_identical"]):
+                raise ValueError("transfer total not conserved live and after reopen")
             if result["perf_counted"] != (kind == "perf"):
                 raise ValueError("perf control state does not match the cohort")
             if kind == "perf":
@@ -554,7 +566,7 @@ def run_matrix(root, kind):
     for repeat, cohort, clients, durability in cells(kind, identity["clients"]):
         seed = SEEDS[repeat]
         order = [v for v in VARIANTS if v in identity["variants"]]
-        random.Random(seed ^ (COHORTS.index(cohort) << 8) ^ (DURABILITIES.index(durability) << 16)
+        random.Random(seed ^ (ORDER_COHORTS.index(cohort) << 8) ^ (DURABILITIES.index(durability) << 16)
                       ^ (clients << 24)).shuffle(order)
         for variant in order:
             if not trial(root, identity, cohort, clients, durability, variant, repeat, seed, kind):
@@ -598,8 +610,11 @@ def metrics(entry):
     service = [w["service_tsc_ticks"] for w in workers]
     total_service = sum(service)
     # Pure 1-record clients vs pure K-record clients; a lone mixed client is neither.
-    small = [i for i, w in enumerate(workers) if w["request_sizes"] == [1]]
-    large = [i for i, w in enumerate(workers) if len(w["request_sizes"]) == 1 and w["request_sizes"] != [1]]
+    # Transfer: every client alike, no short/long split.
+    transfer = entry["cohort"] == TRANSFER_COHORT
+    small = [] if transfer else [i for i, w in enumerate(workers) if w["request_sizes"] == [1]]
+    large = [] if transfer else [i for i, w in enumerate(workers)
+                                 if len(w["request_sizes"]) == 1 and w["request_sizes"] != [1]]
     split = len(small) + len(large) == n
     windows = [[w["window_transactions"][t] for w in workers] for t in range(len(workers[0]["window_transactions"]))]
     histogram = [sum(w["response_ns_log2"][b] for w in workers) for b in range(64)]
@@ -607,6 +622,7 @@ def metrics(entry):
     long_histogram = [sum(workers[i]["response_ns_log2"][b] for i in large) for b in range(64)]
     hits = [w["fast_path_hits"] for w in workers]
     calls = sum(w["completed_transactions"] for w in workers)
+    aborted = sum(w["aborted_transactions"] for w in workers)
     share = [x / total_service for x in service] if total_service else None
     return {"throughput_tx_s": sum(tx)/seconds, "throughput_records_s": sum(records)/seconds,
             "short_tx_s": sum(tx[i] for i in small)/seconds if split else None,
@@ -619,6 +635,8 @@ def metrics(entry):
             "fast_path_hit_rate": (sum(hits) / calls if calls and all(h is not None for h in hits) else None),
             "max_zero_progress_windows": max(sum(row[i] == 0 for row in windows) for i in range(n)),
             "worker_tx": tx, "worker_records": records, "worker_service_tsc": service, "windows_tx": windows,
+            "aborted_transactions": aborted,
+            "aborted_fraction": aborted / (aborted + calls) if aborted + calls else None,
             "response_p50_ms_upper": quantile(histogram, 0.50),
             "response_p99_ms_upper": quantile(histogram, 0.99),
             "short_response_p99_ms_upper": quantile(short_histogram, 0.99) if split else None,
@@ -930,7 +948,7 @@ def load_rows(root, kind):
         if "results" in entry:
             row.update(clock_metrics(row, identity))
         rows.append(row)
-    order = {"durability": DURABILITIES, "cohort": COHORTS, "variant": VARIANTS}
+    order = {"durability": DURABILITIES, "cohort": ORDER_COHORTS, "variant": VARIANTS}
     rows.sort(key=lambda r: (order["durability"].index(r["durability"]), order["cohort"].index(r["cohort"]),
                              r["clients"], order["variant"].index(r["variant"]), r["repeat"]))
     return identity, rows
@@ -960,7 +978,8 @@ def analyze(root, smoke=False):
                     "Transaction size changes completed mix; total tx/s is not isolated lock overhead.",
                     "Smoke uses 3 repetitions: a setup/noise-bounded sanity check, not a formal result.",
                     "clock_ghz is the sampler's client mean (heuristic, whole child process; undecidable for mostly idle clients); tx_s_at_ref = tx/s x reference / clock_ghz with reference = F under S1/S2, the TSC rate under S0; clock_off_target (S1/S2) = clock outside F +- 2 %.",
-                    "Close/reopen does not simulate power failure."]})
+                    "Close/reopen does not simulate power failure.",
+                    "Transfer tx/s counts committed transfers only; aborted bodies hold the lock but return no service time."]})
     (analysis / "summary.md").write_text(markdown(table, checks))
     import matplotlib
     matplotlib.use("Agg")
