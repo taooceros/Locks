@@ -1,5 +1,6 @@
 #import "lib.typ": rng, fit
 #import "tables/numbers.typ": *
+#import "figures/contract.typ": contract
 
 // A number or result the text wants but no FINDINGS.md entry or JSON provides.
 #let todo(body) = text(fill: red, weight: "bold")[\[TODO: #body\]]
@@ -23,9 +24,10 @@
 #show figure: set block(breakable: false)
 
 // A generated table in a float; `wide` spans both columns (LaTeX table*).
-#let tbl(file, caption, wide: false, colsep: 6pt) = figure(
+// `placement: none` keeps it in the text flow.
+#let tbl(file, caption, wide: false, colsep: 6pt, placement: top) = figure(
   kind: table,
-  placement: top,
+  placement: placement,
   scope: if wide { "parent" } else { "column" },
   caption: caption,
   {
@@ -34,6 +36,15 @@
     set table(inset: (x: colsep, y: 1.6pt))
     fit(include file)
   },
+)
+
+// A generated SVG figure (scripts/make_figures.py) in a float, included at
+// the width it was drawn for, so its 7.5-8 pt text prints at size.
+#let fig(file, caption, wide: false) = figure(
+  placement: top,
+  scope: if wide { "parent" } else { "column" },
+  caption: caption,
+  image(file, width: if wide { 7in } else { 3.3in }),
 )
 
 #place(top + center, float: true, scope: "parent", clearance: 2em)[
@@ -57,8 +68,8 @@ Coroutine runtimes such as tokio~@tokio multiplex many tasks onto a few worker t
 
 Patel et al.~@scl showed that ordinary locks _subvert_ the OS scheduler: lock hold time, not the scheduler's share, decides who gets CPU time. We find two analogous subversions when delegation locks meet a cooperative executor:
 
-+ *Combiner burden.* Critical sections run on whichever worker is combining, and the executor cannot see that. With CES the unlocking worker stays combiner for as long as the wait queue is non-empty. Under sustained contention that is the entire 2 s run: the burden Jain index over workers is exactly $1\/W$ in every saturated sustained cell at $W=4,8,16$ (§@sec:motiv), and a bystander task queued on that worker is never polled. Without executor balancing, FC without a cooperative yield is worse. The combining task never returns `Pending`, so 63 of 64 clients do no work for 2 s.
-+ *Service unfairness.* FIFO hand-off gives equal operations per client, so lock time is proportional to critical-section cost. For a 1:8 light:heavy cost mix, the resulting service Jain index is 0.653 (from the measured 1 306:8 324 cycles per op). `dispatch`, CES, FC and `tokio::sync::Mutex` all reproduce it to within 0.01 (@tab:fifo).
++ *Combiner burden.* Critical sections run on whichever worker is combining, and the executor cannot see that. With CES the unlocking worker stays combiner for as long as the wait queue is non-empty. Under sustained contention that is the entire 2 s run: the burden Jain index over workers is exactly $1\/W$ in every saturated sustained cell at $W=4,8,16$, and a bystander task queued on that worker is never polled (@fig:motiv a, b). Without executor balancing, FC without a cooperative yield is worse. The combining task never returns `Pending`, so 63 of 64 clients do no work for 2 s.
++ *Service unfairness.* FIFO hand-off gives equal operations per client, so lock time is proportional to critical-section cost (@fig:motiv c). For a 1:8 light:heavy cost mix, the resulting service Jain index is 0.653 (from the measured 1 306:8 324 cycles per op). `dispatch`, CES, FC and `tokio::sync::Mutex` all reproduce it to within 0.01 (@tab:fifo).
 
 #par(first-line-indent: (amount: 1em, all: true))[Our position is that both are lock policies, not executor policies. A delegation lock decides _where the combiner runs_ and _whom it serves next_. To act on the first decision, the only thing it needs from the executor is a placement argument on wakes (inline, remote, home). We make three contributions:]
 
@@ -97,19 +108,19 @@ $W$ bystander tasks spin 1 000 cycles and then yield. Three metrics are Jain i
 - the _combiner-worker bystander p99_, the p99 schedule-to-poll delay on the worker with the most combining cycles, against the maximum p99 of the other workers.
 A bystander first polled after the window is _censored_ ("cens." in the tables): it never ran.
 
-#tbl("tables/tab-motivation.typ", wide: true)[The problem, phase-2 matrix, $W=8$, heavy 8× (09-28 window). Service $J$ is over clients and burden $J$ over workers. The p99 columns are bystander schedule-to-poll delays in µs on the combiner worker and the maximum over the other workers. The last column counts starved clients and bystanders (0 ops in 2 s). `fc-noyield` is FC without the cooperative yield of §@sec:design.] <tab:motiv>
+#fig("figures/fig-motivation.svg", wide: true)[Both subversions at $W=8$, heavy 8×. (a) Share of combining cycles per worker, workers sorted by share, sustained b0; the legend gives burden Jain. (b) p99 bystander schedule-to-poll delay on the combiner worker (filled) and the maximum over the other workers (open), same runs; CES's combiner-worker bystander is never polled in the 2~s window. (c) Per-client CS cycles over the mean, sustained b31; dashed: FIFO theory (equal operations per client at `dispatch`'s measured costs); the legend gives service Jain. `ces-k64`, `ces-k64-home`, `fc-remote` and `fcpq-h16-home-c16` are the policies of §@sec:design. All runs are from the 09-28 window except `fcpq-h16-home-c16` (hollow, 09-29). Markers and bars are medians of 3 repeats; error bars span [min, max].] <fig:motiv>
 
 == Measured subversion
-@tab:motiv shows the problem at 8 workers. The full matrix covers $W in {4,8,16}$, heavy $in {1,8}$ and $b in {0,31}$ (432 runs).
+@fig:motiv shows both subversions at 8 workers. The full matrix covers $W in {4,8,16}$, heavy $in {1,8}$ and $b in {0,31}$ (432 runs); @tab:motiv in the appendix lists its $W=8$, heavy-8× cells.
 
-#par(first-line-indent: 0pt)[*CES concentrates all combining on one worker.* In every saturated sustained cell CES has burden Jain exactly $1\/W$ (0.125 at 8 workers, 0.062 at 16), with or without balancing. The median chain is 819 200 inline hand-offs, i.e. one chain lasts the whole window. What happens to the tasks around it depends on balancing:]
-- Without balancing, CES traps whatever sits in the combiner's queue: 5 clients (range 5--6 across repeats) and the bystander starve for 2 s. Service Jain drops to 0.574#rng[0.557][0.627].
+#par(first-line-indent: 0pt)[*CES concentrates all combining on one worker.* In every saturated sustained cell CES has burden Jain exactly $1\/W$ (0.125 at 8 workers, 0.062 at 16), with or without balancing: one worker does all the combining (@fig:motiv a). The median chain is 819 200 inline hand-offs, i.e. one chain lasts the whole window. What happens to the tasks around it depends on balancing:]
+- Without balancing, CES traps whatever sits in the combiner's queue: 5 clients (range 5--6 across repeats) and the bystander starve for 2 s (@fig:motiv b). Service Jain drops to 0.574#rng[0.557][0.627].
 - With balancing, the combiner's bystander is stolen during warm-up and never returns. The burden shows up as eviction, not as delay.
 Whether a CES chain ever ends is an executor property. An earlier executor version drained one injector task per 31 polls. At $W <= 8$ that let the wait queue empty periodically: burden Jain was 0.96 at 8 workers but 0.06 at 16.
 
 #par(first-line-indent: 0pt)[*FC without a yield hands the lock to one client.* When the executor does not balance, the FC combiner's `run` completes synchronously. The waiters it served are woken into its own worker's queue, and the client loop never returns `Pending`. The same task therefore re-publishes and re-wins the election forever. Service Jain is $0.016=1\/64$ and 63 clients starve (bursty: 15 of 16). A yield after combining fixes the starvation. It does not fix placement: at b0, all clients converge on the combiner's worker (burden 1/W) and throughput is 0.235 instead of 0.390 Mops/s with balancing.]
 
-#par(first-line-indent: 0pt)[*FIFO service is proportional to cost.* @tab:fifo applies the two-class model $J(x)=(1+x)^2 \/ (2(1+x^2))$ to each lock's measured costs, where $x$ is the light:heavy per-client service ratio. Service Jain follows from the costs to three digits for `dispatch`, CES, FC and `tokio::sync::Mutex`. Equal service would need 6.0--6.5 light operations per heavy one.]
+#par(first-line-indent: 0pt)[*FIFO service is proportional to cost.* @fig:motiv c shows the per-client result. Under `dispatch` and `tokio::sync::Mutex` every light client receives 0.28× and every heavy client 1.71--1.72× the mean lock time, the FIFO prediction $2 C_L \/ (C_L+C_H)$ and $2 C_H \/ (C_L+C_H)$. @tab:fifo applies the two-class model $J(x)=(1+x)^2 \/ (2(1+x^2))$ to each lock's measured costs, where $x$ is the light:heavy per-client service ratio. Service Jain follows from the costs to three digits for `dispatch`, CES, FC and `tokio::sync::Mutex`. Equal service would need 6.0--6.5 light operations per heavy one.]
 
 #tbl("tables/tab-fifo.typ", colsep: 3pt)[FIFO service fairness, $W=8$, sustained, b31 (09-28 window). $"CS"_(L,H)$ are critical-section cycles per op (TSC). The model uses $x="L:H" dot "CS"_L \/ "CS"_H$. The last column is $"CS"_H$/$"CS"_L$.] <tab:fifo>
 
@@ -132,8 +143,11 @@ G2 and G3 conflict in one measurable way: fairness shifts the served mix toward 
 // ---------------------------------------------------------------------------
 = Design <sec:design>
 
+#figure(placement: top, scope: "parent", kind: image, contract,
+  caption: [The executor contract and the two burden policies. (a) A lock may ask for each wake to be placed _Inline_ (the waking worker's run-next slot), _Remote_ (the shared injector) or _Home_ (the inbox of the worker that last polled the wakee). (b) CES resumes waiters inline on one worker; `ces-k64-home` ends the chain after $K=64$ hand-offs and hands ownership to the next waiter on its home worker, so the ex-combiner drains its own queue. (c) An FC combiner serves at most $H$ closures, wakes the served waiters remotely (`fc-remote`) and yields once after combining, so the tasks queued on its worker run before it competes again.]) <fig:contract>
+
 == Executor contract
-A `Waker` can only enqueue its task, so it carries no placement. The executor exposes a thread-local placement hint, which the schedule callback reads and resets:
+A `Waker` can only enqueue its task, so it carries no placement. The executor exposes a thread-local placement hint, which the schedule callback reads and resets (@fig:contract a):
 - `wake_with(Inline, w)` puts the task in this worker's run-next slot. The slot is polled as soon as the current poll returns, before the local queue and before stealing. It has no anti-starvation cap; that is deliberate, so that unbounded CES chains remain observable.
 - `wake_with(Remote, w)` pushes the task to the injector and unparks one worker.
 - `wake_with(Home, w)` pushes the task to the inbox of the worker that last polled it.
@@ -141,7 +155,7 @@ A `Waker` can only enqueue its task, so it carries no placement. The executor ex
 Tokio's LIFO slot is an implicit, capped `Inline` for every wake issued on a worker. The contract makes that choice explicit and per-wake. It adds no policy to the executor beyond what the lock requests (G4).
 
 == Burden: CES chain bound and break placement
-A _chain_ is the sequence of inline resumes on one worker since that worker last polled anything else. `ces-k`$K$ ends a chain after $K$ hand-offs; `ces-t`$T$ ends it after $T$ cycles. At that point the unlocker does not resume the head waiter inline. It hands ownership to the head waiter with a _break placement_ and continues, so the worker drains its own queue when the poll returns. With the default break placement, the woken owner lands in the ex-combiner's own queue and the next chain restarts there. The `-home` suffix sends it to its home worker's inbox, which moves the combiner role (§@sec:q1).
+A _chain_ is the sequence of inline resumes on one worker since that worker last polled anything else (@fig:contract b). `ces-k`$K$ ends a chain after $K$ hand-offs; `ces-t`$T$ ends it after $T$ cycles. At that point the unlocker does not resume the head waiter inline. It hands ownership to the head waiter with a _break placement_ and continues, so the worker drains its own queue when the poll returns. With the default break placement, the woken owner lands in the ex-combiner's own queue and the next chain restarts there. The `-home` suffix sends it to its home worker's inbox, which moves the combiner role (§@sec:q1).
 
 == Burden: FC yield, placement and pass limit
 Every FC client owns one node, allocated once. A request writes a closure pointer and a trampoline into the node and pushes the node onto a Treiber stack. The client then tries the combiner flag. The winner drains the stack into the policy queue and runs at most $H$ closures (default 64). Each served waiter is marked `COMPLETE` (release/acquire) and woken with the lock's _wake placement_.
@@ -150,7 +164,7 @@ Losers return `Pending`; a waiter never spins. At the end of a pass the combiner
 - Queue empty: release the flag and re-check the stack (SeqCst on both sides).
 - Own request served: release the flag and wake the policy's next candidate, which re-runs the election.
 - Own request still pending: keep combining.
-_Yield-after-combine_ (default on) makes a poll that won the election return `Pending` once, having woken itself behind the waiters it just served. Preemption gives OS-thread FC the same effect. `-remote` and `-home` set the placement of every wake the lock issues.
+_Yield-after-combine_ (default on) makes a poll that won the election return `Pending` once, having woken itself behind the waiters it just served (@fig:contract c). Preemption gives OS-thread FC the same effect. `-remote` and `-home` set the placement of every wake the lock issues.
 
 == Service: usage-ordered FC-PQ
 FC-PQ keeps pending requests in a binary min-heap keyed by (cumulative charged cycles, arrival). The combiner charges each closure the `rdtscp` cycles around its execution, and the charge persists in the client's node. Two rules modify the key:
@@ -191,37 +205,37 @@ The `actor` unit tests exercise mutual exclusion with overlap detection, the abs
 
 #par(first-line-indent: 0pt)[*Setup.* The machine has 2× Intel Xeon Gold 6438M (32 cores per socket, SMT on, 128 logical CPUs), Linux 6.17.7, a 2.20 GHz TSC and `rustc` 1.100.0-nightly with `--release`. $W$ workers are pinned to logical CPUs $0..W-1$, one per physical core. Each run has a 200 ms warm-up and a 2 s window. Each configuration is repeated 3 times, with repeats as the outermost loop, and runs execute one at a time under a measurement lock. We report medians with [min, max] over the repeats, and we do not interpret differences inside the spread. Latencies are histogram bucket lower bounds at 6 % resolution. One unrelated single-threaded process ran during the 09-28 matrices. #todo[commit id of the measured binaries not recorded; binaries are identified by sha256 in FINDINGS.md]]
 
-#par(first-line-indent: 0pt)[*Two measurement windows.* From 2026-09-29 00:07:54 UTC, CPUs 0--15 were capped at 3.0 GHz. On 09-28 they ran at about 3.69 GHz turbo. Spins are TSC-timed, so the cap slows only non-spin work: a light CS costs 1 365--1 376 instead of 1 303 cycles. Every table row is labelled with its window, and ratios are formed only within one window unless marked otherwise.]
+#par(first-line-indent: 0pt)[*Two measurement windows.* From 2026-09-29 00:07:54 UTC, CPUs 0--15 were capped at 3.0 GHz. On 09-28 they ran at about 3.69 GHz turbo. Spins are TSC-timed, so the cap slows only non-spin work: a light CS costs 1 365--1 376 instead of 1 303 cycles. Every table row is labelled with its window, and ratios are formed only within one window unless marked otherwise. Every figure panel names its window; where one axis shows both, 09-29 data are drawn hollow.]
 
 The same binary paths re-run on 09-29 were 1.4--3.4 % slower than their 09-28 cells (`dispatch`, `ces-k64-home`, `fc-remote`). This is outside both spreads, and service Jain rose by 0.004--0.007. We attribute the drift to the cap [inference; the actor entry that measured it predates the diagnosis]. Cross-window ratios are therefore uncertain by about 3 %.
 
 == Q1: Does placement restore burden fairness? <sec:q1>
 
-#tbl("tables/tab-burden.typ", wide: true)[Burden fairness, phase 3, heavy 8× (09-28 window). The p99 columns are bystander delays in µs. "/`ces`" is the throughput ratio to plain CES in the same cell. `ces` rows with "--" combiner p99 have no bystander left on the combiner worker (evicted by balancing).] <tab:burden>
+#fig("figures/fig-burden.svg", wide: true)[Burden fairness, phase 3, heavy 8× (09-28 window). Top: burden Jain over workers; bars are $W=8$, diamonds $W=16$ (measured for `ces` and `ces-k64-home` only); dashed: goal G1. Bottom: bystander p99 schedule-to-poll delay (µs, log scale) on the combiner worker (filled) and the maximum over the other workers (open). ▲: the combiner worker's bystander was never polled in the 2~s window (censored); ×: no bystander was left on the combiner worker (evicted by balancing). Medians of 3 repeats; error bars span [min, max]. Numbers and throughput: @tab:burden.] <fig:burden>
 
-@tab:burden gives the answer.
+@fig:burden gives the answer; @tab:burden in the appendix lists the numbers and each variant's throughput relative to CES.
 
-_A chain bound alone does nothing for burden at b0._ `ces-k64` keeps burden at 0.125. The ex-combiner drains its own queue, the next acquirer is again one of its own clients, and the combiner's bystander p99 is 171 µs, the length of one 64-hand-off chain. The bound ends starvation but not concentration.
+_A chain bound alone does nothing for burden at b0._ `ces-k64` keeps burden at 0.125 (left column of @fig:burden). The ex-combiner drains its own queue, the next acquirer is again one of its own clients, and the combiner's bystander p99 is 171 µs, the length of one 64-hand-off chain. The bound ends starvation but not concentration.
 
-_The bound plus a home chain break fixes it._ `ces-k64-home` has burden Jain 0.993--0.999 in every cell (8 and 16 workers, sustained and bursty, b0 and b31). Its combiner-worker bystander p99 equals the others' (2.6--2.9 µs sustained; 44.7 and 14.9 µs bursty at 8 and 16 workers), and no task starves. It costs 0.98--0.99× CES throughput sustained and 0.95--0.99× bursty.
+_The bound plus a home chain break fixes it._ `ces-k64-home` has burden Jain 0.993--0.999 in every cell (8 and 16 workers, sustained and bursty, b0 and b31). Its combiner-worker bystander p99 equals the others' (2.6--2.9 µs sustained; 44.7 and 14.9 µs bursty at 8 and 16 workers), and no task starves: in @fig:burden its filled and open markers coincide in all four columns. It costs 0.98--0.99× CES throughput sustained and 0.95--0.99× bursty.
 
 _Bursty load needs no bound._ In bursty cells CES chains already end naturally (p50 12 hand-offs). The bound only trims the tail from a maximum of 152--191 to 64. The cycle budget (`ces-t64000-home`) breaks every $tilde.op$12 hand-offs even where the queue would have continued, and costs 5--8 %.
 
-_For FC, `remote` beats `home`._ `fc-remote` removes the b0 one-worker convergence (burden 0.981#rng[0.967][0.996] sustained, 1.000 bursty) at the balanced throughput level. `fc-home` reaches only 0.744 at b0 sustained. The election is sticky: the ex-combiner's own clients are woken locally and win the next `try_lock`. In bursty mode `home` is nevertheless faster (1.09--1.13× CES), because served waiters resume their parallel work on their own worker.
+_For FC, `remote` beats `home`._ `fc-remote` removes the b0 one-worker convergence of `fc` (burden 0.981#rng[0.967][0.996] sustained, 1.000 bursty) at the balanced throughput level. `fc-home` reaches only 0.744 at b0 sustained. The election is sticky: the ex-combiner's own clients are woken locally and win the next `try_lock`. In bursty mode `home` is nevertheless faster (1.09--1.13× CES), because served waiters resume their parallel work on their own worker.
 
-_Bystander delay did not exceed the other workers' under balancing._ Our pre-registered hypothesis was that the combiner-worker bystander p99 would exceed the other workers' p99 by more than one pass ($H times$ mean CS). It is refuted under balancing in all 12 bursty cells for all five combining variants: the two p99s are equal within one bucket, for example 44.7 against 44.7 µs for CES at 8 workers, with a 136.6 µs pass. Without balancing the effect is starvation, not delay.
+_Bystander delay did not exceed the other workers' under balancing._ Our pre-registered hypothesis was that the combiner-worker bystander p99 would exceed the other workers' p99 by more than one pass ($H times$ mean CS). It is refuted under balancing in all 12 bursty cells for all five combining variants: the two p99s are equal within one bucket (right column of @fig:burden), for example 44.7 against 44.7 µs for CES at 8 workers, with a 136.6 µs pass. Without balancing the effect is starvation, not delay.
 
 == Q2: Does usage ordering restore service fairness? <sec:q2>
 
 #tbl("tables/tab-service.typ", wide: true)[Service fairness, $W=8$, sustained, b31. Upper block: phase 3 (09-28). Lower block: same-window A/B and clamp sweep (09-29, 3.0 GHz cap); `-c`$N$ is `fcpq-h16-home` with starvation clamp $N$ (0 = off) and newcomer init _mean_. "model $J$" is the two-class model applied to the measured L:H and per-class costs. L:H, util and non-CS/op are medians (max spread 5 % of the median). util $=$ CS cycles / window. non-CS/op $=$ (window $-$ CS cycles) / ops; only for the FC-family rows, whose combiner is busy almost the whole window, is it the per-op lock cost $o$ of §@sec:design; for `dispatch` and `ces` it also contains lock-idle and hand-off time. Max wait is in combining passes. Do not compare rows across the two blocks.] <tab:service>
 
-#tbl("tables/tab-clamp-confirm.typ", colsep: 3pt)[Clamp 8 vs. 16 for `fcpq-h16-home` in the confirmation cells (09-29 window). Heavy p99 is run latency in µs; L:H, p99 and burden $J$ are medians.] <tab:confirm>
+#fig("figures/fig-service.svg", wide: true)[Service fairness of FC-PQ, $W=8$, sustained, b31. (a) Pass limit $H$ (09-28 window): bars are measured service Jain, ticks the two-class model; dashed: goal G2. (b--f) Starvation-clamp sweep of `fcpq-h16-home`, newcomer init _mean_ (09-29 window): (b) service Jain with the model (ticks) and the confirmation cells (hollow; $W=8$ b0 and $W=16$ b31 were run at clamps 8 and 16 only); (c) light:heavy ops against the ratios the model needs for Jain 0.95 and 1; (d) throughput; (e) heavy-client run latency; (f) worst queue wait, with $c+1$ passes marked. Dashed green: same-window `fc-remote`. Medians of 3 repeats; error bars span [min, max].] <fig:service>
 
-The pass limit decides whether usage ordering has any effect (@tab:service). `fcpq` with $H=64$ admits every waiter in every pass, so it reaches only 0.706. $H=8$ gives 0.763, $H=16$ 0.863, and $H=16$ with `home` wakes 0.932. The remaining FC-PQ knobs leave service Jain at or below `fcpq`'s level: pass budget `t16000` 0.661, rotation 0.708, combining credit 0.693, max-usage election 0.707. None of them changes the admission set.
+@fig:service a shows that the pass limit decides whether usage ordering has any effect. `fcpq` with $H=64$ admits every waiter in every pass, so it reaches only 0.706. $H=8$ gives 0.763, $H=16$ 0.863, and $H=16$ with `home` wakes 0.932. The remaining FC-PQ knobs leave service Jain at or below `fcpq`'s level: pass budget `t16000` 0.661, rotation 0.708, combining credit 0.693, max-usage election 0.707 (@tab:service lists the main rows). None of them changes the admission set.
 
-At $H=16$ with `home` wakes, the 8-pass clamp is the bound: L:H stays at 3.64, as §@sec:design predicts. Lengthening the clamp to 16 lifts service Jain to 0.997 at $W=8$ b31, $W=8$ b0 and $W=16$ b31 (@tab:confirm). L:H rises to 5.45--5.53, and ops throughput rises by 13 % (0.540→0.612 Mops/s, same window).
+At $H=16$ with `home` wakes, the 8-pass clamp is the bound: L:H stays at 3.64, as §@sec:design predicts, below the #LHNinetyFive that Jain 0.95 needs (@fig:service c). Lengthening the clamp to 16 lifts service Jain to 0.997 at $W=8$ b31, $W=8$ b0 and $W=16$ b31 (@fig:service b; @tab:confirm in the appendix). L:H rises to 5.45--5.53, and ops throughput rises by 13 % (@fig:service d; 0.540→0.612 Mops/s, same window). Longer clamps change nothing further: clamp 32 and no clamp give the same Jain, L:H and throughput.
 
-The price is heavy-client latency. Heavy p50/p99 grow from 253/357 µs to 328/626 µs, and light p99 from 164 to 343 µs. The worst queue wait is 17 passes at clamp 16 and 33 at clamp 32. With the clamp off it is 106#rng[54][193] passes, with heavy maximum latencies of 1.5--4.3 ms. We therefore take `fcpq-h16-home-c16`: it has the fairness of clamp-off and a bounded worst case (G5).
+The price is heavy-client latency (@fig:service e). Heavy p50/p99 grow from 253/357 µs to 328/626 µs, and light p99 from 164 to 343 µs. The worst queue wait grows with the clamp (@fig:service f): 17 passes at clamp 16 and 33 at clamp 32. With the clamp off it is 106#rng[54][193] passes, with heavy maximum latencies of 1.5--4.3 ms. We therefore take `fcpq-h16-home-c16`: it has the fairness of clamp-off and a bounded worst case (G5).
 
 Two settings had no effect. The newcomer rule fires on only 64 of about 1.2 M requests per run, all during warm-up when every usage is near 0, so mean, zero, min and median initialisation are indistinguishable. In bursty load every knob is inert (Jain 0.697 at $W=8$): with at most 16 waiters and 7.8 ops per pass, every pass serves everyone pending. Usage ordering can only act when the backlog exceeds $H$.
 
@@ -229,39 +243,41 @@ _Side effect on burden._ Clamp 16 also fixes a burden problem at b0, from 0.501#
 
 == Q3: Against real tokio locks <sec:q3>
 
-#tbl("tables/tab-xrt-thr.typ", wide: true, colsep: 3.5pt)[Throughput against tokio 1.53.1 (09-28 window; coro rows b31). ×tm is the ratio to `tokio-mutex` in the same cell. `fcpq-h16-home` (clamp 8) counts cheap light ops and is not a like-for-like throughput reference. *The bursty ratios of 4--5× are largely due to tokio's LIFO slot; see @tab:lifo.*] <tab:xrt>
+#fig("figures/fig-xrt.svg", wide: true)[Throughput against tokio 1.53.1, relative to `tokio-mutex` (LIFO slot on) in the same cell; log scale (09-28 window; coro locks b31). Hatched: `tokio-mutex` with the LIFO slot disabled, as off/on within a throwaway `tokio_unstable` build whose LIFO-on runs are 0.96--1.00× the release binary. Black ticks on the delegation bars: the same throughput divided by LIFO-off `tokio-mutex`. Numbers above bars: clients that completed no operation in 2~s. `fcpq-h16-home` is clamp 8 and counts cheap light ops, so it is not a like-for-like throughput reference. Medians of 3 repeats; error bars span the numerator's [min, max].] <fig:xrt>
+
+#tbl("tables/tab-xrt-thr.typ", wide: true, colsep: 3.5pt)[Throughput against tokio 1.53.1 (09-28 window; coro rows b31), the numbers of @fig:xrt. ×tm is the ratio to `tokio-mutex` in the same cell. *The bursty ratios of 4--5× are largely due to tokio's LIFO slot.*] <tab:xrt>
 
 #tbl("tables/tab-xrt-fair.typ", wide: true, colsep: 3.5pt)[Service Jain and starved clients/bystanders for the runs of @tab:xrt. `std-mutex` and `parking-lot` are really $W$ pinned threads on a blocking mutex (see text).] <tab:xrtfair>
 
-#tbl("tables/tab-lifo.typ", wide: true, colsep: 2.5pt)[tokio LIFO slot on/off (Mops/s; throwaway `tokio_unstable` build whose LIFO-on runs are 0.96--1.00× the release binary; 09-28 window). The right-hand columns divide the coro throughputs of @tab:xrt by LIFO-off `tokio-mutex`.] <tab:lifo>
+We ported the workload unchanged to tokio's multi-thread runtime (`tokio-bench`): same key stream, costs, histogram and pinning. @fig:xrt summarises the comparison; @tab:xrt and @tab:xrtfair give the numbers.
 
-We ported the workload unchanged to tokio's multi-thread runtime (`tokio-bench`): same key stream, costs, histogram and pinning.
+#par(first-line-indent: 0pt)[*The executor is not a weak baseline.* Coro `dispatch` runs at 0.90--0.98× `tokio-mutex` (grey bars in @fig:xrt). The coop budget never forced a yield, and removing it (`-unconstrained`) moves throughput by 0--1 %.]
 
-#par(first-line-indent: 0pt)[*The executor is not a weak baseline.* Coro `dispatch` runs at 0.90--0.98× `tokio-mutex` (@tab:xrt). The coop budget never forced a yield, and removing it (`-unconstrained`) moves throughput by 0--1 %.]
+#par(first-line-indent: 0pt)[*Sustained load.* The burden-fair delegation locks run #(SusOnLo)--#(SusOnHi)× `tokio-mutex` (blue and green bars). They starve no client and no bystander and keep FIFO-level service Jain (0.653--0.678, against 0.663--0.672 for `tokio-mutex`).]
 
-#par(first-line-indent: 0pt)[*Sustained load.* The burden-fair delegation locks run #(SusOnLo)--#(SusOnHi)× `tokio-mutex`. They starve no client and no bystander and keep FIFO-level service Jain (0.653--0.678, against 0.663--0.672 for `tokio-mutex`).]
+#par(first-line-indent: 0pt)[*The LIFO-slot caveat.* Bursty ratios of #(BurOnLo)--#(BurOnHi)× come mostly from tokio's LIFO slot, not from the lock. A mutex hand-off wake lands in the unlocker's LIFO slot, and the new owner waits there behind the unlocker's parallel work. Disabling the slot lifts `tokio-mutex` 3.4--3.7× in bursty mode and 1.08× in sustained mode (hatched bars; @tab:lifo). Against that configuration (black ticks), `ces-k64-home` and `fc-remote` run #(BurOffLo)--#(BurOffHi)× bursty and #(SusOffLo)--#(SusOffHi)× sustained. The advantage that holds under either tokio configuration is 1.5--1.6× sustained and about 1.2--1.4× bursty.]
 
-#par(first-line-indent: 0pt)[*The LIFO-slot caveat.* Bursty ratios of #(BurOnLo)--#(BurOnHi)× come mostly from tokio's LIFO slot, not from the lock. A mutex hand-off wake lands in the unlocker's LIFO slot, and the new owner waits there behind the unlocker's parallel work. Disabling the slot lifts `tokio-mutex` 3.4--3.7× in bursty mode and 1.08× in sustained mode (@tab:lifo). Against that configuration, `ces-k64-home` and `fc-remote` run #(BurOffLo)--#(BurOffHi)× bursty and #(SusOffLo)--#(SusOffHi)× sustained. The advantage that holds under either tokio configuration is 1.5--1.6× sustained and about 1.2--1.4× bursty.]
-
-#par(first-line-indent: 0pt)[*Blocking mutexes.* `std-mutex` and `parking-lot` beat every async lock at $W=8$ bursty (5.02× and 4.90×). In that cell they serve only 8 of the 16 clients and starve all bystanders (@tab:xrtfair), so the ratio is not like-for-like. Elsewhere the delegation locks beat `std-mutex` 1.80--3.28×.]
+#par(first-line-indent: 0pt)[*Blocking mutexes.* `std-mutex` and `parking-lot` beat every async lock at $W=8$ bursty (5.02× and 4.90×). In that cell they serve only 8 of the 16 clients and starve all bystanders (@fig:xrt, @tab:xrtfair), so the ratio is not like-for-like. Elsewhere the delegation locks beat `std-mutex` 1.80--3.28×.]
 
 #par(first-line-indent: 0pt)[*Missing comparison.* The two runtimes were only measured together in the 09-28 window. `fcpq-h16-home-c16` (09-29) has no same-window tokio reference #todo[same-window tokio baseline for `fcpq-h16-home-c16`].]
 
 == Q4: Is a server task enough? <sec:q4>
 
-#tbl("tables/tab-actor.typ", wide: true)[Actor control. Upper blocks: same-window (09-29) references. Lower blocks: b0 and $W=16$, where the `fc-remote` reference is a stored 09-28 cell. Ratios marked † cross windows (actor 09-29 vs. reference 09-28) and understate the actor rows by up to about 3 %.] <tab:actor>
+#fig("figures/fig-actor.svg")[Actor control: throughput relative to `fc-remote` in the same cell, against burden Jain. Shaded: the goal (burden Jain $>= 0.9$ at $>= 0.95×$ `fc-remote`). Marker shape gives the cell. At $W=8$ b31 all runs are from the 09-29 window. In the b0 and $W=16$ cells the references are stored 09-28 cells, so the actor ratios there (hollow) cross windows and understate the actor by up to about 3 %. Error bars span burden Jain's [min, max]. Numbers: @tab:actor.] <fig:actor>
 
-@tab:actor compares the two actor variants with the delegation locks. Plain `actor` is burden-fair only because the executor's balancing steal keeps moving the server: burden Jain is 0.990 sustained and 0.999 bursty at $W=8$ b31. It runs 0.91× same-window `fc-remote` sustained and 0.54× bursty. Served clients are woken into the server's queue ahead of the yielded server, so each pass waits for their parallel work [inference]. At b0, `actor` is a one-worker system: burden 0.125, 0.59× sustained, 0.19× bursty, and a server-worker bystander p99 of 268--283 µs.
+@fig:actor compares the two actor variants with the delegation locks; @tab:actor in the appendix gives the numbers. Plain `actor` is burden-fair only because the executor's balancing steal keeps moving the server: burden Jain is 0.990 sustained and 0.999 bursty at $W=8$ b31. It runs 0.91× same-window `fc-remote` sustained and 0.54× bursty. Served clients are woken into the server's queue ahead of the yielded server, so each pass waits for their parallel work [inference]. At b0, `actor` is a one-worker system: burden 0.125, 0.59× sustained, 0.19× bursty, and a server-worker bystander p99 of 268--283 µs.
 
 `actor-inline` restores throughput (1.04× sustained, 0.96× bursty at $W=8$ b31), but under sustained load the server never parks. A server that never parks is never re-placed by a wake, so only balancing steals move it. Burden is 0.179#rng[0.125][0.267] at $W=8$ and 0.612#rng[0.556][0.651] at $W=16$. At b0, its worker's bystander p99 is 156 µs, about one 64-request pass.
 
-No actor variant reaches both delegation-level throughput and burden $>= 0.9$ in the sustained cells. `ces-k64-home` and `fc-remote` reach both, because they move the combiner role by construction. A server task would need the same explicit migration.
+No actor variant reaches the goal corner of @fig:actor in the sustained cells: each is either fast or burden-fair. `ces-k64-home` and `fc-remote` reach it, because they move the combiner role by construction. A server task would need the same explicit migration.
 
 == Q5: Costs and limits <sec:q5>
 
-#par(first-line-indent: 0pt)[*Utilisation.* Service fairness lowers the fraction of time the lock spends doing work. On 09-28, utilisation drops from #UtilFcOld (`fc`) to 0.725 (`fcpq-h16-home`). On 09-29 it drops from #UtilFcRemoteAB (`fc-remote`) to #UtilCEight (clamp 8) and #UtilCSixteen (clamp 16), while a combiner is busy 98.8--98.9 % of the window. The lock's cost is $o=#OCSixteen$ cycles/op, 96--97 % of it in-pass administration. Same-window `fc-remote` has $o=#OFcRemoteAB$, and the lowest $o$ of any fc-family sustained cell is `fc` on 09-28 at turbo clock, with $o=#OFcOld$.]
+#fig("figures/fig-util.svg")[Lock utilisation (CS cycles / window) against the per-op cycles not spent in a critical section, $o$, for FC-family locks at $W=8$, sustained, b31. Curves: the identity util $= macron(C) \/ (macron(C)+o)$ for the FIFO mix ($macron(C)$ of same-window `fc-remote`), the mix at the Jain-0.95 bound, and the clamp-16 mix. Purple points are FC-PQ settings. Filled: 09-28; hollow: 09-29. Star: the $o$ that utilisation 0.80 needs at Jain 0.95. Error bars span [min, max].] <fig:util>
 
-At the fairness bound $J=0.95$ (L:H $= #LHNinetyFive$), the mix costs $macron(C)=#CbarNinetyFive$ cycles, so utilisation 0.80 requires $o <= #ONeededEighty$ cycles/op. That is 39 % below `fcpq-h16-home` and 25 % below `fc-remote`. Even $o=#OFcOld$ would give only #UtilAtOFcOld. The ops/s gain of FC-PQ is therefore partly an accounting effect: the lock does less work per second while completing more operations. Our first candidate for the cost [inference] is home wakes: on 09-28, `fcpq-h16` with default placement had 769 admin cycles/op against 1 005 for `-home`. We have not broken $o$ into drain, heap, rekey and wake costs #todo[breakdown of $o$ into drain / heap / rekey / home-wake cycles].
+#par(first-line-indent: 0pt)[*Utilisation.* Service fairness lowers the fraction of time the lock spends doing work (@fig:util). On 09-28, utilisation drops from #UtilFcOld (`fc`) to 0.725 (`fcpq-h16-home`). On 09-29 it drops from #UtilFcRemoteAB (`fc-remote`) to #UtilCEight (clamp 8) and #UtilCSixteen (clamp 16), while a combiner is busy 98.8--98.9 % of the window. Each point sits on the curve of its own mix: FC-PQ moves left-to-right only a little ($o$) but drops to curves of cheaper mixes ($macron(C)$). The lock's cost is $o=#OCSixteen$ cycles/op, 96--97 % of it in-pass administration. Same-window `fc-remote` has $o=#OFcRemoteAB$, and the lowest $o$ of any fc-family sustained cell is `fc` on 09-28 at turbo clock, with $o=#OFcOld$.]
+
+At the fairness bound $J=0.95$ (L:H $= #LHNinetyFive$), the mix costs $macron(C)=#CbarNinetyFive$ cycles, so utilisation 0.80 requires $o <= #ONeededEighty$ cycles/op (the star in @fig:util). That is 39 % below `fcpq-h16-home` and 25 % below `fc-remote`. Even $o=#OFcOld$ would give only #UtilAtOFcOld. The ops/s gain of FC-PQ is therefore partly an accounting effect: the lock does less work per second while completing more operations. Our first candidate for the cost [inference] is home wakes: on 09-28, `fcpq-h16` with default placement had 769 admin cycles/op against 1 005 for `-home`. We have not broken $o$ into drain, heap, rekey and wake costs #todo[breakdown of $o$ into drain / heap / rekey / home-wake cycles].
 
 #par(first-line-indent: 0pt)[*Usage ordering alone costs little.* At heavy ratio 1, FC-PQ's throughput is within 0--3 % of FC.]
 
@@ -301,3 +317,20 @@ Future work:
 #set text(size: 9pt)
 #bibliography("refs.bib", style: "ieee", title: "References")
 ]
+
+// ---------------------------------------------------------------------------
+#counter(heading).update(0)
+#set heading(numbering: "A.1")
+= Supplementary Tables <sec:appendix>
+
+The tables below give the numbers behind @fig:motiv, @fig:burden, @fig:service b, @fig:xrt and @fig:actor. They are generated by `make_tables.py` from the same result files.
+
+#tbl("tables/tab-motivation.typ", wide: true)[The problem, phase-2 matrix, $W=8$, heavy 8× (09-28 window). Service $J$ is over clients and burden $J$ over workers. The p99 columns are bystander schedule-to-poll delays in µs on the combiner worker and the maximum over the other workers. The last column counts starved clients and bystanders (0 ops in 2~s). `fc-noyield` is FC without the cooperative yield of §@sec:design.] <tab:motiv>
+
+#tbl("tables/tab-lifo.typ", wide: true, colsep: 2.5pt, placement: bottom)[tokio LIFO slot on/off (Mops/s; throwaway `tokio_unstable` build whose LIFO-on runs are 0.96--1.00× the release binary; 09-28 window): the hatched bars and black ticks of @fig:xrt. The right-hand columns divide the coro throughputs of @tab:xrt by LIFO-off `tokio-mutex`.] <tab:lifo>
+
+#tbl("tables/tab-clamp-confirm.typ", colsep: 3pt, placement: none)[Clamp 8 vs. 16 for `fcpq-h16-home` in the confirmation cells (09-29 window). Heavy p99 is run latency in µs; L:H, p99 and burden $J$ are medians.] <tab:confirm>
+
+#tbl("tables/tab-burden.typ", wide: true)[Burden fairness, phase 3, heavy 8× (09-28 window); the data of @fig:burden. The p99 columns are bystander delays in µs. "/`ces`" is the throughput ratio to plain CES in the same cell. `ces` rows with "--" combiner p99 have no bystander left on the combiner worker (evicted by balancing).] <tab:burden>
+
+#tbl("tables/tab-actor.typ", wide: true)[Actor control; the data of @fig:actor. Upper blocks: same-window (09-29) references. Lower blocks: b0 and $W=16$, where the `fc-remote` reference is a stored 09-28 cell. Ratios marked † cross windows (actor 09-29 vs. reference 09-28) and understate the actor rows by up to about 3 %.] <tab:actor>
