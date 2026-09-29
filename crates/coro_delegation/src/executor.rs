@@ -327,6 +327,39 @@ pub fn schedule_remote(runnable: Runnable) {
     });
 }
 
+/// Spawn `fut` onto the executor that owns the current worker thread, from
+/// inside a task: the first schedule goes through the normal schedule
+/// callback (placement hint as set, `Default` = this worker's local queue),
+/// exactly like [`Executor::spawn`] called on a worker. `None` off-worker.
+///
+/// Hook for locks that own a service task (`locks::actor` starts its server
+/// lazily from the first request); it adds no scheduling policy.
+pub fn spawn_here<F>(kind: TaskKind, fut: F) -> Option<Task<F::Output>>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let shared = CTX.with(|c| c.get().map(|ctx| Arc::clone(&ctx.shared)))?;
+    let (runnable, task) = build_task(&shared, kind, fut);
+    runnable.schedule();
+    Some(task)
+}
+
+fn build_task<F>(shared: &Arc<Shared>, kind: TaskKind, fut: F) -> (Runnable, Task<F::Output>)
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let shared = Arc::clone(shared);
+    Builder::new()
+        .metadata(TaskMeta::new(kind))
+        .propagate_panic(true)
+        .spawn(
+            move |_| fut,
+            WithInfo(move |r: Runnable, info: ScheduleInfo| schedule(&shared, r, info)),
+        )
+}
+
 impl WorkerCtx {
     fn put_run_next(&self, runnable: Runnable) {
         let meta = runnable.metadata();
@@ -549,14 +582,7 @@ impl Executor {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let shared = Arc::clone(&self.shared);
-        Builder::new()
-            .metadata(TaskMeta::new(kind))
-            .propagate_panic(true)
-            .spawn(
-                move |_| fut,
-                WithInfo(move |r: Runnable, info: ScheduleInfo| schedule(&shared, r, info)),
-            )
+        build_task(&self.shared, kind, fut)
     }
 
     /// Drive `fut` to completion on the calling thread (must not be a worker).

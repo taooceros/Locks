@@ -57,7 +57,9 @@ All implement `lock::DelegationLock` / `lock::LockClient` (`src/lock.rs`).
 | `ces` | `ces.rs` | FIFO mutex; unlock suspends owner (`schedule_remote`) and inline-resumes next waiter (`schedule_inline`) | combiner thread = unlocking thread |
 | `fc` | `fc.rs` | closure delegation, FIFO over publication order; combiner = task that wins `try_lock`; pass bound H=64 | closures run on combiner's thread; waiters woken via Waker |
 | `fcpq` | `fc_pq.rs` | as `fc` but usage-ordered (binary heap keyed by charged cycles; newcomer usage = running mean; starvation clamp after 8 passes), mirrors `crates/libdlock/src/dlock2/fc_pq/lock.rs` in the main repo | same |
-| `fcpq-*` | `fc_pq.rs` feature knobs | mitigations for H-D, each independently switchable via constructor options: `pass_budget_cycles`, `rotate_combiner`, `credit_combining`, `elect_max_usage` | same |
+| `fcpq-*` | `fc_pq.rs` feature knobs | mitigations for H-D, each independently switchable via constructor options: `pass_budget_cycles`, `rotate_combiner`, `credit_combining`, `elect_max_usage`; H-C knobs `starvation_clamp` (passes, 0 = off; label `-c<N>`) and `newcomer_init` (`mean`/`zero`/`min`/`median`; label `-n<init>`); `record_waits` (`--fcpq-wait-stats`, queue-wait histogram in the JSON) | same |
+| `actor` | `actor.rs` | closure delegation to one dedicated server task per lock (spawned lazily by the first request): drain the request stack, serve ≤ H=64 in FIFO order, yield; park when empty | server woken, yields and wakes clients with default placement |
+| `actor-inline` | `actor.rs` | as `actor` | server woken into the publisher's run-next slot (`wake_inline`), yields `home`, clients woken `remote` |
 
 ## Executor contract (`src/executor.rs`)
 
@@ -72,6 +74,10 @@ All implement `lock::DelegationLock` / `lock::LockClient` (`src/lock.rs`).
   Worker-only.
 - `executor::schedule_remote(runnable)`: push to the injector and unpark one
   other worker.
+- `executor::spawn_here(kind, fut) -> Option<Task<R>>`: spawn from inside a
+  task onto the current worker's executor (first schedule as for any wake,
+  default = local queue); `None` off-worker. Used by `actor` to start its
+  server task.
 - `Executor::block_on(fut)`: drive `fut` on the calling (non-worker) thread.
 - `Executor::shutdown() -> Vec<WorkerStats>`.
 - Per-worker stats (`src/stats.rs`): cycles polling by `TaskKind`

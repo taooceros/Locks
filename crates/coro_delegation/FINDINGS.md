@@ -5,6 +5,521 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-29 — FC-PQ starvation clamp / newcomer-init sweep
+
+### One-line verdicts
+
+- **Service Jain ≥ 0.95 is reachable at H = 16 `home` by lengthening the
+  starvation clamp.** With clamp 16, 32 or off, sustained service Jain is
+  0.997 [0.997, 0.997] at W = 8 (balance 31 and 0) and W = 16 (balance 31).
+  Light:heavy ops rise to 5.45–5.53 (clamp 8: 3.64), and throughput to
+  0.611–0.614 Mops/s (clamp 8: 0.540 [0.539, 0.540]; +13 %). Same window,
+  same binary. The lock's own charged usage is then equal across all 64
+  clients (min/max 0.9996–0.9997 per run). The clamp was what held
+  fcpq-h16-home at 0.93–0.94.
+- **Jain ≥ 0.95 together with CS-work utilisation ≥ 0.80 is not reachable,
+  and the clamp is not what bounds it.** Utilisation drops from 0.708 (clamp
+  8) to 0.680–0.682 (clamp ≥ 16) while a combiner is busy 98.8–98.9 % of the
+  window in every sustained cell. It follows util = C̄ / (C̄ + o), where C̄ is
+  the mean CS cycles per op of the served mix and o is the per-op lock cost
+  (in-pass admin plus hand-off gap), 1142–1192 cycles/op here. The lowest
+  L:H that still gives Jain 0.95 is 3.86, where C̄ = 2812 cycles. That caps
+  this lock at util 0.70–0.71 at Jain ≥ 0.95, whatever the
+  clamp. Util 0.80 needs o ≤ 703 cycles/op: 39 % below fcpq-h16-home and
+  25 % below same-window `fc-remote` (937). Even the lowest o of any
+  fc-family sustained cell so far (plain `fc`, 784, 2026-09-28 at turbo
+  clock) reaches only 0.775.
+- **Newcomer init has no effect, by construction.** The rule fires only on a
+  client's first request ever (`served() == 0`). That is 64 of ~1.2 M
+  requests per run, all in the first passes of the warm-up, when every
+  queued usage is ≈ 0, so mean, zero, min and median all start clients at
+  ≈ 0. Across the 192 pairwise mode comparisons (4 clamps × sus/bur ×
+  {throughput, Jain, util, L:H} × 6 pairs), 173 ranges overlap. The other
+  19 are ≤ 0.15 % apart and flip sign between clamps and contention levels;
+  64 warm-up requests cannot produce that pattern, so it is read as
+  run-to-run drift [INFERENCE]. No rule re-initialises a client returning
+  from idle (it keeps its cumulative charge), and this closed-loop workload
+  has no idle clients.
+- **The price is heavy latency; the clamp now only cuts the tail.** At
+  clamp ≥ 16 the clamp promotes ≤ 0.035 % of requests (clamp 16; none
+  when off). Heavy run p50 / p99 are 327.7 / 625.5 µs (clamp 8: 253.2 /
+  357.4) and light p99 is 342.5 µs (163.8). Max queue wait is 17 / 33 /
+  106–180 passes, and heavy max run latency 0.90–0.95 / 1.01–1.06 /
+  1.5–4.3 ms, for clamp 16 / 32 / off.
+  **Winner: `fcpq-h16-home-c16`**, the fairness of clamp-off with a bounded
+  worst case. Confirmed at W = 8 balance 0 (Jain 0.997, 0.614 Mops/s) and
+  W = 16 balance 31 (0.997, 0.604 Mops/s; clamp 8: 0.937, 0.531).
+- **Bursty: no knob has an effect.** All 16 cells: 0.357–0.358 Mops/s, Jain
+  0.696–0.697, max wait 1 pass. There are at most 16 waiters and 7.8 ops per
+  pass under H = 16, so every pass serves everyone pending.
+- **Defaults unchanged** (acceptance): in two same-window A/Bs the final
+  binary overlaps the pre-change binary in throughput and service Jain
+  (table below). Against the stored 2026-09-28 cells only L:H reproduces
+  (3.64–3.65 vs 3.65 [3.64, 3.65]). The pre-change binary's throughput and
+  Jain moved too, with a CPU frequency cap set before these runs (Setup).
+
+### How the clamp and newcomer init work (code as found)
+
+Line numbers are for the pre-change `src/locks/fc_pq.rs`, then the current
+ones.
+
+- Admission (`UsagePq::admit`, 169–185, now 313–329) keys an entry by
+  `base = node.usage()`, the client's cumulative charged cycles. Ties go to
+  the earlier arrival `seq` (`Entry::cmp`, 110–114, now 207–211). The
+  newcomer rule (172–175) is
+  `if n.served() == 0 && self.served > 0 { base = self.total_usage / self.served }`.
+  That is the lock-lifetime mean cost *per served request* (≈ 2.8 k cycles
+  here), not a per-client mean usage, and it applies only to a client never
+  served before. After service the node's usage becomes `base + cs`
+  (`charge`, 207–213, now 365–371).
+- Clamp (`begin_pass`, 187–199, now 331–353) runs at every pass start,
+  after the drain (fc.rs:528–531). If any queued entry has
+  `pass - pass_entered > 8` (`STARVATION_THRESHOLD`, 30, now 41), it rebuilds
+  the heap (`rekey`, 151–157, now 266–272, O(n)) with those entries' key
+  lowered to the current heap-minimum key. The equal key and older `seq`
+  put them first. The key stays lowered for the rest of the queue stay;
+  `base` (the accounting) is untouched. `pass_entered` is the pass counter
+  at the drain that admitted the entry: the start of pass p (fc.rs:530) or
+  the end of pass p (fc.rs:568). A promoted entry is therefore served in its
+  9th or 10th pass (measured max wait: 10).
+- libdlock's reference clamps after the pop
+  (`crates/libdlock/src/dlock2/fc_pq/lock.rs:236–239`), a no-op, as the
+  module doc says. Its newcomer test is `raw_usage == 0 && served > 0`
+  (lock.rs:200–201).
+
+### Changes
+
+- `FcPqOptions` gains three fields. `starvation_clamp` (default 8, 0 =
+  off). `newcomer_init`: `NewcomerInit::{Mean (default, as before), Zero,
+  Min, Median}`, where min / median are taken over the queued entries'
+  accounting usage, 0 if nothing is queued. `record_waits`: off by default;
+  it fills `WaitStats` (per served request the wait in passes, clamp
+  promotions, passes) and publishes it via `fc_pq::take_wait_stats()`. The
+  counters and the median scratch live in a boxed `UsagePq::cold` (see the
+  superseded sets below for why). Unit tests cover a configurable clamp, 0
+  disabling it, the four newcomer modes, and clamp-off / newcomer-min / all
+  knobs in the option matrix.
+- `coro-bench`: `--starvation-clamp N` and `--newcomer-init
+  {mean,zero,min,median}` add label suffixes `-c<N>` / `-n<init>` after the
+  placement suffix. `--fcpq-wait-stats` adds no suffix; it writes
+  `fcpq_wait` into the JSON.
+- `scripts/run_p3.sh`: suffixes `-c<N>`, `-n{mean,zero,min,median}`; env
+  `BALANCES`, `BIN`, `SKIP_BUILD`, `PREFIX`, `REPEATS`, `FCPQ_WAIT_STATS`.
+  New `scripts/run_fcpq_sweep.sh` (stages sweep / confirm / ab / iso) and
+  `scripts/summarize_fcpq_sweep.py` (the tables here).
+
+### Setup
+
+- Binary `target/release/coro-bench` sha256 `5e4cfd35…`, frozen as
+  `target/fcpq-sweep/coro-bench`. It includes the concurrently added actor
+  lock, which fcpq does not use. Later source edits were doc and help text
+  only. W = 8 (CPUs 0–7), heavy 8, balance 31, sustained (64 clients, 4 000
+  cycle parallel work) and bursty (16, 32 000), 2 s window after 200 ms
+  warm-up, 3 repeats outermost, measurement lock held. Every sweep and
+  confirm run used `--fcpq-wait-stats`. `--sanity` passed for every lock
+  before each stage.
+- Grid: clamp {8, 16, 32, 0} × newcomer {mean (current), zero, min,
+  median} = 16 labels `fcpq-h16-home-c<clamp>-n<init>`; the requested 12
+  (current + min + median) are a subset. Unix windows: sweep
+  1790643193–1790643418 (96 runs), confirm 1790643419–1790643478
+  (`-c8-nmean` / `-c16-nmean` at W = 8 balance 0 and W = 16 balance 31, 24
+  runs), ab 1790643478–1790643564, iso 1790643116–1790643175.
+  util = Σ harness CS cycles / (window × TSC Hz), the 2026-09-28 "lock
+  utilisation" definition (the script reproduces that entry's 0.860 `fc` /
+  0.725 `fcpq-h16-home` from its JSONs). Table: `python3
+  scripts/summarize_fcpq_sweep.py results
+  'p3-fcpq-h16-home-c*-w8-h8-b31-*.json' 'p3ab-pre-*.json'`.
+- **Machine state differs from 2026-09-28.** Since 00:07:54 UTC today
+  (before every run here, unchanged through the last one), CPUs 0–15 have
+  `scaling_max_freq` 3.0 GHz and governor `performance` (intel_cpufreq,
+  cpuinfo max 3.9 GHz). On 09-28 they turboed to ~3.69 GHz. Spins are
+  TSC-timed, so only non-spin work slows: light CS 1365–1376 vs 1303
+  cycles/op; `fc-remote` 0.378 vs 0.387 Mops/s; the pre-change fcpq-h16-home
+  binary 0.542 vs 0.564 Mops/s, with Jain 0.939 vs 0.932 because a costlier
+  light op raises Jain at unchanged L:H. Only same-window numbers are
+  compared below.
+- Superseded, archived with READMEs: `results/fcpq-sweep-v1-ab.tar.zst`
+  (queue-wait accounting always on, −0.4 % throughput) and
+  `results/fcpq-sweep-v2-inline-stats.tar.zst` (behind the flag but stored
+  inline in `UsagePq`: −0.75 % sustained throughput and bursty Jain
+  0.7006 vs 0.6956 *with the flag off*, from a hot-struct layout change;
+  its sweep conclusions match this one).
+
+### Defaults unchanged: fcpq-h16-home, W = 8, balance 31, default flags
+
+"iso" builds are the pre-change crate, and the same crate plus only this
+entry's `fc_pq.rs` / `coro_bench.rs` diff, each built alone in a minimal
+workspace. `pre` = the pre-change binary `8b070beb…`, built from the
+00:20 UTC snapshot of this crate.
+
+| window | binary | sus Mops/s | sus Jain | sus L:H | bur Mops/s | bur Jain |
+|---|---|---|---|---|---|---|
+| iso | iso pre-change `9ec8cd61` | 0.5420 [0.5414, 0.5428] | 0.9393 [0.9388, 0.9395] | 3.644 [3.643, 3.645] | 0.3584 [0.3584, 0.3591] | 0.6959 [0.6947, 0.6959] |
+| iso | iso + this change `6acf388e` | 0.5412 [0.5409, 0.5427] | 0.9394 [0.9385, 0.9395] | 3.645 [3.642, 3.645] | 0.3585 [0.3576, 0.3587] | 0.6951 [0.6948, 0.6961] |
+| iso | pre `8b070beb` | 0.5436 [0.5418, 0.5438] | 0.9387 [0.9386, 0.9396] | 3.647 [3.644, 3.648] | 0.3581 [0.3580, 0.3584] | 0.6957 [0.6953, 0.6961] |
+| iso | final `5e4cfd35` | 0.5416 [0.5411, 0.5419] | 0.9396 [0.9389, 0.9396] | 3.646 [3.645, 3.647] | 0.3581 [0.3572, 0.3582] | 0.6967 [0.6959, 0.6968] |
+| ab | pre | 0.5422 [0.5410, 0.5430] | 0.9387 [0.9386, 0.9394] | 3.643 [3.643, 3.643] | 0.3583 [0.3581, 0.3583] | 0.6958 [0.6955, 0.6959] |
+| ab | final | 0.5411 [0.5409, 0.5424] | 0.9396 [0.9391, 0.9397] | 3.646 [3.646, 3.647] | 0.3576 [0.3573, 0.3581] | 0.6959 [0.6953, 0.6970] |
+| ab | final + `--fcpq-wait-stats` | 0.5411 [0.5400, 0.5411] | 0.9398 [0.9393, 0.9403] | 3.642 [3.642, 3.643] | 0.3573 [0.3570, 0.3580] | 0.6973 [0.6963, 0.6976] |
+
+Every pair overlaps except one. In the ab window, sustained L:H is 3.646
+(final) vs 3.643 (pre), 0.003 apart. That is less than the pre-change
+binary's own shift between the two windows (3.643 vs 3.647), so it is
+not interpreted. `fc-remote` in the ab window: 0.378 [0.377, 0.379] (pre)
+vs 0.379 [0.378, 0.379] (final) sustained, 0.300 vs 0.300 bursty.
+
+### Results: W = 8, balance 31, sustained
+
+o = admin/op + gap/op (medians, TSC cycles). Wait is in combining passes,
+admission to service, over all requests. "Promoted" is the fraction of
+served requests whose key the clamp had lowered. First two rows: same-day
+pre-change binary, ab window.
+
+| variant | Mops/s | service Jain | util | L:H ops | o (cyc/op) | heavy p50 / p99 (µs) | heavy max (µs) | light p99 (µs) | wait p99 / max | promoted |
+|---|---|---|---|---|---|---|---|---|---|---|
+| fc-remote | 0.378 [0.377, 0.379] | 0.660 | 0.839 [0.837, 0.840] | 1.00 | 861 + 76 | 163.8 / 178.7 | 500 [484, 830] | 178.7 | – | – |
+| fcpq-h16-home | 0.542 [0.541, 0.543] | 0.939 | 0.710 [0.710, 0.711] | 3.64 | 1127 + 48 | 253.2 / 357.4 | 647 [647, 730] | 163.8 [156.4, 163.8] | – | – |
+| -c8-nmean | 0.540 [0.539, 0.540] | 0.940 [0.939, 0.940] | 0.708 [0.708, 0.709] | 3.64 [3.64, 3.65] | 1141 + 48 | 253.2 / 357.4 | 853 [756, 918] | 163.8 | 9 / 10 | 0.216 [0.215, 0.216] |
+| -c8-nzero | 0.539 [0.539, 0.541] | 0.940 | 0.708 [0.708, 0.710] | 3.64 [3.64, 3.65] | 1143 + 49 | 253.2 / 357.4 | 776 [720, 1084] | 163.8 | 9 / 10 | 0.216 [0.215, 0.216] |
+| -c8-nmin | 0.540 [0.539, 0.541] | 0.940 [0.939, 0.940] | 0.708 [0.708, 0.709] | 3.65 [3.64, 3.65] | 1140 + 47 | 253.2 / 357.4 | 798 [672, 919] | 163.8 | 9 / 10 | 0.216 [0.215, 0.216] |
+| -c8-nmedian | 0.540 [0.540, 0.541] | 0.940 | 0.709 [0.709, 0.710] | 3.65 [3.64, 3.65] | 1134 + 48 | 253.2 / 357.4 | 752 [703, 910] | 163.8 | 9 / 10 | 0.216 [0.215, 0.216] |
+| -c16-nmean | 0.612 [0.611, 0.614] | 0.997 | 0.681 [0.680, 0.681] | 5.51 [5.48, 5.52] | 1106 + 39 | 327.7 / 625.5 | 905 [826, 986] | 342.5 | 14 / 17 | 0.000 |
+| -c16-nzero | 0.612 [0.611, 0.612] | 0.997 | 0.682 [0.680, 0.682] | 5.47 [5.46, 5.51] | 1105 + 40 | 327.7 / 625.5 | 903 [765, 933] | 342.5 | 14 / 17 | 0.000 |
+| -c16-nmin | 0.614 [0.611, 0.614] | 0.997 | 0.681 [0.681, 0.684] | 5.51 [5.51, 5.53] | 1103 + 39 | 327.7 / 625.5 | 942 [900, 952] | 342.5 | 14 / 17 | 0.000 |
+| -c16-nmedian | 0.612 [0.611, 0.614] | 0.997 | 0.681 [0.680, 0.681] | 5.51 [5.51, 5.53] | 1107 + 40 | 327.7 / 625.5 | 952 [930, 1033] | 342.5 | 14 / 17 | 0.000 |
+| -c32-nmean | 0.613 [0.612, 0.613] | 0.997 | 0.682 | 5.51 [5.51, 5.52] | 1102 + 40 | 327.7 / 625.5 | 1064 [1007, 2127] | 342.5 | 14 / 33 | 0.000 |
+| -c32-nzero | 0.612 | 0.997 | 0.681 [0.680, 0.684] | 5.51 [5.47, 5.52] | 1107 + 40 | 327.7 / 625.5 | 1006 [961, 1426] | 342.5 | 14 / 33 | 0.000 |
+| -c32-nmin | 0.611 [0.611, 0.612] | 0.997 | 0.681 [0.679, 0.681] | 5.51 [5.50, 5.52] | 1107 + 39 | 327.7 / 625.5 | 1059 [930, 2242] | 342.5 | 14 / 33 | 0.000 |
+| -c32-nmedian | 0.612 [0.610, 0.613] | 0.997 | 0.681 [0.681, 0.683] | 5.50 [5.45, 5.52] | 1108 + 39 | 327.7 / 625.5 | 1040 [982, 1142] | 342.5 | 14 / 33 | 0.000 |
+| -c0-nmean | 0.611 [0.610, 0.612] | 0.997 | 0.681 | 5.48 [5.46, 5.51] | 1106 + 40 | 327.7 / 625.5 | 2807 [1732, 5025] | 342.5 | 14 / 106 [54, 193] | 0.000 |
+| -c0-nzero | 0.612 [0.611, 0.613] | 0.997 | 0.680 [0.679, 0.680] | 5.51 [5.48, 5.53] | 1112 + 39 | 327.7 / 625.5 | 4327 [3503, 4584] | 342.5 | 14 / 167 [136, 176] | 0.000 |
+| -c0-nmin | 0.611 [0.611, 0.612] | 0.997 | 0.680 [0.680, 0.682] | 5.51 [5.47, 5.52] | 1110 + 40 | 327.7 / 625.5 | 1457 [1340, 3861] | 342.5 | 14 / 174 [54, 516] | 0.000 |
+| -c0-nmedian | 0.612 [0.610, 0.612] | 0.997 | 0.681 [0.679, 0.683] | 5.51 [5.47, 5.51] | 1108 + 39 | 327.7 / 625.5 | 1832 [1323, 4642] | 342.5 | 14 / 180 [50, 467] | 0.000 |
+
+Wait p50 is 2 passes in every clamp cell. Bursty (16 cells): 0.357–0.358
+Mops/s, Jain 0.696–0.697, util 0.738–0.741, L:H 1.23, o ≈ 1000 + 600,
+wait max 1, promoted 0.000, 7.8–7.9 ops/pass. Same-day pre-change
+references: fcpq-h16-home 0.358 [0.358, 0.358], Jain 0.696 [0.695, 0.696];
+`fc-remote` 0.300 [0.299, 0.300], 0.661 [0.661, 0.663]. The full
+per-column table comes from the command in Setup.
+
+### Confirmation: `-c8-nmean` vs `-c16-nmean`
+
+| cell | variant | Mops/s | service Jain | util | L:H | heavy p50 / p99 (µs) | wait p99 / max | burden Jain | combiner / non-combiner bystander p99 (µs) |
+|---|---|---|---|---|---|---|---|---|---|
+| W8 b0 sus | c8 | 0.540 [0.540, 0.543] | 0.930 [0.929, 0.931] | 0.719 [0.716, 0.720] | 3.50 [3.50, 3.52] | 253.2 / 268.1 [268.1, 312.8] | 9 / 9 [9, 10] | 0.501 [0.500, 0.544] | 7.4 [7.4, 13.5] / 7.4 [7.2, 7.4] |
+| W8 b0 sus | c16 | 0.614 [0.613, 0.617] | 0.997 | 0.681 [0.680, 0.687] | 5.53 [5.49, 5.53] | 327.7 / 655.3 [625.5, 655.3] | 14 [13, 14] / 17 | 0.970 [0.969, 0.974] | 2.3 / 4.7 |
+| W16 b31 sus | c8 | 0.531 [0.530, 0.531] | 0.937 [0.937, 0.938] | 0.706 | 3.57 | 268.1 / 342.5 | 9 / 10 | 0.999 | 2.4 / 2.4 |
+| W16 b31 sus | c16 | 0.604 [0.603, 0.604] | 0.997 | 0.680 [0.679, 0.680] | 5.45 [5.42, 5.45] | 327.7 / 565.9 | 14 / 17 | 0.998 [0.998, 0.999] | 2.4 / 2.6 [2.4, 2.6] |
+| W8 b0 bur | c8 | 0.356 [0.354, 0.357] | 0.683 [0.682, 0.683] | 0.755 [0.750, 0.757] | 1.14 | 31.6 / 63.3 | 1 / 1 | – | – |
+| W8 b0 bur | c16 | 0.355 [0.354, 0.358] | 0.683 [0.682, 0.684] | 0.753 [0.751, 0.759] | 1.14 [1.14, 1.15] | 31.6 [29.8, 31.6] / 63.3 | 1 / 1 | – | – |
+| W16 b31 bur | c8 | 0.386 | 0.734 [0.734, 0.735] | 0.745 [0.745, 0.746] | 1.48 [1.47, 1.48] | 35.4 / 70.7 | 1 / 1 | – | – |
+| W16 b31 bur | c16 | 0.386 | 0.734 [0.734, 0.735] | 0.744 [0.744, 0.745] | 1.48 | 35.4 / 70.7 | 1 / 1 | – | – |
+
+Burden and bystander columns come from `python3 scripts/summarize.py results
+'p3-fcpq-h16-home-c*-nmean-*.json'`. Zero starved clients and bystanders in
+every run of this entry.
+
+### Mechanism, quantified
+
+- **Clamp → L:H.** Under H = 16 with N_h = 32 heavy clients, a heavy client's
+  service interval is 2 (1 + L:H) passes. At clamp 8 every heavy op is a
+  clamp promotion: 0.216 of requests promoted, and the heavy share of ops is
+  1 / 4.64 = 0.216. So the interval is (c + 1) + 0.28 = 9.28 passes, and L:H
+  = 3.64. The 0.28 is the return delay: parallel work plus wake. With the
+  clamp out of the way, usage ordering settles where charged usage is equal,
+  at an interval of 2 × 6.51 = 13.0 passes. A clamp therefore binds only if
+  c + 1.28 < 13.0, i.e. c ≤ 11. Clamp 16 promotes ≤ 0.035 % of requests,
+  only waits in the tail beyond 16 passes.
+- **L:H → Jain.** For two equal-size classes with per-client service ratio
+  x = L:H · CS_L / CS_H, Jain = (1 + x)² / (2 (1 + x²)). This predicts 0.9395
+  at clamp 8 (x = 0.595; measured 0.940) and 0.9970 at clamp 16 (x = 0.896;
+  measured 0.997). Jain 0.95 needs x ≥ 0.627, i.e. L:H ≥ 3.86. By the
+  binding rule that means clamp ≥ 9, and clamps 9 / 10 / 11 would give
+  L:H 4.14 / 4.64 / 5.14 and Jain ≈ 0.963 / 0.981 / 0.992 [INFERENCE,
+  untested].
+- **Why 0.997 and not 1.** Charged usage is equal, but the charge window
+  (fc.rs:546–548) also covers the trampoline. That trampoline moves the
+  closure out of the waiter's future and writes the result back
+  (`run_slot`, fc.rs:749–759), outside the harness timer inside the closure.
+  Equal charges at L:H 5.51 imply that extra is (CS_H − 5.51 CS_L) / 4.51
+  ≈ 193 cycles per op. The harness then sees light clients get 0.89–0.90×
+  the heavy clients' service.
+- **Utilisation.** util = C̄ / (C̄ + o) reproduces the measurements. Clamp 8:
+  C̄ = 2891, o = 1189, predicted 0.709 (measured 0.708). Clamp 16: C̄ = 2444,
+  o = 1145, predicted 0.681 (0.681). o is 96–97 % in-pass admin; the
+  hand-off gap is only 39–49 cycles/op. Fairness moves the mix toward cheap
+  ops, and each op pays o regardless of its cost. Clamp 8 carries ~35
+  cycles/op more admin than clamp ≥ 16 (1134–1143 vs 1102–1112),
+  consistent with the O(n) rekey that only fires under clamp 8
+  [INFERENCE].
+- **Heavy p99 vs clamp.** At clamp 8, heavy p99 (357 µs) sits just above
+  the clamp's queue-wait bound (≤ 10 passes × 29.6 µs = 296 µs). At
+  clamp ≥ 16 it is set by the equal-usage rotation, not by the clamp.
+  Heavy p50 of 327.7 µs ≈ 13 passes × 26.1 µs, but p99 of 625.5 µs is
+  above the 17-pass cap (≈ 444 µs of queue wait).
+  The remainder is pass-length variation (a pass of heavies lasts up to
+  ~69 µs) and the wake-to-poll delay; this entry does not separate them
+  [INFERENCE].
+- **Side finding: balance-0 burden.** Burden Jain is 0.501 at clamp 8 and
+  0.970 at clamp 16 (confirmation table). [INFERENCE] At balance 0 clients
+  stay on their spawn worker (id mod W), and light clients are the even ids,
+  so they sit on workers 0, 2, 4 and 6. The pass-end hand-off goes to the
+  heap minimum (fc.rs:590–605), which under clamp 8 is almost always a light
+  client, so the combiner role stays on 4 of 8 workers (4/8 = 0.50). This
+  also accounts for phase 3's 0.500 for fcpq-h16-home at balance 0. Under
+  equal usage the minimum rotates over both classes.
+
+### Caveats
+
+1. Bystanders are always runnable, so steal-when-idle never fires; this
+   standing limitation of the study applies here.
+2. Frequency cap (Setup). `summarize.py results 'p3-*.json'` now mixes this
+   entry's 3.0 GHz rows with the 2026-09-28 turbo rows. Its thr/ces and
+   thr/dispatch ratios across the two sets are not like-for-like.
+3. Wait accounting also counts the drain after the window (≤ 0.1 % of
+   requests), and its histogram is not split by class. Heavy waits are
+   inferred from the promoted fraction and the heavy run latency.
+4. The newcomer modes were exercised only at start-up. Late joiners and
+   clients returning from idle are untested, and no mode handles idle
+   return.
+5. o is a per-op average and is not broken down (drain, heap, rekey, home
+   wake, misses on waiter nodes).
+
+### Next question
+
+Whether clamp 9–12 traces the predicted frontier: Jain 0.96–0.99 with
+heavy wait bounded at 10–13 passes, i.e. heavy p99 between 357 and 626 µs.
+Beyond that, which parts of the ~1 100 cycles/op of in-pass admin can go,
+since o alone decides whether util 0.80 at Jain 0.95 is reachable (needs
+o ≤ 703). On 2026-09-28, `fcpq-h16` with default placement had admin 769
+against 1 005 for `-home`, so home wakes are the first suspect.
+
+## 2026-09-29 — actor / actor-inline: combiner as a server task
+
+### One-line verdicts
+
+- **Throughput: the plain actor idiom does not reach delegation
+  throughput.** `actor` runs 0.91× same-window `fc-remote` sustained (0.343
+  vs 0.377 Mops/s, w8 b31; 0.90× the stored cell at w16) and 0.55× bursty
+  (0.163 vs 0.299; 0.48× stored at w16). With balancing off it is a
+  one-worker system (burden 0.125): 0.59× sustained, 0.19× bursty, i.e.
+  `dispatch` level. `actor-inline` (server woken into the publisher's
+  run-next slot, `home` yield, `remote` client wakes) matches the delegation
+  locks sustained (1.04× same-window `fc-remote`, 1.00–1.01× the stored
+  cells at b0 and w16) and runs 0.96× same-window `fc-remote` / 0.93×
+  `ces-k64-home` bursty at w8 (1.03× the stored `fc-remote` at w16).
+- **Burden: fair only when something moves the server.** `actor` is
+  burden-fair only through the executor's balancing steal (b31: 0.990 /
+  0.999 sus / bur at w8, 0.970 / 0.999 at w16); at b0 burden is 1/W and the
+  server worker's bystander p99 is 268–283 µs against 0.1–0.2 µs elsewhere.
+  `actor-inline` keeps the server on one worker whenever it never idles,
+  i.e. sustained: burden 0.125 (b0), 0.179 [0.125, 0.267] (b31), 0.612
+  [0.556, 0.651] (w16), and at b0 the server worker's bystander p99 is 156.4
+  µs ≈ one pass (64 × mean CS = 140 µs) against 2.7 µs. Bursty at w8 it
+  serves passes of ~1.8 requests and parks about every 8 requests, and each
+  re-wake lands inline on the publishing worker: burden 0.999–1.000; at w16
+  bursty it never parks and balancing steals move it (0.989). So no actor
+  variant has both delegation-level throughput and burden ≥ 0.9 in the
+  sustained cells, which `ces-k64-home` and `fc-remote` both have.
+- Service Jain stays FIFO (0.654–0.668); no starved client or bystander in
+  any run.
+
+### Setup
+
+Implementation (`src/locks/actor.rs`): per-client record and Treiber-stack
+publication as in `fc`, same `COMPLETE` completion and per-closure
+`cycles()` charge (`fc::AtomicWaker` reused; its three methods are now
+`pub(crate)`, no other change to `fc.rs`). One server task per lock,
+spawned lazily by the first request through the new
+`executor::spawn_here` (spawn onto the current worker's executor; no
+scheduling-policy change; `Executor::make_task` now calls the same builder)
+and exiting when idle with no live client. Each server poll drains the
+stack into a FIFO, serves up to H = 64 closures, charges the pass (drain +
+closures + wakes) to its worker via `stats::record_combining`, and yields;
+with nothing to serve it registers its waker, publishes `IDLE` and
+re-checks the stack (SeqCst Dekker against the publisher's push → state
+load). `actor`: server wake, per-pass yield and client wakes all default
+placement. `actor-inline`: server wake `wake_inline`, yield `home` (inbox of
+the worker that just polled it), client wakes `remote`. `--wake-placement
+remote|home` overrides client wakes on both (`default` keeps the variant's
+own), `--pass-limit` sets H; labels `actor`, `actor-inline`, `actor-h<H>`,
+`actor-inline-home`, ... in `scripts/run_p3.sh`. The server is a
+`TaskKind::Client` task, so its polls count as client polls.
+
+Checks. Unit tests in `actor.rs`, 12 option sets (2 variants × client wake
+{default, remote, home} × H {1, 64}) on a real 4-worker executor with a 60 s
+watchdog: mutual exclusion and completion (16 clients × 2 000 non-atomic
+read-modify-write critical sections with overlap detection: exact count,
+per-client results increasing, `usage` ≥ spin floor, one server spawn per
+client lifetime, lock `Arc` released after the server exits); no lost
+request across idle transitions (8 × 1 500 requests with ≤ 40 k-cycle gaps,
+3 × 400 with ≤ 400 k-cycle gaps, where every remote-wake set must park ≥ 100
+times; the dense runs of the remote-wake sets parked 6–8 k times each); FIFO
+publication order on one worker. PASS in release and
+under TSan (nightly 2026-04-28, `-Zsanitizer=thread -Zbuild-std`), 0
+reports. `coro-bench --sanity`: PASS for all six locks (`actor` 173 116 ops,
+`actor-inline` 188 658). Allocation probe (throwaway counting global
+allocator, 1 s steady-state window, w8 b31, key space 64, n = 1): `actor` 0
+allocations sustained and bursty (`fc` 0); `actor-inline` 0.016 / 0.025
+allocations per op, which is one crossbeam `Injector` block per 63 remote
+wakes plus the home-yield inbox pushes (`fc-remote` 0.016 / 0.012): the
+executor's queues allocate, the lock does not.
+
+Runs: frozen binary `target/actor-cells/coro-bench` (sha256 `b65bcac6…`),
+`BIN=… SKIP_BUILD=1 VARIANTS="actor actor-inline" scripts/run_p3.sh` (w8,
+balance 0 / 31, sus / bur) and the same with `WORKERS=16 BALANCES=31`: 36
+runs, `results/p3-actor{,-inline}-w<W>-h8-b<B>-<sus|bur>-r<i>.json`, n = 3
+per cell. Then a same-window re-run of `dispatch`, `ces-k64-home`,
+`fc-remote` at w8 b31 (18 runs, `results/actorref-*.json`). Sequential,
+repeats outermost, unix 1790642568–1790642845, holding
+`~/.cache/locks-experiments/measurement.lock`, no other measurement running.
+The first driver invocation exited 127 right after its 24th (last w8) run,
+cause not identified; those 24 JSONs are complete (2.0 s windows) and the
+re-invocation skipped them. References: the stored phase-3 cells
+(2026-09-28) for `dispatch`, `ces-k64-home`, `fc-remote`, `fcpq-h16-home`;
+`fc-remote` has no phase-3 w16 cell, so w16 uses
+`results/xrt-fc-remote-w16-h8-b31-*` (same flags, cross-runtime entry).
+Table: `scripts/summarize.py` over a directory of symlinks to exactly these
+files, condensed to the columns below (`python3 scripts/summarize.py
+results 'p3-*.json'` shows the actor rows next to every phase-3 cell).
+
+### Drift since the reference cells
+
+Same cells, same flags, one day apart (w8 b31, throughput in Mops/s):
+
+| contention | variant | stored (2026-09-28) | same window (2026-09-29) | change |
+|---|---|---|---|---|
+| sus | dispatch | 0.217 [0.217, 0.217] | 0.213 [0.212, 0.213] | −1.8 % |
+| sus | ces-k64-home | 0.378 [0.377, 0.379] | 0.365 [0.364, 0.366] | −3.4 % |
+| sus | fc-remote | 0.387 [0.386, 0.387] | 0.377 [0.377, 0.378] | −2.6 % |
+| bur | dispatch | 0.070 [0.070, 0.071] | 0.069 [0.069, 0.069] | −1.4 % |
+| bur | ces-k64-home | 0.314 [0.314, 0.316] | 0.309 [0.305, 0.309] | −1.6 % |
+| bur | fc-remote | 0.307 [0.306, 0.307] | 0.299 [0.299, 0.299] | −2.6 % |
+
+Every change is outside both spreads; service Jain rose by 0.004–0.007,
+burden Jain moved inside 0.98–1.00. The three locks' code paths are
+unchanged apart from the no-op `make_task` refactor; the cause (binary
+layout or machine state) is not identified. Ratios against stored cells
+(b0, w16, `fcpq-h16-home`) therefore understate the actor rows by up to
+~3 %, and differences below that are not interpreted.
+
+### Results (medians [min, max], n = 3; ratios against the stored cells)
+
+| cell | variant | n | throughput (Mops/s) | thr / fc-remote | thr / ces-k64-home | service Jain | burden Jain | combiner share | combiner / non-combiner bystander p99 (µs) | starved clients / bystanders |
+|---|---|---|---|---|---|---|---|---|---|---|
+| w8 sus b0 | dispatch | 3 | 0.209 [0.208, 0.210] | 0.54 | 0.55 | 0.650 [0.649, 0.652] | – | – | – / 5.8 [5.8, 5.8] | 0 / 0 |
+| w8 sus b0 | ces-k64-home | 3 | 0.378 [0.378, 0.382] | 0.97 | 1.00 | 0.660 [0.659, 0.660] | 0.996 [0.993, 0.997] | 0.13 [0.13, 0.13] | 2.6 [2.6, 2.8] / 2.6 [2.6, 2.8] | 0 / 0 |
+| w8 sus b0 | fc-remote | 3 | 0.388 [0.382, 0.388] | 1.00 | 1.03 | 0.654 [0.654, 0.658] | 0.981 [0.967, 0.996] | 0.16 [0.14, 0.16] | 2.6 [2.6, 2.7] / 2.6 [2.6, 2.7] | 0 / 0 |
+| w8 sus b0 | fcpq-h16-home | 3 | 0.563 [0.563, 0.569] | 1.45 | 1.49 | 0.922 [0.920, 0.922] | 0.500 [0.500, 0.500] | 0.25 [0.25, 0.26] | 7.2 [7.2, 9.3] / 7.2 [7.2, 12.1] | 0 / 0 |
+| w8 sus b0 | actor | 3 | 0.228 [0.228, 0.231] | 0.59 | 0.60 | 0.655 [0.655, 0.655] | 0.125 [0.125, 0.125] | 1.00 [1.00, 1.00] | 283.0 [268.1, 283.0] / 0.2 [0.1, 0.2] | 0 / 0 |
+| w8 sus b0 | actor-inline | 3 | 0.389 [0.387, 0.390] | 1.00 | 1.03 | 0.655 [0.654, 0.655] | 0.125 | 1.00 | 156.4 [148.9, 156.4] / 2.7 [2.7, 4.9] | 0 / 0 |
+| w8 sus b31 | dispatch | 3 | 0.217 [0.217, 0.217] | 0.56 | 0.57 | 0.659 [0.659, 0.660] | – | – | – / 0.8 [0.8, 0.8] | 0 / 0 |
+| w8 sus b31 | ces-k64-home | 3 | 0.378 [0.377, 0.379] | 0.98 | 1.00 | 0.659 [0.659, 0.660] | 0.993 [0.992, 0.995] | 0.13 [0.13, 0.14] | 2.7 [2.7, 2.8] / 2.9 [2.8, 3.0] | 0 / 0 |
+| w8 sus b31 | fc-remote | 3 | 0.387 [0.386, 0.387] | 1.00 | 1.02 | 0.654 [0.654, 0.654] | 0.993 [0.975, 0.995] | 0.14 [0.14, 0.16] | 2.9 [2.9, 3.0] / 3.0 [3.0, 3.0] | 0 / 0 |
+| w8 sus b31 | fcpq-h16-home | 3 | 0.564 [0.563, 0.571] | 1.46 | 1.49 | 0.932 [0.930, 0.933] | 1.000 [1.000, 1.000] | 0.13 [0.13, 0.13] | 2.9 [2.9, 2.9] / 2.9 [2.9, 2.9] | 0 / 0 |
+| w8 sus b31 | actor | 3 | 0.343 [0.342, 0.347] | 0.89 | 0.91 | 0.660 [0.660, 0.660] | 0.990 [0.987, 0.993] | 0.14 [0.14, 0.14] | 1.3 [1.2, 1.3] / 1.3 [1.3, 1.4] | 0 / 0 |
+| w8 sus b31 | actor-inline | 3 | 0.391 [0.390, 0.391] | 1.01 | 1.03 | 0.654 [0.654, 0.655] | 0.179 [0.125, 0.267] | 0.82 [0.53, 1.00] | 3.1 [3.1, 3.1] / 3.1 [3.1, 3.3] | 0 / 0 |
+| w8 bur b0 | dispatch | 3 | 0.057 [0.057, 0.057] | 0.19 | 0.18 | 0.652 [0.652, 0.658] | – | – | – / 18.6 [18.6, 18.6] | 0 / 0 |
+| w8 bur b0 | ces-k64-home | 3 | 0.314 [0.313, 0.317] | 1.03 | 1.00 | 0.678 [0.678, 0.679] | 0.996 [0.993, 0.999] | 0.13 [0.13, 0.13] | 44.7 [44.7, 44.7] / 44.7 [44.7, 44.7] | 0 / 0 |
+| w8 bur b0 | fc-remote | 3 | 0.304 [0.301, 0.304] | 1.00 | 0.97 | 0.657 [0.656, 0.660] | 1.000 [1.000, 1.000] | 0.13 [0.13, 0.13] | 29.8 [29.8, 29.8] / 29.8 [29.8, 29.8] | 0 / 0 |
+| w8 bur b0 | fcpq-h16-home | 3 | 0.363 [0.362, 0.364] | 1.19 | 1.16 | 0.674 [0.672, 0.674] | 0.696 [0.678, 0.721] | 0.29 [0.27, 0.29] | 37.2 [37.2, 37.2] / 35.4 [35.4, 37.2] | 0 / 0 |
+| w8 bur b0 | actor | 3 | 0.058 [0.058, 0.058] | 0.19 | 0.18 | 0.658 [0.658, 0.658] | 0.125 [0.125, 0.125] | 1.00 [1.00, 1.00] | 268.1 [268.1, 268.1] / 0.1 [0.1, 0.1] | 0 / 0 |
+| w8 bur b0 | actor-inline | 3 | 0.287 [0.283, 0.288] | 0.94 | 0.91 | 0.663 [0.663, 0.664] | 0.999 [0.989, 1.000] | 0.13 [0.13, 0.16] | 29.8 [29.8, 29.8] / 29.8 [29.8, 29.8] | 0 / 0 |
+| w8 bur b31 | dispatch | 3 | 0.070 [0.070, 0.071] | 0.23 | 0.22 | 0.676 [0.675, 0.676] | – | – | – / 0.8 [0.8, 0.8] | 0 / 0 |
+| w8 bur b31 | ces-k64-home | 3 | 0.314 [0.314, 0.316] | 1.02 | 1.00 | 0.678 [0.678, 0.679] | 0.996 [0.995, 0.998] | 0.13 [0.13, 0.14] | 44.7 [44.7, 44.7] / 44.7 [44.7, 44.7] | 0 / 0 |
+| w8 bur b31 | fc-remote | 3 | 0.307 [0.306, 0.307] | 1.00 | 0.98 | 0.657 [0.656, 0.657] | 1.000 [1.000, 1.000] | 0.13 [0.13, 0.13] | 29.8 [29.8, 29.8] / 29.8 [29.8, 29.8] | 0 / 0 |
+| w8 bur b31 | fcpq-h16-home | 3 | 0.365 [0.365, 0.366] | 1.19 | 1.16 | 0.687 [0.685, 0.687] | 1.000 [1.000, 1.000] | 0.13 [0.13, 0.13] | 29.8 [29.8, 29.8] / 29.8 [29.8, 29.8] | 0 / 0 |
+| w8 bur b31 | actor | 3 | 0.163 [0.159, 0.164] | 0.53 | 0.52 | 0.666 [0.666, 0.666] | 0.999 [0.999, 0.999] | 0.13 [0.13, 0.14] | 2.1 [2.0, 2.1] / 2.1 [2.1, 2.2] | 0 / 0 |
+| w8 bur b31 | actor-inline | 3 | 0.287 [0.281, 0.288] | 0.93 | 0.91 | 0.663 [0.663, 0.663] | 1.000 [0.998, 1.000] | 0.13 [0.13, 0.13] | 29.8 [29.8, 29.8] / 29.8 [29.8, 29.8] | 0 / 0 |
+| w16 sus b31 | dispatch | 3 | 0.214 [0.214, 0.214] | 0.57 | 0.58 | 0.664 [0.663, 0.665] | – | – | – / 0.7 [0.7, 0.7] | 0 / 0 |
+| w16 sus b31 | ces-k64-home | 3 | 0.369 [0.369, 0.372] | 0.98 | 1.00 | 0.663 [0.662, 0.663] | 0.998 [0.995, 0.998] | 0.07 [0.07, 0.07] | 2.6 [2.6, 2.6] / 2.6 [2.6, 2.6] | 0 / 0 |
+| w16 sus b31 | fc-remote | 3 | 0.378 [0.378, 0.379] | 1.00 | 1.02 | 0.659 [0.659, 0.660] | 0.998 [0.994, 0.998] | 0.07 [0.07, 0.07] | 2.4 [2.4, 2.4] / 2.4 [2.4, 2.4] | 0 / 0 |
+| w16 sus b31 | fcpq-h16-home | 3 | 0.546 [0.542, 0.548] | 1.44 | 1.48 | 0.935 [0.933, 0.936] | 0.999 [0.998, 0.999] | 0.07 [0.07, 0.07] | 2.4 [2.4, 2.4] / 2.4 [2.4, 2.4] | 0 / 0 |
+| w16 sus b31 | actor | 3 | 0.340 [0.340, 0.340] | 0.90 | 0.92 | 0.661 [0.661, 0.661] | 0.970 [0.966, 0.970] | 0.09 [0.08, 0.09] | 0.9 [0.9, 1.0] / 1.0 [1.0, 1.0] | 0 / 0 |
+| w16 sus b31 | actor-inline | 3 | 0.382 [0.382, 0.383] | 1.01 | 1.04 | 0.656 [0.656, 0.657] | 0.612 [0.556, 0.651] | 0.19 [0.17, 0.21] | 2.6 [2.6, 2.6] / 2.6 [2.6, 2.6] | 0 / 0 |
+| w16 bur b31 | dispatch | 3 | 0.070 [0.070, 0.071] | 0.20 | 0.20 | 0.681 [0.680, 0.681] | – | – | – / 0.7 [0.7, 0.7] | 0 / 0 |
+| w16 bur b31 | ces-k64-home | 3 | 0.348 [0.348, 0.348] | 0.97 | 1.00 | 0.664 [0.664, 0.664] | 0.999 [0.998, 0.999] | 0.07 [0.07, 0.07] | 14.9 [14.9, 14.9] / 14.9 [14.9, 14.9] | 0 / 0 |
+| w16 bur b31 | fc-remote | 3 | 0.358 [0.357, 0.358] | 1.00 | 1.03 | 0.662 [0.662, 0.662] | 1.000 [1.000, 1.000] | 0.06 [0.06, 0.06] | 14.9 [14.9, 14.9] / 14.9 [14.9, 14.9] | 0 / 0 |
+| w16 bur b31 | fcpq-h16-home | 3 | 0.391 [0.390, 0.392] | 1.09 | 1.12 | 0.729 [0.727, 0.729] | 0.997 [0.997, 0.998] | 0.07 [0.07, 0.07] | 14.9 [14.9, 14.9] / 14.9 [14.9, 14.9] | 0 / 0 |
+| w16 bur b31 | actor | 3 | 0.173 [0.173, 0.173] | 0.48 | 0.50 | 0.668 [0.667, 0.668] | 0.999 [0.997, 0.999] | 0.07 [0.07, 0.07] | 1.2 [1.0, 1.2] / 1.2 [1.2, 1.2] | 0 / 0 |
+| w16 bur b31 | actor-inline | 3 | 0.367 [0.366, 0.368] | 1.03 | 1.05 | 0.663 [0.663, 0.663] | 0.989 [0.988, 0.993] | 0.08 [0.07, 0.08] | 14.9 [14.9, 14.9] / 14.9 [14.9, 14.9] | 0 / 0 |
+
+Same-window ratios (w8 b31, against the `actorref` rows of the drift
+table): `actor` 0.91 / 0.94 / 1.61× (`fc-remote` / `ces-k64-home` /
+`dispatch`) sustained, 0.55 / 0.53 / 2.36× bursty; `actor-inline` 1.04 /
+1.07 / 1.84× sustained, 0.96 / 0.93 / 4.16× bursty. `fcpq-h16-home`'s ops
+ratio counts cheap light ops (phase 3) and is not a like-for-like
+throughput reference.
+
+### Server behaviour
+
+From the same JSONs; placement counts cover the whole run including warm-up
+and drain.
+
+- `actor-inline` requests per pass (remote client wakes ÷ home yields):
+  57.9–58.1 at w8 sustained, 61.2 at w16 sustained, 1.8 at w8 bursty, 9.1
+  at w16 bursty. Inline server wakes: 3–10 per run (of ~0.8 M ops)
+  sustained and at w16 bursty, i.e. it practically never parks; 0.13 per op
+  at w8 bursty (it parks and is re-woken on the publisher's worker every ~8
+  ops).
+- `actor`: the placement counts are all `default`, so passes are not
+  separable; the allocation probe (n = 1) gave 60.8 requests per pass and 1
+  park sustained, 11.6 and 2 parks bursty. Client poll cycles are spread
+  over the workers at b31 (Jain 0.989–1.000) with 123–192 balancing steals
+  per ms (`fc-remote` 0–148), and all on one worker at b0 (0.125).
+- [INFERENCE] `actor`'s b31 deficit: served clients are woken into the
+  server worker's local queue ahead of the yielded server, so each pass
+  waits for their parallel work unless a balancing steal (every 31 polls)
+  has moved them; the longer that work (bursty: 32 000 cycles), the larger
+  the loss (0.55× vs 0.91×). Not tested separately (e.g. `actor-remote`).
+- `actor-inline` sustained: the `home` yield returns the server to its own
+  worker's queue, and a server that never parks is never re-placed by an
+  inline wake, so only balancing steals move it (6.5 per ms at w8 b31 vs
+  123 for `actor`): burden 0.125–0.27 at w8. At w16 balancing steals are
+  more frequent (54 per ms) and burden is 0.61. At b0 nothing moves it; its
+  worker's bystander p99 (156 µs) is about one pass.
+
+### Caveats
+
+1. Bystanders are always runnable (no idle worker, so no steal-when-idle).
+   [INFERENCE, untested] with idle gaps a server that never parks would
+   also be stolen by idle workers, which changes `actor-inline`'s burden.
+2. `actor` at b0 is, like `fc` / `fcpq` with default placement, a
+   one-worker system (all clients converge on the server's worker):
+   reported, not a lock property.
+3. The server task is `TaskKind::Client`; its polls are in the client poll
+   counts (in `actor-inline` bursty ≈ 0.56 passes + 0.13 parks = 0.7 of the
+   1.7 client polls per op).
+4. Cross-day drift of 1.4–3.4 % (above); all b0, w16 and `fcpq-h16-home`
+   ratios are against stored cells.
+
+### Verdict
+
+A dedicated server task per lock is a correct, allocation-free delegation
+lock on this executor, but the plain actor idiom is not a delegation lock
+in performance: it reaches 0.91× `fc-remote` sustained and 0.55× bursty in
+the same window (0.90× / 0.48× at 16 workers), and collapses to `dispatch`
+level without executor balancing. Its combiner burden is fair (0.97–0.999)
+only because the executor's balancing steal keeps moving the server; with
+balancing off the whole system runs on the server's worker. The placement
+hooks that restore throughput (`actor-inline`: 1.04× sustained, 0.96×
+bursty) pin the server to one worker under sustained load (burden 0.125–
+0.27 at 8 workers, 0.61 at 16), because a server that never parks is never
+re-placed by a wake. `ces-k64-home` and `fc-remote` keep both properties;
+both move the combiner role off its worker by construction (chain bound 64
+with a home handoff; pass-end handoff with remote wakes). [INFERENCE] A
+server task would need the same explicit migration.
+
+### Next question
+
+Does an explicit server migration give an actor both properties: `yield =
+remote` (the server re-enters through the injector after every pass, so any
+worker may run the next one) or a pass-count bound after which the server
+yields `remote`, combined with `actor-inline`'s wakes; and does `actor` with
+`remote` client wakes (the served clients leave the server's worker) close
+the b31 throughput gap? Same grid, same-window references.
+
 ## 2026-09-28 — Cross-runtime baseline: tokio locks
 
 ### Setup

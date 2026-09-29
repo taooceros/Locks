@@ -43,6 +43,7 @@ impl<T: Send + 'static, P: fc::Policy<T>> ClientExtras for fc::Client<T, P> {
         fc::Client::combiner_yields(self)
     }
 }
+impl<T: Send + 'static> ClientExtras for crate::locks::actor::ActorClient<T> {}
 
 pub type Shared = BTreeMap<u64, u64>;
 

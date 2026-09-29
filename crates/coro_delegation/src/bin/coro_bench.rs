@@ -19,13 +19,14 @@ use clap::{Parser, ValueEnum};
 
 use coro_delegation::executor::Placement;
 use coro_delegation::lock::DelegationLock;
+use coro_delegation::locks::actor::{Actor, ActorOptions};
 use coro_delegation::locks::ces::{Ces, CesOptions};
 use coro_delegation::locks::dispatch::Dispatch;
 use coro_delegation::locks::fc::{Fc, FcOptions, WakePlacement};
-use coro_delegation::locks::fc_pq::{FcPq, FcPqOptions};
+use coro_delegation::locks::fc_pq::{self, FcPq, FcPqOptions, NewcomerInit, WaitStats};
 use coro_delegation::workload::{self, Config, Report, Shared};
 
-const LOCKS: &[&str] = &["dispatch", "ces", "fc", "fcpq"];
+const LOCKS: &[&str] = &["dispatch", "ces", "fc", "fcpq", "actor", "actor-inline"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum WakePlacementArg {
@@ -60,13 +61,41 @@ impl WakePlacementArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum NewcomerInitArg {
+    Mean,
+    Zero,
+    Min,
+    Median,
+}
+
+impl NewcomerInitArg {
+    fn fc_pq(self) -> NewcomerInit {
+        match self {
+            NewcomerInitArg::Mean => NewcomerInit::Mean,
+            NewcomerInitArg::Zero => NewcomerInit::Zero,
+            NewcomerInitArg::Min => NewcomerInit::Min,
+            NewcomerInitArg::Median => NewcomerInit::Median,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            NewcomerInitArg::Mean => "mean",
+            NewcomerInitArg::Zero => "zero",
+            NewcomerInitArg::Min => "min",
+            NewcomerInitArg::Median => "median",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "coro-bench",
     about = "Delegation locks on a coroutine executor"
 )]
 struct Cli {
-    /// Lock variant: dispatch | ces | fc | fcpq
+    /// Lock variant: dispatch | ces | fc | fcpq | actor | actor-inline
     #[arg(long, default_value = "dispatch")]
     lock: String,
     /// Executor workers (each pinned to its own physical core)
@@ -113,7 +142,9 @@ struct Cli {
 
     // --- placement (all locks) -------------------------------------------
     /// Placement of lock-issued wakes: dispatch handoff, CES chain-break
-    /// handoff, every fc/fcpq wake (served waiters, next combiner, self-yield)
+    /// handoff, every fc/fcpq wake (served waiters, next combiner, self-yield),
+    /// actor client completions (`default` keeps the variant's own: actor
+    /// default, actor-inline remote)
     #[arg(long, value_enum, default_value_t = WakePlacementArg::Default)]
     wake_placement: WakePlacementArg,
 
@@ -126,7 +157,7 @@ struct Cli {
     ces_chain_budget_cycles: Option<u64>,
 
     // --- fc / fcpq -------------------------------------------------------
-    /// fc/fcpq: maximum closures per combining pass, H (label -h<H>)
+    /// fc/fcpq/actor: maximum closures per combining pass, H (label -h<H>)
     #[arg(long)]
     pass_limit: Option<usize>,
     /// fcpq: bound a combining pass to this many cycles (label -t<T>)
@@ -145,6 +176,19 @@ struct Cli {
     /// (original flat-combining behaviour; label -noyield)
     #[arg(long, default_value_t = false)]
     no_combiner_yield: bool,
+    /// fcpq: passes a queued request may wait before its key is clamped to
+    /// the heap minimum, 0 = never (default 8; label -c<N>)
+    #[arg(long)]
+    starvation_clamp: Option<u64>,
+    /// fcpq: admission usage of a client's first request: mean (running
+    /// mean request cost, default), zero, or min / median of the queued
+    /// entries' usage (label -n<init>)
+    #[arg(long, value_enum)]
+    newcomer_init: Option<NewcomerInitArg>,
+    /// fcpq: count queue waits in combining passes, written as `fcpq_wait`
+    /// in the JSON (instrumentation, no label suffix)
+    #[arg(long, default_value_t = false)]
+    fcpq_wait_stats: bool,
 }
 
 impl Cli {
@@ -199,6 +243,7 @@ impl Cli {
 
     fn fcpq_options(&self) -> FcPqOptions {
         let core = self.fc_options();
+        let defaults = FcPqOptions::default();
         FcPqOptions {
             pass_budget_cycles: self.pass_budget_cycles,
             rotate_combiner: self.rotate_combiner,
@@ -207,6 +252,11 @@ impl Cli {
             yield_after_combine: core.yield_after_combine,
             wake_placement: core.wake_placement,
             pass_limit: core.pass_limit,
+            starvation_clamp: self.starvation_clamp.unwrap_or(defaults.starvation_clamp),
+            newcomer_init: self
+                .newcomer_init
+                .map_or(defaults.newcomer_init, NewcomerInitArg::fc_pq),
+            record_waits: self.fcpq_wait_stats,
         }
     }
 
@@ -243,11 +293,41 @@ impl Cli {
             label.push_str("-elect");
         }
         label.push_str(self.wake_placement.suffix());
+        if let Some(c) = self.starvation_clamp {
+            label.push_str(&format!("-c{c}"));
+        }
+        if let Some(n) = self.newcomer_init {
+            label.push_str(&format!("-n{}", n.name()));
+        }
         label
     }
 
     fn dispatch_label(&self) -> String {
         format!("dispatch{}", self.wake_placement.suffix())
+    }
+
+    /// `variant` (`ActorOptions::plain` / `inline`) with the CLI's
+    /// non-default knobs applied.
+    fn actor_options(&self, variant: ActorOptions) -> ActorOptions {
+        ActorOptions {
+            wake_placement: match self.wake_placement {
+                WakePlacementArg::Default => variant.wake_placement,
+                p => p.fc(),
+            },
+            pass_limit: self.pass_limit.unwrap_or(variant.pass_limit),
+            ..variant
+        }
+    }
+
+    fn actor_label(&self, base: &str, variant: ActorOptions) -> String {
+        let mut label = String::from(base);
+        if let Some(h) = self.pass_limit {
+            label.push_str(&format!("-h{h}"));
+        }
+        if self.actor_options(variant).wake_placement != variant.wake_placement {
+            label.push_str(self.wake_placement.suffix());
+        }
+        label
     }
 }
 
@@ -277,6 +357,17 @@ fn run_lock(cli: &Cli, cfg: &Config, tsc_hz: f64) -> Report {
                 FcPq::with_options(data, opts)
             })
         }
+        base @ ("actor" | "actor-inline") => {
+            let variant = if base == "actor" {
+                ActorOptions::plain()
+            } else {
+                ActorOptions::inline()
+            };
+            let opts = cli.actor_options(variant);
+            workload::run_benchmark(cfg, tsc_hz, &cli.actor_label(base, variant), move |data| {
+                Actor::with_options(data, opts)
+            })
+        }
         other => {
             eprintln!("unknown lock {other:?}; known: {}", LOCKS.join(", "));
             std::process::exit(2);
@@ -290,6 +381,14 @@ fn sanity_lock(id: &str, cfg: &Config) -> Result<workload::SanityOutcome, String
         "ces" => workload::sanity(cfg, Ces::<Shared>::new),
         "fc" => workload::sanity(cfg, Fc::<Shared>::new),
         "fcpq" => workload::sanity(cfg, FcPq::<Shared>::new),
+        "actor" => workload::sanity(cfg, Actor::<Shared>::new),
+        "actor-inline" => workload::sanity(cfg, |data| {
+            Actor::with_options(data, ActorOptions::inline())
+        })
+        .map(|o| workload::SanityOutcome {
+            lock: "actor-inline",
+            ..o
+        }),
         other => Err(format!("{other}: not available")),
     }
 }
@@ -328,7 +427,22 @@ fn main() {
     let cfg = cli.config();
     let report = run_lock(&cli, &cfg, tsc_hz);
     print_summary(&report);
-    let json = serde_json::to_string_pretty(&report).expect("serialize report");
+    let fcpq_wait = if cli.lock == "fcpq" {
+        fc_pq::take_wait_stats()
+    } else {
+        None
+    };
+    if let Some(w) = &fcpq_wait {
+        eprintln!(
+            "  fcpq wait (passes): served={} passes={} promoted={} max={}",
+            w.served, w.passes, w.promoted, w.max_wait
+        );
+    }
+    let out = Output {
+        report: &report,
+        fcpq_wait: fcpq_wait.map(wait_json),
+    };
+    let json = serde_json::to_string_pretty(&out).expect("serialize report");
     match &cli.out {
         Some(path) => {
             if let Some(dir) = path.parent() {
@@ -341,6 +455,29 @@ fn main() {
         }
         None => println!("{json}"),
     }
+}
+
+/// The report plus lock-specific extras in one JSON object: the `Report`
+/// fields in their usual order, then the extras.
+#[derive(serde::Serialize)]
+struct Output<'a> {
+    #[serde(flatten)]
+    report: &'a Report,
+    /// fcpq only: queue waits in combining passes (`fc_pq::WaitStats`;
+    /// `wait_hist[i]` = requests served after exactly i passes, the last
+    /// bucket open-ended).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fcpq_wait: Option<serde_json::Value>,
+}
+
+fn wait_json(w: WaitStats) -> serde_json::Value {
+    serde_json::json!({
+        "passes": w.passes,
+        "served": w.served,
+        "promoted": w.promoted,
+        "max_wait": w.max_wait,
+        "wait_hist": w.wait_hist.to_vec(),
+    })
 }
 
 fn print_summary(r: &Report) {

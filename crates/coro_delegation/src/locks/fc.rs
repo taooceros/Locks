@@ -158,7 +158,7 @@ unsafe impl Send for AtomicWaker {}
 unsafe impl Sync for AtomicWaker {}
 
 impl AtomicWaker {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             state: AtomicUsize::new(WAITING),
             waker: UnsafeCell::new(None),
@@ -168,7 +168,7 @@ impl AtomicWaker {
     /// Owner only. Stores `waker` (no clone when it would wake the same
     /// task). If a `wake` lands while we hold the slot, deliver it ourselves so
     /// the owner is re-polled and re-checks its condition.
-    fn register(&self, waker: &Waker, placement: WakePlacement) {
+    pub(crate) fn register(&self, waker: &Waker, placement: WakePlacement) {
         match self
             .state
             .compare_exchange(WAITING, REGISTERING, Acquire, Acquire)
@@ -206,7 +206,7 @@ impl AtomicWaker {
     /// Any thread. Must be called after the event it announces is visible
     /// (here: after the `COMPLETE` release-store, or after the combiner flag
     /// is released for a designation wake).
-    fn wake(&self, placement: WakePlacement) {
+    pub(crate) fn wake(&self, placement: WakePlacement) {
         // AcqRel: the Release half orders the caller's event before the
         // registrant's Acquire, the Acquire half orders the waker load after
         // its publication.
