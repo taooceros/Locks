@@ -1,0 +1,100 @@
+@inproceedings{scl,
+  author    = {Yuvraj Patel and Leon Yang and Leo Arulraj and Andrea C. Arpaci-Dusseau and Remzi H. Arpaci-Dusseau and Michael M. Swift},
+  title     = {Avoiding Scheduler Subversion using Scheduler-Cooperative Locks},
+  booktitle = {Proceedings of the Fifteenth European Conference on Computer Systems (EuroSys '20)},
+  year      = {2020},
+  doi       = {10.1145/3342195.3387521},
+  note      = {\url{https://research.cs.wisc.edu/adsl/Publications/eurosys20-scl.pdf}}
+}
+
+@inproceedings{cfl,
+  author    = {Jonggyu Park and Young Ik Eom},
+  title     = {Locks as a Resource: Fairly Scheduling Lock Occupation with {CFL}},
+  booktitle = {Proceedings of the 29th ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming (PPoPP '24)},
+  year      = {2024},
+  doi       = {10.1145/3627535.3638477}
+}
+
+@inproceedings{tclocks,
+  author    = {Vishal Gupta and Kumar Kartikeya Dwivedi and Yugesh Kothari and Yueyang Pan and Diyu Zhou and Sanidhya Kashyap},
+  title     = {Ship your Critical Section, Not Your Data: Enabling Transparent Delegation with {TCLocks}},
+  booktitle = {17th USENIX Symposium on Operating Systems Design and Implementation (OSDI '23)},
+  year      = {2023}
+}
+
+@misc{ces,
+  author       = {Simon K{\"o}nig and Lukas Epple and Christian Becker},
+  title        = {Minimize Your Critical Path with Combine-and-Exchange Locks},
+  year         = {2025},
+  howpublished = {arXiv:2511.09194v1 [cs.DC]},
+  note         = {\url{https://arxiv.org/abs/2511.09194}}
+}
+
+@inproceedings{fc,
+  author    = {Danny Hendler and Itai Incze and Nir Shavit and Moran Tzafrir},
+  title     = {Flat Combining and the Synchronization-Parallelism Tradeoff},
+  booktitle = {Proceedings of the 22nd ACM Symposium on Parallelism in Algorithms and Architectures (SPAA '10)},
+  pages     = {355--364},
+  year      = {2010}
+}
+
+@misc{fcdispatch,
+  author       = {Gangmin Lee and Wonsup Yoon and Sue Moon},
+  title        = {Dynamic Dispatcher Assignment With Flat-Combining},
+  year         = {2025},
+  howpublished = {EuroSys '25 Poster Session},
+  note         = {\url{https://2025.eurosys.org/posters/final/eurosys25posters-final163.pdf}}
+}
+
+@inproceedings{shinjuku,
+  author    = {Kostis Kaffes and Timothy Chong and Jack Tigar Humphries and Adam Belay and David Mazi{\`e}res and Christos Kozyrakis},
+  title     = {Shinjuku: Preemptive Scheduling for $\mu$second-scale Tail Latency},
+  booktitle = {16th USENIX Symposium on Networked Systems Design and Implementation (NSDI '19)},
+  year      = {2019}
+}
+
+@inproceedings{persephone,
+  author    = {Henri Maxime Demoulin and Joshua Fried and Isaac Pedisich and Marios Kogias and Boon Thau Loo and Linh Thi Xuan Phan and Irene Zhang},
+  title     = {When Idling is Ideal: Optimizing Tail-Latency for Heavy-Tailed Datacenter Workloads with {Pers{\'e}phone}},
+  booktitle = {Proceedings of the ACM SIGOPS 28th Symposium on Operating Systems Principles (SOSP '21)},
+  year      = {2021}
+}
+
+@techreport{jain,
+  author      = {Raj Jain and Dah-Ming Chiu and William R. Hawe},
+  title       = {A Quantitative Measure of Fairness and Discrimination for Resource Allocation in Shared Computer Systems},
+  institution = {Digital Equipment Corporation},
+  number      = {DEC-TR-301},
+  year        = {1984}
+}
+
+@misc{tokio,
+  author       = {{Tokio contributors}},
+  title        = {Tokio: an asynchronous runtime for {Rust}, version 1.53.1},
+  howpublished = {\url{https://docs.rs/tokio/1.53.1}},
+  note         = {\texttt{sync::Mutex}, multi-thread runtime, LIFO slot and cooperative budget}
+}
+
+@misc{asynclock,
+  author       = {{smol-rs contributors}},
+  title        = {async-lock: Async synchronization primitives, version 3.4.2},
+  howpublished = {\url{https://docs.rs/async-lock/3.4.2}}
+}
+
+@misc{asynctask,
+  author       = {{smol-rs contributors}},
+  title        = {async-task: Task abstraction for building executors, version 4.7.1},
+  howpublished = {\url{https://docs.rs/async-task/4.7.1}}
+}
+
+@misc{crossbeam,
+  author       = {{crossbeam contributors}},
+  title        = {crossbeam-deque: Concurrent work-stealing deque, version 0.8},
+  howpublished = {\url{https://docs.rs/crossbeam-deque/0.8}}
+}
+
+@misc{tokio6049,
+  author       = {{Tokio contributors}},
+  title        = {tokio-rs/tokio issue \#6049 (scope of \texttt{sync::Mutex} FIFO fairness)},
+  howpublished = {\url{https://github.com/tokio-rs/tokio/issues/6049}}
+}
