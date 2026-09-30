@@ -5,16 +5,18 @@ The upstream redb 3.1.0 crate archive is verified against its crates.io SHA-256
 (the checksum also locked in Cargo.lock), extracted, and patches/0*.patch are
 applied in order. The patched tree is placed at the fixed Cargo path dependency
 .worktree/redb-src/redb-3.1.0; an existing tree must be byte-identical to a fresh
-application or the build stops. Three binaries are built with --locked:
+application or the build stops. Four binaries are built with --locked:
 
-  upstream    upstream crates.io redb, untouched          (variant upstream)
-  patched     patched redb                                (upstream_gate, std_mutex, mcs, uscl, fc, fc_pq)
-  test_hooks  patched redb + dlock_test_hooks probes      (correctness gate only)
+  upstream       upstream crates.io redb, untouched          (variant upstream)
+  patched        patched redb                                (upstream_gate, std_mutex, mcs, uscl, fc, fc_pq, fc_pq_hn, fc_pq_h8)
+  test_hooks     patched redb + dlock_test_hooks probes      (correctness gate only)
+  patched_stats  patched + combiner_pass_stat counters       (pass-length ablation stats runs only;
+                 run.py --stats-binary maps the delegated variants to it)
 
 Every binary is instrumented (service_time: rdtscp around each write body) and the
 patched ones build FC-PQ with the E0(b) fast path and its hit counter
 (fcpq_fast_path, fcpq_fast_path_stat). --uninstrumented drops service_time and
-fcpq_fast_path_stat (fast path kept) for the instrumentation-overhead check only;
+fcpq_fast_path_stat (fast path kept) and skips patched_stats, for the instrumentation-overhead check only;
 run.py refuses such builds. build.json records each binary's requested harness
 features, the libdlock/redb features Cargo resolved for it, and the features the
 binary reports itself (--build-info).
@@ -40,7 +42,7 @@ OUT = ROOT / '.worktree/redb'
 CRATE = 'redb-3.1.0.crate'
 CRATE_URL = 'https://static.crates.io/crates/redb/' + CRATE
 CRATE_SHA256 = 'ae323eb086579a3769daa2c753bb96deb95993c534711e0dbe881b5192906a06'
-PATCHED_VARIANTS = ['upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq']
+PATCHED_VARIANTS = ['upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq', 'fc_pq_hn', 'fc_pq_h8']
 INSTRUMENTATION = ['service_time', 'fcpq_fast_path_stat']
 BINARIES = {
     'upstream': {'features': ['upstream', 'service_time'], 'variants': ['upstream']},
@@ -48,6 +50,9 @@ BINARIES = {
                 'variants': PATCHED_VARIANTS},
     'test_hooks': {'features': ['test_hooks', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat'],
                    'variants': PATCHED_VARIANTS},
+    'patched_stats': {'features': ['patched', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat',
+                                   'combiner_pass_stat'],
+                      'variants': PATCHED_VARIANTS},
 }
 VARIANT_BINARY = {'upstream': 'upstream', **{variant: 'patched' for variant in PATCHED_VARIANTS}}
 
@@ -182,6 +187,8 @@ def build(out, jobs, instrumented=True):
     (out / 'logs').mkdir()
     binaries = {}
     for name, spec in BINARIES.items():
+        if not instrumented and name == 'patched_stats':
+            continue
         features = [f for f in spec['features'] if instrumented or f not in INSTRUMENTATION]
         command = ['cargo', 'build', '--manifest-path', str(MANIFEST), '--release', '--locked',
                    '--bin', 'redb_transactions', '--features', ','.join(features),

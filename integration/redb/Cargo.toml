@@ -23,6 +23,9 @@ service_time = ["redb?/dlock_service_time"]
 # E0(b) FC-PQ fast path and its per-thread hit counter (libdlock features).
 fcpq_fast_path = ["libdlock?/fcpq_fast_path"]
 fcpq_fast_path_stat = ["libdlock?/fcpq_fast_path_stat"]
+# Combiner pass counters of FC and FC-PQ (bodies per pass, combiner changes);
+# only the separate stats binary carries them (build.py `patched_stats`).
+combiner_pass_stat = ["libdlock?/combiner_pass_stat"]
 
 [dependencies]
 # Upstream redb 3.1.0 from crates.io, untouched (the `upstream` variant).

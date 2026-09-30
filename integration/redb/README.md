@@ -65,7 +65,7 @@ B-tree, allocator and commit work unchanged; only the writer admission differs:
 - **upstream_gate**: `dlock_private::execute_upstream_gate` runs the body; its begin step
   is the unchanged public `begin_write`, i.e. redb's original tracker
   `Mutex<State>` + `live_write_transaction_available` Condvar, on the caller.
-- **delegated** (`std_mutex`, `mcs`, `uscl`, `fc`, `fc_pq`): `DelegatedWriteGate::execute`
+- **delegated** (`std_mutex`, `mcs`, `uscl`, `fc`, `fc_pq`, `fc_pq_hn`, `fc_pq_h8`): `DelegatedWriteGate::execute`
   hands the *same* body to the lock through a synchronous submit closure. Mutex,
   MCS and U-SCL run it on the requesting thread; FC and FC-PQ may run it on a
   combiner.
@@ -173,6 +173,44 @@ application stops the build.
 | `uscl` | `redb-patched` | Shared body via the bridge, U-SCL (`c/u-scl` fairlock in bridge mode, equal weights), on the requester |
 | `fc` | `redb-patched` | Shared body via the bridge, libdlock FC, possibly on a combiner |
 | `fc_pq` | `redb-patched` | Shared body via the bridge, libdlock FC-PQ built with the E0(b) `fcpq_fast_path`, possibly on a combiner |
+| `fc_pq_hn` | `redb-patched` | As `fc_pq` with the per-pass pop cap H = `active` (entries in the priority queue at pass start); opt-in, see below |
+| `fc_pq_h8` | `redb-patched` | As `fc_pq` with H = 8; opt-in, see below |
+
+### FC-PQ pass-length variants (opt-in)
+
+`fc_pq` keeps FC-PQ's original cap of 64 pops per combining pass (`PassCap::DEFAULT`,
+so every earlier result stays valid). `fc_pq_hn` and `fc_pq_h8` build the same lock with
+`FCPQ::with_pass_cap(…, PassCap::Active | PassCap::Fixed(8))`; the cap is a runtime field
+read once per pass, so one binary hosts all three. They are **not** in the default
+`--variants` set (the default matrix stays the seven original variants); name them at
+preparation, for example `--variants fc,fc_pq,fc_pq_hn,fc_pq_h8,upstream_gate`. Plan and
+result: [plan](../../plan/2026-09-29/fcpq-pass-length-ablation.md),
+[evidence](../../docs/evidence/fcpq-pass-length-2026-09-29/RESULTS.md).
+
+Extra per-cell data (present for every variant that has the quantity):
+
+- `response_ns_hdr` per worker: response times of the windowed requests with 8
+  sub-buckets per octave (12.5 % resolution), analysed as per-worker `worker_p50_ms` /
+  `worker_p99_ms` (bucket upper bounds) plus the merged and short/long-group values;
+- `served_for_others` and `executed_bodies` per worker (FC and FC-PQ variants): the bodies that
+  worker's thread ran, over its whole run, for other requesters only and in total (its own
+  requests included) - the requests served while it was the combiner. The analysis gives
+  `max_worker_executed_share` (combiner concentration), `served_remote_fraction` and
+  `own_local_fraction` (requests that ran on their own requester's thread); the trial
+  fails if the workers' executed bodies differ from the committed transactions of an insert
+  cohort. Two thread-local increments per body, always on;
+- `pass_stats` (FC and FC-PQ, **stats binary only**): passes, empty passes, bodies,
+  combiner changes (the combiner differs from the previous pass's; `_nonempty` compares only
+  passes that ran a body), cap violations and a bodies-per-pass histogram. The analysis
+  reports `bodies_per_pass` (ratio of totals), `bodies_weighted_pass_length` and
+  `combiner_changes_per_1k_bodies`. A fast-path request counts as a one-body pass.
+
+The counters live in the separate `redb-patched_stats` binary (harness and libdlock feature
+`combiner_pass_stat`), because they add work inside the combining pass. Preparing with
+`run.py --prepare-only --stats-binary` maps the delegated variants onto it, and
+`build.py --uninstrumented` does not build it. `--prepare-only` also accepts `--clients`,
+`--cohorts` and `--durabilities` to restrict the
+matrix (recorded in the manifest as `subset`); the defaults are unchanged.
 
 `redb-test_hooks` (patched redb with `dlock_test_hooks`) is used only by the
 correctness gate and is never timed. Every binary is built with the harness
@@ -372,7 +410,8 @@ flock --exclusive "$MEASUREMENT_LOCK" prlimit --core=0 \
 ```
 
 The gate runs every case as a fresh process on a fresh database, for all seven
-variants, all writes as closures: exact contents after every request with
+variants and the opt-in `fc_pq_hn`/`fc_pq_h8` (nine by default; `--variants` restricts),
+all writes as closures: exact contents after every request with
 close/reopen; shape rejections; duplicate-key abort and the lock being released
 after aborts; transaction-ID order, including across gate entry/exit; one gate
 per database, public `begin_write` waiting for it and an unrun call reporting

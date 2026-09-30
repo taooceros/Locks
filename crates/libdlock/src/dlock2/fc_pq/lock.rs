@@ -17,6 +17,8 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
+#[cfg(any(test, feature = "combiner_pass_stat"))]
+use crate::dlock2::pass_stat::{PassRecorder, PassStats};
 use crate::{
     atomic_extension::AtomicExtension,
     dlock2::{DLock2, DLock2Delegate},
@@ -77,6 +79,35 @@ fn prefetch_node<I>(node: &Node<I>) {
 /// and is perpetually deprioritized by a stream of short-CS newcomers.
 const STARVATION_THRESHOLD: u64 = 8;
 
+/// Per-pass cap on priority-queue pops in `combine()` (the pass length H).
+///
+/// `Fixed(n)` pops at most `n` entries per pass; `Active` pops at most as many
+/// entries as the queue holds at pass start (after the announcement ring has
+/// been drained into it), i.e. the number of active or enrolled nodes. A pop
+/// that finds an already-completed node counts against the cap without running
+/// a body, so a pass runs at most `cap` bodies, possibly fewer.
+///
+/// Served nodes are re-inserted and a node whose owner resubmits during the
+/// pass is served again in the same pass, so a large cap lets one combiner run
+/// many bodies in a row; `Active` bounds the pass to about one body per
+/// enrolled node, like FC's single sweep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassCap {
+    Fixed(usize),
+    Active,
+}
+
+impl PassCap {
+    /// The original constant, used by `FCPQ::new`.
+    pub const DEFAULT: PassCap = PassCap::Fixed(64);
+}
+
+impl Default for PassCap {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// A queue entry borrows a ThreadLocal node. Its internally manufactured
 /// `'static` lifetime is valid only while its owning FCPQ exists: the sealed
 /// built-in queues retain entries within the lock, and all calls must return
@@ -121,6 +152,8 @@ where
 {
     combiner_lock: CachePadded<L>,
     delegate: F,
+    /// Read-only after construction; read once per pass by the combiner.
+    pass_cap: PassCap,
     // Dropped before local_node, after all lock() calls have returned.
     job_queue: SyncUnsafeCell<PQ>,
     waiting_nodes: ConcurrentRingBuffer<(AtomicPtr<Node<I>>, u64), 64>,
@@ -132,6 +165,9 @@ where
     total_served: SyncUnsafeCell<u64>,
     /// Monotonically increasing combining pass counter (combiner-only access)
     combine_pass: SyncUnsafeCell<u64>,
+    /// Combiner-only pass counters (stats build and unit tests only).
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    pass_stats: SyncUnsafeCell<PassRecorder>,
 }
 
 impl<T, I, PQ, F, L> FCPQ<T, I, PQ, F, L>
@@ -142,10 +178,22 @@ where
     F: DLock2Delegate<T, I>,
     L: RawMutex,
 {
+    /// FC-PQ with the default pass cap, `PassCap::DEFAULT` (64 pops per pass).
     pub fn new(data: T, delegate: F) -> Self {
+        Self::with_pass_cap(data, delegate, PassCap::DEFAULT)
+    }
+
+    /// FC-PQ with an explicit per-pass pop cap; `Fixed(0)` is rejected (a pass
+    /// that can never serve would livelock every requester).
+    pub fn with_pass_cap(data: T, delegate: F, pass_cap: PassCap) -> Self {
+        assert!(
+            pass_cap != PassCap::Fixed(0),
+            "FC-PQ pass cap must be at least 1"
+        );
         Self {
             combiner_lock: CachePadded::new(L::INIT),
             delegate,
+            pass_cap,
             job_queue: PQ::new().into(),
             waiting_nodes: ConcurrentRingBuffer::new(),
             data: SyncUnsafeCell::new(data),
@@ -153,6 +201,8 @@ where
             total_usage: SyncUnsafeCell::new(0),
             total_served: SyncUnsafeCell::new(0),
             combine_pass: SyncUnsafeCell::new(0),
+            #[cfg(any(test, feature = "combiner_pass_stat"))]
+            pass_stats: SyncUnsafeCell::new(PassRecorder::new()),
         }
     }
 
@@ -282,6 +332,11 @@ where
         node.fast_path_hits
             .store(node.fast_path_hits.load(Relaxed) + 1, Relaxed);
 
+        // SAFETY: lock held; a fast-path request is a one-body pass by the
+        // calling thread (the statistic is combiner-only).
+        #[cfg(any(test, feature = "combiner_pass_stat"))]
+        self.record_pass(1, 1);
+
         self.release_combiner();
         output
     }
@@ -313,12 +368,40 @@ where
             .sum()
     }
 
+    /// Combiner identity for the pass statistics: the address of the calling
+    /// thread's ThreadLocal node (stable, nonzero, unique per live thread).
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    fn record_pass(&self, bodies: usize, cap: usize) {
+        let combiner = self.local_node.get().map_or(1, |node| node.get() as usize);
+        // SAFETY: only the combiner-lock holder calls this.
+        unsafe { (*self.pass_stats.get()).record(combiner, bodies, cap) };
+    }
+
+    /// Snapshot of the pass counters, taken under the combiner lock (so it is
+    /// consistent even while other threads are combining; it waits for the
+    /// current pass). Must not be called from inside a delegate, which already
+    /// holds the lock.
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    pub fn pass_stats(&self) -> PassStats {
+        self.combiner_lock.lock();
+        // SAFETY: the combiner lock is held.
+        let stats = unsafe { self.pass_stats_locked() };
+        // SAFETY: locked just above.
+        unsafe { self.combiner_lock.unlock() };
+        stats
+    }
+
+    /// # Safety
+    /// The caller holds `combiner_lock`.
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    unsafe fn pass_stats_locked(&self) -> PassStats {
+        (*self.pass_stats.get()).snapshot()
+    }
+
     fn combine(&self) {
         let mut aux: u32 = 0;
         #[cfg(feature = "combiner_stat")]
         let pass_begin = timestamp(&mut aux);
-
-        const H: usize = 64;
 
         // SAFETY: only the combiner mutex holder accesses the queue and
         // aggregate counters; no other thread borrows these interior values.
@@ -366,13 +449,21 @@ where
             assert!(count == size.0);
         }
 
+        // The pass length: fixed, or the entries the queue holds now.
+        let cap = match self.pass_cap {
+            PassCap::Fixed(cap) => cap,
+            PassCap::Active => job_queue.len(),
+        };
+        #[cfg(any(test, feature = "combiner_pass_stat"))]
+        let mut bodies = 0_usize;
+
         let mut buffer = ConstGenericRingBuffer::<UsageNode<I>, 4>::new();
 
         // SAFETY: combiner exclusion permits one queue/state writer; acquire
         // of complete=false observes each owner's initialized payload. Each
         // input is moved once, complete=true release returns the result.
         unsafe {
-            for _ in 0..H {
+            for _ in 0..cap {
                 let current = job_queue.pop();
 
                 if current.is_none() {
@@ -418,6 +509,10 @@ where
                     // Track running average for newcomer initialization
                     *self.total_usage.get() += cs_time;
                     *self.total_served.get() += 1;
+                    #[cfg(any(test, feature = "combiner_pass_stat"))]
+                    {
+                        bodies += 1;
+                    }
 
                     node.complete.store(true, Release);
 
@@ -451,6 +546,9 @@ where
                 }
             }
         }
+
+        #[cfg(any(test, feature = "combiner_pass_stat"))]
+        self.record_pass(bodies, cap);
 
         #[cfg(feature = "combiner_stat")]
         unsafe {
@@ -644,5 +742,175 @@ mod accounting_tests {
         } else {
             assert_eq!((usage_after, served_after, newcomer), (0, 0, 0));
         }
+    }
+}
+
+// The pass length H: a pass runs at most `cap` bodies (a pop that finds a
+// completed node counts against the cap without running one).
+#[cfg(test)]
+mod pass_cap_tests {
+    use std::{cmp::Reverse, collections::BinaryHeap, thread};
+
+    use super::*;
+    use crate::dlock2::pass_stat::PassStats;
+    use crate::spin_lock::RawSpinLock;
+
+    type Add = fn(&mut u64, u64) -> u64;
+    type Lock = FCPQ<u64, u64, BinaryHeap<Reverse<UsageNode<'static, u64>>>, Add, RawSpinLock>;
+
+    const PENDING: usize = 6;
+    const REQUESTS: u64 = if cfg!(miri) { 8 } else { 500 };
+
+    fn add(counter: &mut u64, input: u64) -> u64 {
+        *counter += input;
+        *counter
+    }
+
+    /// Holds the combiner lock while `PENDING` threads each announce one
+    /// request, runs exactly one pass, then lets the threads finish. Returns
+    /// the statistics after that first pass and after everything completed.
+    fn first_pass(cap: PassCap) -> (PassStats, PassStats) {
+        let lock = Lock::with_pass_cap(0, add, cap);
+        let first = thread::scope(|scope| {
+            assert!(lock.combiner_lock.try_lock());
+            // The driving thread acts as the combiner, so it needs a node of its own
+            // (combiner statistics are attributed to the calling thread's node).
+            lock.local_node.get_or(|| SyncUnsafeCell::new(Node::new()));
+            let handles: Vec<_> = (0..PENDING).map(|_| scope.spawn(|| lock.lock(1))).collect();
+            // Every ticket is reserved (the pass waits for their publication).
+            while lock.waiting_nodes.tail.load(Acquire) < PENDING {
+                std::hint::spin_loop();
+            }
+            lock.combine();
+            // SAFETY: this thread holds the combiner lock (taken above).
+            let first = unsafe { lock.pass_stats_locked() };
+            lock.release_combiner();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+            first
+        });
+        // SAFETY: quiescent lock.
+        assert_eq!(unsafe { *lock.data.get() }, PENDING as u64);
+        (first, lock.pass_stats())
+    }
+
+    #[test]
+    fn default_is_the_original_cap_of_64() {
+        assert_eq!(PassCap::default(), PassCap::Fixed(64));
+        assert_eq!(Lock::new(0, add).pass_cap, PassCap::Fixed(64));
+    }
+
+    #[test]
+    #[should_panic(expected = "pass cap must be at least 1")]
+    fn zero_cap_is_rejected() {
+        let _ = Lock::with_pass_cap(0, add, PassCap::Fixed(0));
+    }
+
+    #[test]
+    fn a_pass_never_serves_more_than_a_fixed_cap() {
+        for cap in 1..PENDING {
+            let (first, all) = first_pass(PassCap::Fixed(cap));
+            // More requests are pending than the cap, so the cap binds exactly.
+            assert_eq!(
+                (first.passes, first.bodies, first.last_cap),
+                (1, cap as u64, cap as u64)
+            );
+            assert_eq!(all.cap_violations, 0, "cap {cap}");
+            assert!(all.max_bodies <= cap as u64, "cap {cap}: {all:?}");
+            assert_eq!(
+                all.bodies, PENDING as u64,
+                "every request served exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cap_at_or_above_the_pending_requests_serves_them_all() {
+        for cap in [PENDING, 64] {
+            let (first, all) = first_pass(PassCap::Fixed(cap));
+            assert_eq!((first.bodies, first.last_cap), (PENDING as u64, cap as u64));
+            assert_eq!(all.cap_violations, 0);
+        }
+    }
+
+    #[test]
+    fn active_cap_is_the_number_of_enrolled_nodes_at_pass_start() {
+        let (first, all) = first_pass(PassCap::Active);
+        assert_eq!(
+            (first.bodies, first.last_cap),
+            (PENDING as u64, PENDING as u64)
+        );
+        assert_eq!(all.cap_violations, 0);
+    }
+
+    /// Contended stress: every request runs exactly once and no pass exceeds
+    /// its cap, whatever the interleaving.
+    #[test]
+    fn stress_respects_every_cap() {
+        const THREADS: u64 = 4;
+        for cap in [
+            PassCap::Fixed(1),
+            PassCap::Fixed(2),
+            PassCap::Fixed(8),
+            PassCap::DEFAULT,
+            PassCap::Active,
+        ] {
+            let lock = Lock::with_pass_cap(0, add, cap);
+            thread::scope(|scope| {
+                for _ in 0..THREADS {
+                    scope.spawn(|| {
+                        for _ in 0..REQUESTS {
+                            lock.lock(1);
+                        }
+                    });
+                }
+            });
+            let stats = lock.pass_stats();
+            // SAFETY: quiescent lock.
+            assert_eq!(unsafe { *lock.data.get() }, THREADS * REQUESTS, "{cap:?}");
+            assert_eq!(stats.bodies, THREADS * REQUESTS, "{cap:?}: {stats:?}");
+            assert_eq!(stats.cap_violations, 0, "{cap:?}: {stats:?}");
+            match cap {
+                PassCap::Fixed(cap) => assert!(stats.max_bodies <= cap as u64, "{cap}: {stats:?}"),
+                // At most one entry per thread is ever enrolled.
+                PassCap::Active => assert!(stats.max_bodies <= THREADS, "{stats:?}"),
+            }
+        }
+    }
+
+    /// `pass_stats()` may be called while other threads combine: it takes the
+    /// combiner lock, so every snapshot is consistent and monotone.
+    #[test]
+    fn snapshot_while_combining_is_consistent() {
+        use std::sync::atomic::AtomicBool;
+        let lock = Lock::with_pass_cap(0, add, PassCap::Active);
+        let done = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let workers: Vec<_> = (0..3)
+                .map(|_| {
+                    scope.spawn(|| {
+                        for _ in 0..REQUESTS {
+                            lock.lock(1);
+                        }
+                    })
+                })
+                .collect();
+            let poller = scope.spawn(|| {
+                let mut last = 0;
+                while !done.load(Acquire) {
+                    let stats = lock.pass_stats();
+                    assert!(stats.bodies >= last);
+                    assert_eq!(stats.bodies_hist.iter().sum::<u64>(), stats.passes);
+                    last = stats.bodies;
+                }
+            });
+            for worker in workers {
+                worker.join().unwrap();
+            }
+            done.store(true, Release);
+            poller.join().unwrap();
+        });
+        assert_eq!(lock.pass_stats().bodies, 3 * REQUESTS);
     }
 }

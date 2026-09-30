@@ -219,7 +219,7 @@ fn contents(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value>
         // A lone requester never finds another request pending, so every FC-PQ
         // request must take the E0(b) fast path when it is compiled in.
         fast_path_hits = writer.fast_path_hits();
-        if variant == Variant::FcPq && cfg!(feature = "fcpq_fast_path") {
+        if variant.is_fc_pq() && cfg!(feature = "fcpq_fast_path") {
             ensure!(
                 fast_path_hits.is_some() || !cfg!(feature = "fcpq_fast_path_stat"),
                 "fast-path counter missing"

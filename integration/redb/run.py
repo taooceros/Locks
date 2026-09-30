@@ -63,7 +63,11 @@ import time
 from integration.redb.build import OUT, load_build
 
 HERE = Path(__file__).resolve().parents[2]
-VARIANTS = ('upstream', 'upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
+VARIANTS = ('upstream', 'upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq', 'fc_pq_hn', 'fc_pq_h8')
+# Opt-in variants (FC-PQ pass-length ablation): named with --variants, not in the default matrix.
+ABLATION_VARIANTS = ('fc_pq_hn', 'fc_pq_h8')
+# Variants with a combiner: served_for_others applies (FC, FC-PQ at pass caps 64 / active / 8).
+COMBINING = ('fc', 'fc_pq', 'fc_pq_hn', 'fc_pq_h8')
 # Legacy names: results recorded before the 2026-09-29 rename use these; the analysis loaders map them.
 LEGACY_NAMES = {'native': 'upstream', 'refactored': 'upstream_gate', 'bridge_mutex': 'std_mutex'}
 COHORTS = ('all1', 'half1_half8', 'half1_half64')
@@ -220,7 +224,7 @@ def placement(cpus, numa_node):
             "cpu_model": model, "kernel": platform.release()}
 
 
-def prepare(root, build_dir, cpus, numa_node, power_setup, fixed_ghz, variants):
+def prepare(root, build_dir, cpus, numa_node, power_setup, fixed_ghz, variants, subset=None, stats_binary=False):
     check_affinity(cpus)
     power = power_preflight(cpus, power_setup, fixed_ghz)
     build = load_build(build_dir)
@@ -229,8 +233,16 @@ def prepare(root, build_dir, cpus, numa_node, power_setup, fixed_ghz, variants):
     if "fcpq_fast_path" not in build["binaries"]["patched"]["resolved_features"].get("libdlock", []):
         raise RuntimeError("FC-PQ must be built with fcpq_fast_path")
     clients = sweep_clients(cpus)
+    if subset and subset.get("clients"):
+        clients = [c for c in clients if c in subset["clients"]]
     if not clients:
         raise RuntimeError("no client count of the sweep fits the CPU set")
+    variant_binary = dict(build["variant_binary"])
+    if stats_binary:
+        # Stats root: the delegated variants run on the combiner_pass_stat build.
+        if "patched_stats" not in build["binaries"]:
+            raise RuntimeError("build has no patched_stats binary (an --uninstrumented build?)")
+        variant_binary = {v: ("patched_stats" if b == "patched" else b) for v, b in variant_binary.items()}
     root.mkdir(parents=True, exist_ok=False)
     binaries = root / "binaries"
     binaries.mkdir()
@@ -254,9 +266,9 @@ def prepare(root, build_dir, cpus, numa_node, power_setup, fixed_ghz, variants):
         "runner_sha256": digest(Path(__file__).resolve()),
         "build_git_head": build["git_head"], "build_git_dirty_paths": build["git_dirty_paths"],
         "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip(),
-        "rustc": build["rustc"], "binaries": snapshots, "variant_binary": build["variant_binary"],
+        "rustc": build["rustc"], "binaries": snapshots, "variant_binary": variant_binary,
         "clients": clients, "placement": placement(cpus, numa_node),
-        "variants": list(variants),
+        "variants": list(variants), "subset": subset, "stats_binary": stats_binary,
         "perf": perf_identity(), "tsc": tsc_identity(), "power": power,
         "frequency_sampling": {"kinds": list(FREQ_SAMPLE_KINDS), "interval_s": FREQ_SAMPLE_SECONDS,
                                "busy_every": FREQ_BUSY_EVERY, "busy_min": FREQ_BUSY_MIN,
@@ -510,8 +522,26 @@ def trial(root, identity, cohort, clients, durability, variant, repeat, seed, ki
                     variant, cohort, durability, seed, None, clients, cpus, clients):
                 raise ValueError("result identity mismatch")
             if not result["build"]["service_time"] or (
-                    variant == "fc_pq" and not result["build"]["fcpq_fast_path"]):
+                    variant.startswith("fc_pq") and not result["build"]["fcpq_fast_path"]):
                 raise ValueError("binary lacks service time or the FC-PQ fast path")
+            if result["build"]["combiner_pass_stat"] != ("combiner_pass_stat" in
+                                                         identity["binaries"][binary_name]["features"]):
+                raise ValueError("binary's combiner_pass_stat differs from the prepared features")
+            if result["build"]["combiner_pass_stat"] and variant in COMBINING:
+                pass_stats = result["pass_stats"]
+                if pass_stats is None or pass_stats["cap_violations"] or not pass_stats["bodies"]:
+                    raise ValueError(f"missing or unsound combiner pass statistics: {pass_stats}")
+                if cohort != TRANSFER_COHORT and pass_stats["bodies"] != sum(
+                        w["completed_transactions"] for w in result["workers"]):
+                    raise ValueError("pass statistics' bodies differ from committed transactions")
+            if variant in COMBINING:
+                executed = [w["executed_bodies"] for w in result["workers"]]
+                served_others = [w["served_for_others"] for w in result["workers"]]
+                if None in executed or None in served_others or any(e < s for e, s in zip(executed, served_others)):
+                    raise ValueError("missing or inconsistent combiner body counters")
+                if cohort != TRANSFER_COHORT and sum(executed) != sum(
+                        w["completed_transactions"] for w in result["workers"]):
+                    raise ValueError("bodies executed by the workers differ from committed transactions")
             if (result["max_records"] != MAX_RECORDS
                 or result["max_records_per_worker"] != MAX_RECORDS_PER_WORKER
                 or result["verified_live_records"] > MAX_RECORDS
@@ -546,14 +576,17 @@ KIND_COHORTS = {"smoke": SMOKE_COHORTS, "runs": COHORTS, "perf": PERF_COHORTS}
 KIND_DURABILITIES = {"smoke": DURABILITIES, "runs": DURABILITIES, "perf": PERF_DURABILITIES}
 
 
-def groups(kind, clients):
-    """(cohort, clients) pairs of the smoke cohort, formal matrix or perf cohort, in report order."""
-    return [(cohort, c) for cohort in KIND_COHORTS[kind] for c in clients if cohort_runs(cohort, c)]
+def groups(kind, clients, subset=None):
+    """(cohort, clients) pairs of the smoke cohort, formal matrix or perf cohort, in report order.
+    A prepared `subset` (manifest) may restrict the cohorts."""
+    chosen = (subset or {}).get("cohorts") or KIND_COHORTS[kind]
+    return [(cohort, c) for cohort in chosen for c in clients if cohort_runs(cohort, c)]
 
 
-def cells(kind, clients):
+def cells(kind, clients, subset=None):
+    durabilities = (subset or {}).get("durabilities") or KIND_DURABILITIES[kind]
     return [(r, cohort, c, durability) for r in range(len(SEEDS))
-            for cohort, c in groups(kind, clients) for durability in KIND_DURABILITIES[kind]]
+            for cohort, c in groups(kind, clients, subset) for durability in durabilities]
 
 
 def run_matrix(root, kind):
@@ -565,7 +598,7 @@ def run_matrix(root, kind):
     if (root / kind).exists():
         raise RuntimeError("refusing to overwrite prior raw trials; use a fresh output root")
     errors = []
-    for repeat, cohort, clients, durability in cells(kind, identity["clients"]):
+    for repeat, cohort, clients, durability in cells(kind, identity["clients"], identity.get("subset")):
         seed = SEEDS[repeat]
         order = [v for v in VARIANTS if v in identity["variants"]]
         random.Random(seed ^ (ORDER_COHORTS.index(cohort) << 8) ^ (DURABILITIES.index(durability) << 16)
@@ -602,6 +635,55 @@ def median_range(values):
     return {"median": statistics.median(values), "min": min(values), "max": max(values), "n": len(values)}
 
 
+def hdr_upper_ns(bucket):
+    """Exclusive upper bound (ns) of a main.rs `hdr_index` bucket (8 sub-buckets per octave)."""
+    if bucket < 8:
+        return bucket + 1
+    octave = bucket // 8 + 2
+    width = 1 << (octave - 3)
+    return ((8 + bucket % 8) << (octave - 3)) + width
+
+
+def hdr_quantile_ms(pairs, proportion):
+    """Bucket upper bound (ms) at a quantile of sparse [bucket, count] pairs; None if empty."""
+    count = sum(n for _, n in pairs)
+    if not count:
+        return None
+    threshold = max(1, int(count * proportion + 0.999999))
+    total = 0
+    for bucket, n in sorted(pairs):
+        total += n
+        if total >= threshold:
+            return hdr_upper_ns(bucket) / 1_000_000
+    raise AssertionError("invalid latency histogram")
+
+
+def hdr_merge(lists):
+    merged = {}
+    for pairs in lists:
+        for bucket, n in pairs:
+            merged[bucket] = merged.get(bucket, 0) + n
+    return sorted(merged.items())
+
+
+def pass_metrics(result):
+    """Bodies per pass and combiner changes per 1,000 bodies of a stats-build cell (ratios of totals)."""
+    stats = result.get("pass_stats")
+    if not stats or not stats["passes"] or not stats["bodies"]:
+        return {}
+    hist = stats["bodies_hist"]
+    weighted = sum(b * b * n for b, n in enumerate(hist))
+    bodies = sum(b * n for b, n in enumerate(hist))
+    return {"passes": stats["passes"], "pass_bodies": stats["bodies"],
+            "bodies_per_pass": stats["bodies"] / stats["passes"],
+            # Mean length of the pass a body ran in (bodies-weighted): the combiner tenure a request sees.
+            "bodies_weighted_pass_length": weighted / bodies if bodies else None,
+            "empty_pass_fraction": stats["empty_passes"] / stats["passes"],
+            "combiner_changes_per_1k_bodies": stats["combiner_changes"] * 1000 / stats["bodies"],
+            "combiner_changes_nonempty_per_1k_bodies": stats["combiner_changes_nonempty"] * 1000 / stats["bodies"],
+            "max_bodies_per_pass": stats["max_bodies"], "pass_bodies_hist": hist}
+
+
 def metrics(entry):
     result = entry["results"]
     workers = result["workers"]
@@ -625,6 +707,15 @@ def metrics(entry):
     hits = [w["fast_path_hits"] for w in workers]
     calls = sum(w["completed_transactions"] for w in workers)
     aborted = sum(w["aborted_transactions"] for w in workers)
+    worker_hdr = [w.get("response_ns_hdr") or [] for w in workers]
+    worker_p50 = [hdr_quantile_ms(h, 0.50) for h in worker_hdr]
+    worker_p99 = [hdr_quantile_ms(h, 0.99) for h in worker_hdr]
+    served = [w.get("served_for_others") for w in workers]
+    served_known = all(s is not None for s in served)
+    served_total = sum(served) if served_known else None
+    executed = [w.get("executed_bodies") for w in workers]
+    executed_known = all(e is not None for e in executed)
+    executed_total = sum(executed) if executed_known else None
     share = [x / total_service for x in service] if total_service else None
     return {"throughput_tx_s": sum(tx)/seconds, "throughput_records_s": sum(records)/seconds,
             "short_tx_s": sum(tx[i] for i in small)/seconds if split else None,
@@ -643,6 +734,24 @@ def metrics(entry):
             "response_p99_ms_upper": quantile(histogram, 0.99),
             "short_response_p99_ms_upper": quantile(short_histogram, 0.99) if split else None,
             "long_response_p99_ms_upper": quantile(long_histogram, 0.99) if split else None,
+            # Finer percentiles (8 sub-buckets per octave, bucket upper bounds) of the same requests.
+            "response_p50_ms": hdr_quantile_ms(hdr_merge(worker_hdr), 0.50),
+            "response_p99_ms": hdr_quantile_ms(hdr_merge(worker_hdr), 0.99),
+            "short_response_p99_ms": hdr_quantile_ms(hdr_merge(worker_hdr[i] for i in small), 0.99) if split and small else None,
+            "long_response_p99_ms": hdr_quantile_ms(hdr_merge(worker_hdr[i] for i in large), 0.99) if split and large else None,
+            "worker_p50_ms": worker_p50, "worker_p99_ms": worker_p99,
+            "worker_p99_ms_max": max((p for p in worker_p99 if p is not None), default=None),
+            # Bodies each worker ran for others as combiner (whole run); FC / FC-PQ only.
+            "worker_served_for_others": served if served_known else None,
+            # Requests served while each worker was combiner (own and others'), whole run.
+            "worker_executed_bodies": executed if executed_known else None,
+            "max_worker_executed_share": max(executed) / executed_total if executed_known and executed_total else None,
+            # Bodies that ran on their own requester's thread (executed here minus served for others).
+            "own_local_fraction": ((executed_total - served_total) / executed_total
+                                   if executed_known and served_known and executed_total else None),
+            "served_remote_fraction": served_total / calls if served_known and calls else None,
+            "max_worker_served_share": max(served) / served_total if served_known and served_total else None,
+            **pass_metrics(result),
             "process_cpu_seconds": result["process_cpu_ns"] / 1e9, "tsc_ghz": result["tsc_ticks_per_ns"],
             "reopened_exact": result["reopened_exact"],
             "reopen_error": result["reopen_error"]}
@@ -650,6 +759,8 @@ def metrics(entry):
 
 COMPARISONS = (("upstream_gate", "upstream"), ("std_mutex", "upstream_gate"),
                ("fc_pq", "fc"), ("fc_pq", "upstream"), ("fc_pq", "mcs"), ("fc_pq", "uscl"),
+               ("fc_pq_hn", "fc_pq"), ("fc_pq_h8", "fc_pq"), ("fc_pq_hn", "fc"), ("fc_pq_h8", "fc"),
+               ("fc_pq", "upstream_gate"), ("fc", "upstream_gate"),
                ("mcs", "std_mutex"), ("uscl", "mcs"), ("fc", "std_mutex"))
 
 
@@ -687,6 +798,8 @@ def paired_effects(rows, group_list):
 
 def control_check(rows, group_list):
     """upstream_gate vs upstream per durability/cohort/clients: repeat-level spread is the noise."""
+    if not any(r["variant"] == "upstream" and not r["failure"] for r in rows):
+        return []  # no upstream cells in this root (for example the pass-length ablation)
     checks = []
     for durability in DURABILITIES:
         for cohort, clients in group_list:
@@ -712,7 +825,12 @@ def control_check(rows, group_list):
 
 TABLE_METRICS = ("throughput_tx_s", "throughput_records_s", "service_jain", "tx_jain",
                  "long_service_share", "process_cpu_seconds", "service_utilization", "fast_path_hit_rate",
-                 "clock_ghz", "client_clock_spread", "tx_s_at_ref", "records_s_at_ref")
+                 "clock_ghz", "client_clock_spread", "tx_s_at_ref", "records_s_at_ref",
+                 "response_p50_ms", "response_p99_ms", "worker_p99_ms_max", "short_response_p99_ms",
+                 "long_response_p99_ms", "served_remote_fraction", "max_worker_served_share",
+                 "max_worker_executed_share", "own_local_fraction",
+                 "bodies_per_pass", "bodies_weighted_pass_length", "combiner_changes_per_1k_bodies",
+                 "combiner_changes_nonempty_per_1k_bodies", "empty_pass_fraction")
 
 
 def clock_counts(chosen):
@@ -732,6 +850,8 @@ def cell_table(rows, group_list):
             for variant in (v for v in VARIANTS if v in present):
                 chosen = [r for r in rows if not r["failure"] and (r["durability"], r["cohort"], r["clients"],
                                                                      r["variant"]) == (durability, cohort, clients, variant)]
+                if not chosen:
+                    continue  # durability / variant not in this root
                 table.append({"durability": durability, "cohort": cohort, "clients": clients, "variant": variant,
                               **{m: median_range([r.get(m) for r in chosen]) for m in TABLE_METRICS},
                               **clock_counts(chosen)})
@@ -866,7 +986,7 @@ PERF_TABLE = ("throughput_tx_s", "throughput_records_s", "service_jain", "hitm_l
 
 def analyze_perf(root):
     identity, rows = load_rows(root, "perf")
-    group_list = groups("perf", identity["clients"])
+    group_list = groups("perf", identity["clients"], identity.get("subset"))
     present = {r["variant"] for r in rows}
     table = []
     for cohort, clients in group_list:
@@ -930,7 +1050,7 @@ def analyze_perf(root):
 def load_rows(root, kind):
     identity = json.loads((root / "manifest.json").read_text())
     paths = sorted((root / kind).glob("*/result.json"))
-    expected = len(cells(kind, identity["clients"])) * len(identity.get("variants", VARIANTS))
+    expected = len(cells(kind, identity["clients"], identity.get("subset"))) * len(identity.get("variants", VARIANTS))
     if len(paths) != expected:
         raise RuntimeError(f"expected {expected} {kind} raw results, found {len(paths)}")
     rows = []
@@ -961,7 +1081,7 @@ def load_rows(root, kind):
 def analyze(root, smoke=False):
     kind = "smoke" if smoke else "runs"
     identity, rows = load_rows(root, kind)
-    group_list = groups(kind, identity["clients"])
+    group_list = groups(kind, identity["clients"], identity.get("subset"))
     analysis = root / ("analysis-smoke" if smoke else "analysis")
     analysis.mkdir(exist_ok=False)
     table = cell_table(rows, group_list)
@@ -1088,9 +1208,18 @@ def main():
                              "(required at prepare; must match the manifest when given later)")
     parser.add_argument("--fixed-ghz", type=float, default=DEFAULT_FIXED_GHZ,
                         help=f"S1/S2 target clock F in GHz (default {DEFAULT_FIXED_GHZ})")
-    parser.add_argument("--variants", default=",".join(VARIANTS),
-                        help="comma-separated variant subset (prepare only; default all)")
+    parser.add_argument("--variants", default=",".join(v for v in VARIANTS if v not in ABLATION_VARIANTS),
+                        help="comma-separated variant subset (prepare only; default: the seven original "
+                             "variants; fc_pq_hn and fc_pq_h8 must be named)")
     parser.add_argument("--probe-seconds", type=float, default=10.0)
+    parser.add_argument("--clients", type=lambda v: [int(c) for c in v.split(",")], default=None,
+                        help="restrict the client sweep (prepare only), e.g. 8 or 1,2,4,8")
+    parser.add_argument("--cohorts", default=None,
+                        help="comma-separated cohort subset (prepare only; default = the kind's cohorts)")
+    parser.add_argument("--durabilities", default=None,
+                        help="comma-separated durability subset (prepare only; default = the kind's)")
+    parser.add_argument("--stats-binary", action="store_true",
+                        help="prepare only: run the delegated variants on the combiner_pass_stat build")
     args = parser.parse_args()
     setup = getattr(args, "power_setup", None)
     if args.check_power or args.sustain_probe:
@@ -1119,7 +1248,14 @@ def main():
         variants = [v for v in args.variants.split(",") if v]
         if not variants or any(v not in VARIANTS for v in variants) or len(set(variants)) != len(variants):
             raise RuntimeError(f"--variants must be distinct names from {VARIANTS}")
-        prepare(root, args.build_dir.resolve(), cpus, numa_node, setup, args.fixed_ghz, variants)
+        subset = {"clients": args.clients,
+                  "cohorts": [c for c in args.cohorts.split(",") if c] if args.cohorts else None,
+                  "durabilities": [d for d in args.durabilities.split(",") if d] if args.durabilities else None}
+        if any(c not in ORDER_COHORTS for c in subset["cohorts"] or []) or any(
+                d not in DURABILITIES for d in subset["durabilities"] or []):
+            raise RuntimeError(f"--cohorts from {ORDER_COHORTS}, --durabilities from {DURABILITIES}")
+        prepare(root, args.build_dir.resolve(), cpus, numa_node, setup, args.fixed_ghz, variants,
+                subset if any(subset.values()) else None, args.stats_binary)
     elif args.smoke or args.run or args.perf:
         identity = load_identity(root)
         if args.cpus is not None and list(args.cpus) != identity["cpus"]:

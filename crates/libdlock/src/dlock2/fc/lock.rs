@@ -12,6 +12,8 @@ use crossbeam::utils::{Backoff, CachePadded};
 use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
+#[cfg(any(test, feature = "combiner_pass_stat"))]
+use crate::dlock2::pass_stat::{PassRecorder, PassStats};
 use crate::dlock2::{DLock2, DLock2Delegate};
 
 use super::node::Node;
@@ -32,6 +34,9 @@ where
     data: SyncUnsafeCell<T>,
     head: AtomicPtr<Node<I>>,
     local_node: ThreadLocal<SyncUnsafeCell<Node<I>>>,
+    /// Combiner-only pass counters (stats build and unit tests only).
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    pass_stats: SyncUnsafeCell<PassRecorder>,
 }
 
 impl<T, I, F, L> FC<T, I, F, L>
@@ -49,7 +54,22 @@ where
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
+            #[cfg(any(test, feature = "combiner_pass_stat"))]
+            pass_stats: SyncUnsafeCell::new(PassRecorder::new()),
         }
+    }
+
+    /// Snapshot of the pass counters (one sweep of the active list = one pass,
+    /// no cap), taken under the combiner lock, so it is consistent even while
+    /// other threads are combining (it waits for the current pass). Must not be
+    /// called from inside a delegate, which already holds the lock.
+    #[cfg(any(test, feature = "combiner_pass_stat"))]
+    pub fn pass_stats(&self) -> PassStats {
+        self.combiner_lock.lock();
+        // SAFETY: the combiner lock is held; it is released just below.
+        let stats = unsafe { (*self.pass_stats.get()).snapshot() };
+        unsafe { self.combiner_lock.unlock() };
+        stats
     }
 
     fn push_node(&self, node: &Node<I>) {
@@ -94,6 +114,9 @@ where
             begin = __rdtscp(&mut aux);
         }
 
+        #[cfg(any(test, feature = "combiner_pass_stat"))]
+        let mut bodies = 0_usize;
+
         while let Some(current_nonnull) = current_ptr {
             // SAFETY: ThreadLocal nodes remain at stable addresses until this lock
             // is dropped, after all lock() calls have returned. Only atomics and
@@ -114,9 +137,21 @@ where
                 }
 
                 current.complete.store(true, Release);
+                #[cfg(any(test, feature = "combiner_pass_stat"))]
+                {
+                    bodies += 1;
+                }
             }
 
             current_ptr = NonNull::new(current.next.load(Acquire));
+        }
+
+        // SAFETY: the combiner-lock holder is the only writer. The combiner
+        // identity is the address of the calling thread's ThreadLocal node.
+        #[cfg(any(test, feature = "combiner_pass_stat"))]
+        unsafe {
+            let combiner = self.local_node.get().map_or(1, |node| node.get() as usize);
+            (*self.pass_stats.get()).record(combiner, bodies, usize::MAX);
         }
 
         #[cfg(feature = "combiner_stat")]
@@ -225,5 +260,42 @@ where
                 .get()
                 .map(|x| *(*x.get()).combiner_time_stat.get())
         }
+    }
+}
+
+#[cfg(test)]
+mod pass_stat_tests {
+    use std::thread;
+
+    use super::*;
+    use crate::spin_lock::RawSpinLock;
+
+    type Add = fn(&mut u64, u64) -> u64;
+
+    fn add(counter: &mut u64, input: u64) -> u64 {
+        *counter += input;
+        *counter
+    }
+
+    #[test]
+    fn every_request_is_one_body_in_some_pass() {
+        const THREADS: u64 = 4;
+        const REQUESTS: u64 = if cfg!(miri) { 8 } else { 500 };
+        let lock = FC::<u64, u64, Add, RawSpinLock>::new(0, add);
+        thread::scope(|scope| {
+            for _ in 0..THREADS {
+                scope.spawn(|| {
+                    for _ in 0..REQUESTS {
+                        lock.lock(1);
+                    }
+                });
+            }
+        });
+        let stats = lock.pass_stats();
+        assert_eq!(stats.bodies, THREADS * REQUESTS);
+        assert_eq!(stats.cap_violations, 0);
+        // One sweep serves each active node at most once.
+        assert!(stats.max_bodies <= THREADS, "{stats:?}");
+        assert_eq!(stats.bodies_hist.iter().sum::<u64>(), stats.passes);
     }
 }
