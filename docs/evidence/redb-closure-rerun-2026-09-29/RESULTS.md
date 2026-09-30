@@ -20,7 +20,7 @@ copied here:
 
 Old roots used for the comparison (in `.worktree/jj/redb-internal/.worktree/`):
 `redb-smoke-01` (S0, 336 cells), `redb-formal-03-fixed3g` (S1 3.0 GHz, 360
-cells, five variants: no `refactored`/`bridge_mutex`), `redb-perf-03-fixed3g`
+cells, five variants: no `upstream_gate`/`std_mutex`), `redb-perf-03-fixed3g`
 (S1 3.0 GHz, 168 cells). Their readings are in redb-internal's
 `plan/2026-09-28/redb-internal-rerun.md` and `redb-perf-02-clock.md`.
 
@@ -40,7 +40,7 @@ cells, five variants: no `refactored`/`bridge_mutex`), `redb-perf-03-fixed3g`
 - Patched tree `a153400c3ca27f82e55f10809fe6c2841fd30e15b70ce82380cbcdbcbcd9d37a`
 - `0001-delegated-writer-admission.patch` `639675b3dc580b7e3a609869ed1e53928c2aa3b7208605c7e24525cc855e99e6`
 - `0002-closure-write-body.patch` `590f2cd3a4c03f7da9cbe4fc58d34cc600241bdba9dbe3aad23e8ac51eaadae0`
-- Binaries: `redb-native` `7ada9a3737d068c7218a51ae3bff8e5d6c7e209a6dd709a3e3bd4e636db9dcda`,
+- Binaries: `redb-upstream` `7ada9a3737d068c7218a51ae3bff8e5d6c7e209a6dd709a3e3bd4e636db9dcda`,
   `redb-patched` `555824bc92b79985feb8130d0c6eebe6c6914c1d527e148dacdf2cf58b47163b`,
   `redb-test_hooks` `bfd3694cb73cc2f1c8724b78d6e5254bcbef3905fc84a2a21dc8a5c586c1f003`
   (instrumented; patched with `fcpq_fast_path`, `fcpq_fast_path_stat`).
@@ -84,7 +84,7 @@ records/s, CPU-s, clock and tx/s @ref are in `analysis/summary.md`.
 
 ### tx/s, None
 
-| cohort | c | native | refactored | bridge_mutex | mcs | uscl | fc | fc_pq |
+| cohort | c | upstream | upstream_gate | std_mutex | mcs | uscl | fc | fc_pq |
 |---|---|---|---|---|---|---|---|---|
 | all1 | 1 | 30332 (1%) | 30402 (1%) | 30503 (0%) | 30548 (1%) | 30538 (0%) | 30481 (1%) | 30654 (0%) |
 | all1 | 2 | 29264 (1%) | 29244 (1%) | 29158 (1%) | 25546 (1%) | 29200 (1%) | 29600 (1%) | 29398 (1%) |
@@ -101,19 +101,19 @@ records/s, CPU-s, clock and tx/s @ref are in `analysis/summary.md`.
 
 `half1_half64` records/s, None (the half cohorts' work metric):
 
-| c | native | refactored | bridge_mutex | mcs | uscl | fc | fc_pq |
+| c | upstream | upstream_gate | std_mutex | mcs | uscl | fc | fc_pq |
 |---|---|---|---|---|---|---|---|
 | 2 | 212812 | 86718 | 648438 | 449410 | 345908 | 484910 | 421864 |
 | 4 | 653312 | 655200 | 600752 | 431957 | 336376 | 465440 | 347794 |
 | 8 | 29312 | 588205 | 534865 | 423248 | 323352 | 451234 | 412182 |
 
-The Mutex/Condvar controls (native, refactored, bridge_mutex) let one client
+The Mutex/Condvar controls (upstream, upstream_gate, std_mutex) let one client
 take the write path for long runs, so in the half cohorts their tx/s and
 records/s depend on which request size wins (repeat ranges up to 184 %).
 
 ### tx/s, Immediate (control)
 
-| cohort | c | native | refactored | bridge_mutex | mcs | uscl | fc | fc_pq |
+| cohort | c | upstream | upstream_gate | std_mutex | mcs | uscl | fc | fc_pq |
 |---|---|---|---|---|---|---|---|---|
 | all1 | 1 | 14543 (42%) | 14595 (1%) | 14566 (4%) | 14598 (38%) | 14575 (11%) | 14668 (8%) | 14610 (34%) |
 | all1 | 2 | 14480 (0%) | 14406 (5%) | 14414 (1%) | 12606 (35%) | 14580 (2%) | 14029 (20%) | 14595 (1%) |
@@ -132,7 +132,7 @@ records/s depend on which request size wins (repeat ranges up to 184 %).
 
 `service_jain` (1-client cells are 1 by definition):
 
-| durability | cohort | c | native | refactored | bridge_mutex | mcs | uscl | fc | fc_pq |
+| durability | cohort | c | upstream | upstream_gate | std_mutex | mcs | uscl | fc | fc_pq |
 |---|---|---|---|---|---|---|---|---|---|
 | none | all1 | 2 | 0.500 | 0.986 | 0.830 | 1.000 | 1.000 | 1.000 | 1.000 |
 | none | all1 | 4 | 0.545 | 0.501 | 0.762 | 1.000 | 1.000 | 0.998 | 0.994 |
@@ -156,7 +156,7 @@ records/s depend on which request size wins (repeat ranges up to 184 %).
 (equal counts, unequal service). FC-PQ fast-path hit rate: 1.000 at 1 client,
 0.163 (`all1`) / 0.222 (`half1_half64`) at 2, 0.000 at 4-8.
 
-### refactored_vs_native (formal)
+### upstream_gate_vs_upstream (formal)
 
 | durability | cohort | c | ratio | noise | verdict |
 |---|---|---|---|---|---|
@@ -195,21 +195,21 @@ overhead.
 
 The smoke's insert cells repeat the formal pattern: `all1` None c1 30.4-30.7k
 tx/s for all seven variants, and the same fairness order. Its
-`refactored_vs_native` is 0.996-1.005 in every None `all1`/`transfer` cell and
+`upstream_gate_vs_upstream` is 0.996-1.005 in every None `all1`/`transfer` cell and
 in 1-client `half1_half64`. The one outside-noise value is None `half1_half64`
 c4 (1.704 against a 0.593 range), a Mutex/Condvar winner effect. **Transfer**
 (new, no old counterpart), committed tx/s, None, c 1/2/4/8:
 
 | variant | 1 | 2 | 4 | 8 |
 |---|---|---|---|---|
-| native | 29738 | 28472 | 28446 | 28672 |
+| upstream | 29738 | 28472 | 28446 | 28672 |
 | mcs | 30078 | 24508 | 23174 | 22488 |
 | uscl | 29873 | 28502 | 27660 | 26964 |
 | fc | 29829 | 29018 | 27630 | 26569 |
 | fc_pq | 29882 | 28912 | 27324 | 28024 |
 
 Transfer `service_jain` is ≥ 0.997 for MCS/U-SCL/FC/FC-PQ at every count, and
-0.36-0.37 (native/refactored) and 0.60 (bridge_mutex) at 8 clients. Aborted
+0.36-0.37 (upstream/upstream_gate) and 0.60 (std_mutex) at 8 clients. Aborted
 transfers are not charged service (README, Known limits).
 
 ### Perf cohort (168 cells, None)
@@ -225,30 +225,30 @@ with the clock table are in `analysis-perf/summary.md`.
 At the same placement, power setup (S1 3.0 GHz), kernel and rustc,
 `new/old` median tx/s per cell (formal vs formal-03; perf vs perf-03):
 
-- **Every variant is slower in absolute terms, native included.** `all1` None:
-  native 0.937-0.944, patched variants 0.909-0.930 (formal). In the perf cohort
-  every one of the 28 `all1` cells has ranges disjoint from perf-03 (native
-  0.936-0.944, patched 0.906-0.928). `half1_half64` c1: native 1.01, patched
+- **Every variant is slower in absolute terms, upstream included.** `all1` None:
+  upstream 0.937-0.944, patched variants 0.909-0.930 (formal). In the perf cohort
+  every one of the 28 `all1` cells has ranges disjoint from perf-03 (upstream
+  0.936-0.944, patched 0.906-0.928). `half1_half64` c1: upstream 1.01, patched
   0.95.
-  User-mode instructions/tx **fell** (c1 `all1`: native 221.5k → 209.7k,
-  patched ≈214.5k → ≈209.2k), and so did cycles/tx (native 84.6k → 79.9k,
+  User-mode instructions/tx **fell** (c1 `all1`: upstream 221.5k → 209.7k,
+  patched ≈214.5k → ≈209.2k), and so did cycles/tx (upstream 84.6k → 79.9k,
   patched ≈82k → ≈79.8k). The lost wall time is therefore outside user mode or
   outside the counted span [INFERENCE]. Kernel, filesystem, NUMA policy,
   rustc and clock match, so the cause is **unattributed**. The possibilities
-  are the harness/LTO change (native was rebuilt too) and host drift since
+  are the harness/LTO change (upstream was rebuilt too) and host drift since
   2026-09-29 early morning. An interleaved A/B of `redb-build-04` against
   `redb-build-06` binaries would separate them; it was not run.
 
 ### Conclusions that changed
 
 1. **Patched vs upstream when uncontended: "a few percent faster" → parity.**
-   Old: refactored/native 1.024 (`all1`) and 1.064 (`half1_half64`, outside
+   Old: upstream_gate/upstream 1.024 (`all1`) and 1.064 (`half1_half64`, outside
    noise) at 1 client (smoke-01), and in formal-03 the delegated variants led
-   native by +4.4 % (`all1` c1: 33.5k vs 32.1k) and +5-7 % (`half1_half64` c1).
-   Now refactored/native is 0.998-1.006 in every None 1-client cell, and the
-   delegated variants are within +0.5-1.1 % of native. The native harness now
+   upstream by +4.4 % (`all1` c1: 33.5k vs 32.1k) and +5-7 % (`half1_half64` c1).
+   Now upstream_gate/upstream is 0.998-1.006 in every None 1-client cell, and the
+   delegated variants are within +0.5-1.1 % of upstream. The upstream harness now
    executes the same instructions/tx as patched (209.7k vs 209.2k; before,
-   native ran 3.3 % more). This matches the README's reason for thin LTO.
+   upstream ran 3.3 % more). This matches the README's reason for thin LTO.
 2. **Absolute throughput at 3.0 GHz is 6-9 % lower** (above; unattributed).
    Absolute numbers from redb-internal must not be quoted for this build.
 3. **FC-PQ vs U-SCL records/s, `half1_half64` None, 4 clients: 0.92 → 1.03.**
@@ -267,7 +267,7 @@ At the same placement, power setup (S1 3.0 GHz), kernel and rustc,
    that under S1 with the new build.
 6. **New baseline counter residue at 1 client:** HITM-supplied lines/tx 0.1 →
    ≈8 (`all1`) and 0.3 → ≈6.6 (`half1_half64`), and LLC misses/tx 0.2 → 0.6-0.8
-   (`all1`), for every variant including native. The lock-dependent pattern
+   (`all1`), for every variant including upstream. The lock-dependent pattern
    (MCS ≫ FC > FC-PQ ≫ Mutex/Condvar, U-SCL) is unchanged. The new constant is
    unattributed (the clock sampler also ran in perf-03, so it is not the
    difference).
@@ -289,7 +289,7 @@ At the same placement, power setup (S1 3.0 GHz), kernel and rustc,
   grows with clients, FC-PQ stays flat and low, and the controls and U-SCL are near
   zero. Values are within ≈10 % of perf-03.
 - The Mutex/Condvar controls stay unfair (`service_jain` down to ≈1/c) and
-  noisy in the half cohorts; beyond 1 client `refactored_vs_native` carries no
+  noisy in the half cohorts; beyond 1 client `upstream_gate_vs_upstream` carries no
   build-overhead information.
 
 ## Caveats
@@ -297,7 +297,7 @@ At the same placement, power setup (S1 3.0 GHz), kernel and rustc,
 - Three repetitions; ranges are not confidence intervals. 10.7-23.8 % of cells
   are clock off-target (all counted in the tables; `*_not_flagged` fields in
   `summary.json` exclude them).
-- formal-03 had no `refactored`/`bridge_mutex`; their new/old comparison uses
+- formal-03 had no `upstream_gate`/`std_mutex`; their new/old comparison uses
   smoke-01 (S0) and perf-03 only.
 - `build.json` git fields describe the default workspace, not this source (see
   Build and provenance).

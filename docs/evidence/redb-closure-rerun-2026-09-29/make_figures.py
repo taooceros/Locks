@@ -16,7 +16,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 OUT = pathlib.Path(__file__).parent
-VARIANTS = ["native", "refactored", "bridge_mutex", "mcs", "uscl", "fc", "fc_pq"]
+VARIANTS = ["upstream", "upstream_gate", "std_mutex", "mcs", "uscl", "fc", "fc_pq"]
+# Legacy names: results recorded before the 2026-09-29 rename use these; the loader maps them.
+LEGACY_NAMES = {"native": "upstream", "refactored": "upstream_gate", "bridge_mutex": "std_mutex"}
 CLIENTS = [1, 2, 4, 8]
 METRICS = ["throughput_tx_s", "throughput_records_s", "service_jain", "long_service_share"]
 
@@ -27,7 +29,8 @@ def main(summary_path):
     for r in rows:
         for m in METRICS:
             if r.get(m) is not None:
-                groups[(m, r["cohort"], r["durability"], r["variant"], r["clients"])].append(r[m])
+                variant = LEGACY_NAMES.get(r["variant"], r["variant"])
+                groups[(m, r["cohort"], r["durability"], variant, r["clients"])].append(r[m])
     medians = {"|".join(map(str, k)): statistics.median(v) for k, v in groups.items()}
     (OUT / "medians.json").write_text(json.dumps(medians, indent=0, sort_keys=True))
 

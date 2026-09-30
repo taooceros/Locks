@@ -233,7 +233,7 @@ fn contents(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value>
         }
     }
     ensure_increasing(&ids)?;
-    if variant != Variant::Native {
+    if variant != Variant::Upstream {
         let ids: Vec<u64> = ids.iter().flatten().copied().collect();
         ensure!(
             ids.windows(2).all(|p| p[1] == p[0] + 1),
@@ -373,7 +373,7 @@ fn stress(
         "no read transaction completed while writers were active"
     );
     let mut id_check = "not exposed by upstream redb";
-    if variant != Variant::Native {
+    if variant != Variant::Upstream {
         for ids in &worker_ids {
             ensure_increasing(ids)?;
         }
@@ -564,18 +564,18 @@ fn errors(db: Database, path: &PathBuf, variant: Variant) -> TestResult<Value> {
     Ok(json!({"checks": checks, "records": expected.len(), "reopened_exact": true}))
 }
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 fn errors_gated(_: &Database, _: &mut BTreeMap<u64, u64>) -> TestResult {
-    unreachable!("native has no gate")
+    unreachable!("upstream has no gate")
 }
 
 #[cfg(feature = "patched")]
 fn errors_gated(db: &Database, expected: &mut BTreeMap<u64, u64>) -> TestResult {
-    use redb::dlock_private::{execute_native, DelegatedWriteError, DelegatedWriteGate};
+    use redb::dlock_private::{execute_upstream_gate, DelegatedWriteError, DelegatedWriteGate};
     let one = |k: u64| [(k, value(SEED, k))];
     let tracker_write = |k: u64| -> TestResult<u64> {
         let records = one(k);
-        let (id, ()) = execute_native(db, insert_body(&records, Durability::Immediate))
+        let (id, ()) = execute_upstream_gate(db, insert_body(&records, Durability::Immediate))
             .map_err(|e| e.to_string())?;
         Ok(id)
     };

@@ -3,7 +3,7 @@
 This experiment patches redb 3.1.0 so that a lock (Mutex, MCS, U-SCL, FC,
 FC-PQ) **is** redb's write-serialisation mechanism, following the UpScaleDB
 pattern in [../upscaledb/](../upscaledb/README.md): one extracted write body,
-native/refactored/bridge controls, a pinned source with numbered patches, a
+`upstream`/`upstream_gate`/`std_mutex` controls, a pinned source with numbered patches, a
 real-database correctness gate and the existing fresh-process runner. Fairness
 is measured as **service-time share** (Jain over per-client time inside the
 write body), next to the transaction-count Jain.
@@ -62,14 +62,14 @@ begin (`Begin`), a failed abort after `Err` (`AbortFailed`) and a call the
 bridge never ran (`NotExecuted`). Upstream redb code performs the storage,
 B-tree, allocator and commit work unchanged; only the writer admission differs:
 
-- **refactored**: `dlock_private::execute_native` runs the body; its begin step
+- **upstream_gate**: `dlock_private::execute_upstream_gate` runs the body; its begin step
   is the unchanged public `begin_write`, i.e. redb's original tracker
   `Mutex<State>` + `live_write_transaction_available` Condvar, on the caller.
-- **delegated** (`bridge_mutex`, `mcs`, `uscl`, `fc`, `fc_pq`): `DelegatedWriteGate::execute`
+- **delegated** (`std_mutex`, `mcs`, `uscl`, `fc`, `fc_pq`): `DelegatedWriteGate::execute`
   hands the *same* body to the lock through a synchronous submit closure. Mutex,
   MCS and U-SCL run it on the requesting thread; FC and FC-PQ may run it on a
   combiner.
-- **native** (upstream crates.io redb): the harness runs the same closure with
+- **upstream** (upstream crates.io redb): the harness runs the same closure with
   the same begin → closure → commit/abort (and panic) sequence.
 
 The harness workloads are closures shared by every variant (`src/writer.rs`):
@@ -107,11 +107,11 @@ exactly as upstream.
   combiner never unwinds and the lock stays usable. On FC/FC-PQ the default panic
   hook prints the message on the combiner's thread. Any other panic in a
   delegated body (begin, commit, abort, the one-writer assertion, the bridge,
-  the lock) aborts the process. `refactored` and native follow the same
+  the lock) aborts the process. `upstream_gate` and `upstream` follow the same
   catch → abort → resume sequence for closure panics; a redb-internal panic there
   unwinds on the caller as upstream.
 - **Documented, not enforced.** No `begin_write` inside a closure (it waits on
-  the gate forever, or on itself for `refactored`/native, as a second upstream
+  the gate forever, or on itself for `upstream_gate`/`upstream`, as a second upstream
   `begin_write` would). No nested submission: the bridge's thread-local depth
   guard refuses it and the inner call returns `NotExecuted` (also on a combiner).
   No waiting on other threads' progress (it stalls the lock, and on FC/FC-PQ the
@@ -139,14 +139,14 @@ threads.
 ## What is patched
 
 `build.py` verifies the crates.io archive `redb-3.1.0.crate` against its pinned
-SHA-256 (the same checksum `Cargo.lock` locks for the native build), extracts it,
+SHA-256 (the same checksum `Cargo.lock` locks for the upstream build), extracts it,
 applies these patches in order and places the result at the fixed Cargo path
 dependency `.worktree/redb-src/redb-3.1.0` (generated, ignored):
 
 | Patch | Files | Change |
 |---|---|---|
 | `patches/0001-delegated-writer-admission.patch` | `transaction_tracker.rs`, `db.rs`, `transactions.rs` | Delegated mode (enter/exit), delegated start/end writer slot with assertion, delegated `TransactionGuard`, `Database::begin_delegated_write` (a copy of `begin_write` with delegated admission), transaction-ID accessor |
-| `patches/0002-closure-write-body.patch` | new `dlock_private.rs`, `lib.rs`, `Cargo.toml` | The closure body (`write_body`), `execute_native`, `DelegatedWriteGate`, `DelegatedCall`/`RawDelegatedCall`, `DelegatedWriteError`, the body's service-time span (`Served`, returned by `execute_native_served` and `DelegatedWriteGate::execute_served`; feature `dlock_service_time`), and the `dlock_test_hooks` feature (correctness probes only: occupancy, pause before commit, a panic outside the closure, the executed service total) |
+| `patches/0002-closure-write-body.patch` | new `dlock_private.rs`, `lib.rs`, `Cargo.toml` | The closure body (`write_body`), `execute_upstream_gate`, `DelegatedWriteGate`, `DelegatedCall`/`RawDelegatedCall`, `DelegatedWriteError`, the body's service-time span (`Served`, returned by `execute_upstream_gate_served` and `DelegatedWriteGate::execute_served`; feature `dlock_service_time`), and the `dlock_test_hooks` feature (correctness probes only: occupancy, pause before commit, a panic outside the closure, the executed service total) |
 
 To change a patch, apply the pinned crate plus the patches in a scratch git tree
 under `.worktree/`, edit there, and re-export each patch with `git diff`
@@ -166,9 +166,9 @@ application stops the build.
 
 | Variant | Binary | Write serialisation |
 |---|---|---|
-| `native` | `redb-native` | Upstream crates.io redb, untouched; the harness runs the same closure sequence on public `begin_write`/`commit` |
-| `refactored` | `redb-patched` | Shared closure body under redb's original Mutex/Condvar |
-| `bridge_mutex` | `redb-patched` | Shared body via the bridge, `std::sync::Mutex` (redb's primitive type; the tracker's own mutex cannot be borrowed because commit re-enters it) |
+| `upstream` | `redb-upstream` | Upstream crates.io redb, untouched; the harness runs the same closure sequence on public `begin_write`/`commit` |
+| `upstream_gate` | `redb-patched` | Shared closure body under redb's original Mutex/Condvar writer gate (`begin_write`) |
+| `std_mutex` | `redb-patched` | Shared body via the bridge, `std::sync::Mutex` (redb's primitive type; the tracker's own mutex cannot be borrowed because commit re-enters it) |
 | `mcs` | `redb-patched` | Shared body via the bridge, libdlock MCS, on the requester |
 | `uscl` | `redb-patched` | Shared body via the bridge, U-SCL (`c/u-scl` fairlock in bridge mode, equal weights), on the requester |
 | `fc` | `redb-patched` | Shared body via the bridge, libdlock FC, possibly on a combiner |
@@ -194,7 +194,7 @@ address, is initialised in bridge mode, every thread registers once with weight
 joined. Its waiting is upstream U-SCL's own (futex queue hand-off, `nanosleep`
 while banned, `sched_yield` after 20 spins), and its slice is
 `FAIRLOCK_GRANULARITY` (2 × 2400 × 1000 cycles, ≈ 2.2 ms at this host's 2.2 GHz
-TSC). MCS, FC and FC-PQ waiters spin; `native`, `refactored` and `bridge_mutex`
+TSC). MCS, FC and FC-PQ waiters spin; `upstream`, `upstream_gate` and `std_mutex`
 block on redb's Mutex/Condvar or `std::sync::Mutex` (futex).
 
 ## Service time and fairness metrics
@@ -202,10 +202,10 @@ block on redb's Mutex/Condvar or `std::sync::Mutex` (futex).
 The closure body `write_body` reads the TSC with `rdtscp` once `begin` has
 returned (admission is complete) and again once commit or abort has returned,
 **on whichever thread runs it**: the combiner for FC/FC-PQ, the requester for
-refactored, Mutex, MCS and U-SCL. The difference travels back with the outcome
-(`Served::service_tsc`, from `execute_native_served`/`execute_served`;
-`execute`/`execute_native` are unchanged) to the requester, which is charged.
-`native` measures the identical span around the same public-API calls in the
+upstream_gate, std_mutex, MCS and U-SCL. The difference travels back with the outcome
+(`Served::service_tsc`, from `execute_upstream_gate_served`/`execute_served`;
+`execute`/`execute_upstream_gate` are unchanged) to the requester, which is charged.
+`upstream` measures the identical span around the same public-API calls in the
 harness. The span therefore excludes every admission wait, the bridge and lock
 code, and `WriteTransaction` construction inside `begin`, for all seven variants
 alike; it includes the closure and commit I/O. A panicked closure is not charged
@@ -391,7 +391,7 @@ committed + aborted fill the ID range). Every reopen also runs redb's
 `check_integrity`, which fails if an aborted or panicked transaction leaked pages
 (a negative control that dropped the transaction while panicking, as redb's
 `Drop` does, passed the content checks but failed this one). FC/FC-PQ closures
-must be observed on a combiner and Mutex/MCS/U-SCL/refactored/native never.
+must be observed on a combiner and std_mutex/MCS/U-SCL/upstream_gate/upstream never.
 Service charging is checked in the insert stress cases (`stress-*`): each
 committed body is charged nonzero service to its requester, the charged total
 never exceeds the stress phase's wall ticks (bodies serialised, nothing
@@ -419,7 +419,7 @@ flock --shared "$MEASUREMENT_LOCK" python3 -m integration.redb.run --analyze-smo
 ```
 
 Preparation re-verifies `build.json` (instrumented, FC-PQ with
-`fcpq_fast_path`), snapshots `redb-native`/`redb-patched`, and freezes
+`fcpq_fast_path`), snapshots `redb-upstream`/`redb-patched`, and freezes
 source/patch/binary hashes and features, the client sweep, CPU topology rows,
 the `numactl --show` policy and filesystem. Smoke runs 504 timed 2-second cells
 (seven variants × {`all1`, `half1_half64`, `transfer`} × clients {1, 2, 4, 8} ×
@@ -429,7 +429,7 @@ verification and close/reopen; ≈ 18 min at the 2.16 s per cell of the
 redb-internal smoke (336 cells in 12 min, 2026-09-28). Its analysis
 (`analysis-smoke/summary.json`, plus `summary.md` and `throughput.png`) lists
 `None` first and includes `table` (median [min, max] per durability × cohort ×
-clients × variant) and `refactored_vs_native`: per durability, cohort and client
+clients × variant) and `upstream_gate_vs_upstream`: per durability, cohort and client
 count, the median tx/s ratio against the larger relative repeat range of the two
 variants. Transfer tx/s counts committed transfers; insufficient-balance aborts
 are reported separately (`aborted_transactions`, `aborted_fraction`). Smoke is a
@@ -474,11 +474,11 @@ million records per worker and a 512 MiB database file.
 - A panic raised inside a redb call while redb holds one of its internal mutexes
   (e.g. a user `Value` impl during `open_table`/commit paths) can poison it; the
   following abort may then panic, which aborts the process on the delegated path
-  (and unwinds on the caller for `refactored`/native). Not exercised by the gate.
+  (and unwinds on the caller for `upstream_gate`/`upstream`). Not exercised by the gate.
 - **Codegen parity.** The insert closure is monomorphised in the harness crate
-  (as for `native`), not inside redb as the former fixed body was. Without
+  (as for `upstream`), not inside redb as the former fixed body was. Without
   cross-crate LTO this measured 2-4% fewer tx/s for the patched variants than the
-  fixed-body build on stable cells (native unchanged), so `Cargo.toml` sets
+  fixed-body build on stable cells (upstream unchanged), so `Cargo.toml` sets
   `lto = "thin"` for every binary; with thin LTO on both builds the six variants
   compared (before `uscl` was added) match (all1/None interleaved A/B, 5 pairs:
   1.001-1.004; fat LTO with one codegen unit: 0.997-1.004). Compare builds only
