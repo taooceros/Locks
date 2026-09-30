@@ -42,6 +42,15 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     perf cohort, power setups) ported onto the closure body
   - Status: gate, upstream tests and smoke pass; parity note (LTO) in the plan outcome
 
+### redb client scalability > 8 and reader/writer interaction (2026-09-29)
+
+- [redb scale and readers](./2026-09-29/redb-scale-and-readers.md)
+  - Status: done (workspace `redb-scale-rw`, branch `experiment/redb-scale-rw`):
+    1-64 writer clients (socket boundary at 32), 0-16 concurrent readers outside the
+    write lock, perf cohorts at W=32/64 and W=8,R=16; 540 cells, gate 146/146,
+    results in `docs/evidence/redb-scale-rw-2026-09-29/`
+  - Scope: `integration/redb/**`, `docs/evidence/redb-scale-rw-2026-09-29/`
+
 ### Theoretical analysis (formal version of the thesis)
 
 - [Publication Analysis Plan](./2026-09-23/logp-publication-analysis.md)
@@ -70,6 +79,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     (2026-09-23) is superseded by the publication analysis above
 
 ## By Date
+- 2026-09-29: [redb scale and readers](./2026-09-29/redb-scale-and-readers.md)
 - 2026-09-29: [redb closure write API](./2026-09-29/redb-closure-write-api.md)
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 

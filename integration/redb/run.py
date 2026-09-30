@@ -118,7 +118,7 @@ POWER_SETUPS = ("S0", "S1", "S2")
 DEFAULT_FIXED_GHZ = 3.0
 CLOCK_TOLERANCE = 0.02  # S1/S2: a cell's clock must be within +-2 % of F
 CPU_SYS = Path("/sys/devices/system/cpu")
-MAX_CLIENTS = 8  # the trial binary's worker limit
+MAX_CLIENTS = 64  # the trial binary's worker limit (the sweep here stays 1-8; see scale_rw.py for 1-64)
 MAX_RECORDS_PER_WORKER = 8_000_000
 MAX_RECORDS = MAX_CLIENTS * MAX_RECORDS_PER_WORKER
 

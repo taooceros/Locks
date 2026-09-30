@@ -31,6 +31,16 @@ back. Per variant (primary binary):
                   every reader snapshot conserves the total, final/reopened totals
                   conserved, log rows == committed transfers (no double run),
                   ID-order replay equals the final balances, aborts consume IDs
+trial-*         (primary binary, the timed trial harness itself under taskset, fresh DB)
+                  trial-wide-none / trial-wide-immediate: 64 / 40 writers across both
+                  sockets (more than the former 8-worker cap), fixed transaction counts:
+                  every writer committed exactly its count, exact contents live and after
+                  close/reopen (both durabilities, None included)
+                  trial-readers-*: reader threads running read transactions concurrently
+                  with the writers (8, 16 and 4 readers; 2 s timed for the first two):
+                  zero missing/wrong keys, every reader completed transactions, and in the
+                  timed cells every reader saw the table grow (reads happened during
+                  writes); the writers' contents and reopen checks still run
 Patched variants additionally run the test_hooks binary:
   stress-*, transfer-*, closure-panic
                   plus in-body occupancy assertion (max 1) and bridge-level combiner
@@ -58,6 +68,13 @@ PRIMARY_CASES = (('contents', ()), ('errors', ()), ('savepoints', ()), *STRESS,
                  ('closure-error', ()), ('closure-panic', ()), ('read-own-writes', ()), *TRANSFER)
 HOOK_CASES = (*STRESS, *TRANSFER, ('closure-panic', ()), ('paused-writer', ()))
 TIMEOUT_SECONDS = 180
+TRIAL_TIMEOUT_SECONDS = 120
+# (name, writers, readers, cohort, durability, per-writer transactions or None for a 2 s timed cell)
+TRIAL_CASES = (('trial-wide-none', 64, 0, 'all1', 'none', 60),
+               ('trial-wide-immediate', 40, 0, 'half1_half64', 'immediate', 8),
+               ('trial-readers-none', 16, 8, 'all1', 'none', None),
+               ('trial-readers-wide-none', 32, 16, 'half1_half64', 'none', None),
+               ('trial-readers-immediate', 8, 4, 'all1', 'immediate', 30))
 
 
 def case_name(case, extra):
@@ -91,6 +108,71 @@ def run_case(binary, binary_name, variant, case, extra, directory, failstop=Fals
     return ok, record
 
 
+def run_trial_case(binary, binary_name, variant, case, directory):
+    """One trial-harness cell (see TRIAL_CASES); writers on CPUs 0..W-1, readers on W..W+R-1."""
+    name, writers, readers, cohort, durability, transactions = case
+    cell = directory / f'{variant}-{binary_name}-{name}'
+    cell.mkdir(parents=True)
+    database = cell / 'db.redb'
+    cpus = list(range(writers))
+    reader_cpus = list(range(writers, writers + readers))
+    all_cpus = ','.join(map(str, cpus + reader_cpus))
+    command = ['taskset', '-c', all_cpus, str(binary), '--database', str(database), '--variant', variant,
+               '--cohort', cohort, '--durability', durability, '--seed', '4919', '--duration-ms', '2000',
+               '--cpus', ','.join(map(str, cpus))]
+    if reader_cpus:
+        command += ['--reader-cpus', ','.join(map(str, reader_cpus))]
+    if transactions is not None:
+        command += ['--smoke-transactions', str(transactions)]
+    record = capture_command(command, TRIAL_TIMEOUT_SECONDS, cwd=ROOT,
+                             metadata={'variant': variant, 'binary': binary_name, 'case': name})
+    ok, details = record['returncode'] == 0 and not record['timeout'], {}
+    if ok:
+        try:
+            result = json.loads(record['stdout'])
+            problems = trial_problems(result, variant, cohort, durability, cpus, reader_cpus, transactions)
+            ok = not problems
+            details = {'writers': writers, 'readers': readers, 'problems': problems,
+                       'committed': sum(w['completed_transactions'] for w in result['workers']),
+                       'verified_live_records': result['verified_live_records'],
+                       'reader_txns': [r['read_txns'] for r in result['readers']],
+                       'reader_snapshot_len': [[r['snapshot_len_min'], r['snapshot_len_max']]
+                                               for r in result['readers']]}
+        except (ValueError, KeyError) as error:
+            ok, record['parse_error'] = False, repr(error)
+    record['passed'], record['result'] = ok, {'details': details}
+    (cell / 'record.json').write_text(json.dumps(record, indent=2) + '\n')
+    if ok and database.exists():
+        database.unlink()
+    return ok, record
+
+
+def trial_problems(result, variant, cohort, durability, cpus, reader_cpus, transactions):
+    """Everything a trial-harness result must show for the gate; empty list = pass."""
+    workers, readers = result['workers'], result['readers']
+    problems = []
+    if (result['variant'], result['cohort'], result['durability']) != (variant, cohort, durability):
+        problems.append('result identity mismatch')
+    if result['cpus'] != cpus or result['reader_cpus'] != reader_cpus:
+        problems.append('CPU sets differ from the request')
+    if len(workers) != len(cpus) or len(readers) != len(reader_cpus):
+        problems.append('worker/reader count differs from the request')
+    if not result['reopened_exact'] or result['reopen_error'] is not None:
+        problems.append(f"close/reopen not exact: {result['reopen_error']}")
+    if result['verified_live_records'] != sum(w['completed_records'] for w in workers):
+        problems.append('live contents differ from the committed records')
+    if transactions is not None and any(w['completed_transactions'] != transactions for w in workers):
+        problems.append('a writer did not commit exactly its transaction count')
+    if any(w['completed_transactions'] == 0 for w in workers):
+        problems.append('a writer committed nothing')
+    for reader in readers:
+        if reader['read_txns'] == 0 or reader['gets'] == 0:
+            problems.append(f"reader on CPU {reader['cpu']} completed no verified reads")
+        if transactions is None and reader['snapshot_len_max'] <= reader['snapshot_len_min']:
+            problems.append(f"reader on CPU {reader['cpu']} never saw the table grow")
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--build-dir', type=Path, default=OUT)
@@ -106,6 +188,16 @@ def main():
     binaries = {name: build_dir / entry['file'] for name, entry in manifest['binaries'].items()}
     results, failures = [], []
     for variant in args.variants:
+        for case in TRIAL_CASES:
+            ok, record = run_trial_case(binaries[manifest['variant_binary'][variant]],
+                                        manifest['variant_binary'][variant], variant, case, output)
+            summary = {'variant': variant, 'binary': manifest['variant_binary'][variant], 'case': case[0],
+                       'passed': ok, 'details': record.get('result', {}).get('details'),
+                       'returncode': record['returncode'], 'timeout': record['timeout']}
+            print(json.dumps(summary), flush=True)
+            results.append(summary)
+            if not ok:
+                failures.append(summary)
         plan = [(manifest['variant_binary'][variant], case, extra, False) for case, extra in PRIMARY_CASES]
         if variant != 'upstream':
             plan += [('test_hooks', case, extra, False) for case, extra in HOOK_CASES]

@@ -244,7 +244,7 @@ A cell with c clients runs c saturated requesters, pinned one per CPU on the
 first c prepared CPUs, and the trial process is restricted to exactly those CPUs
 (`taskset`), so there are never more client threads than CPUs (no
 oversubscription). The sweep is c ∈ {1, 2, 4, 8} (only counts ≤ the prepared CPU
-set run; the trial binary accepts 1..=8 CPUs). The half cohorts need 1 client or
+set run; the trial binary accepts 1..=64 CPUs, `scale_rw.py` sweeps up to 64). The half cohorts need 1 client or
 an even count; `all1` and `transfer` run at any client count.
 
 | Cohort | 1 client | 2 clients | 4 clients | 8 clients |
@@ -452,6 +452,47 @@ directories are rejected. Use `--numa-node none` at preparation only when
 deliberately omitting memory binding, and report it. Capacity guards remain 8
 million records per worker and a 512 MiB database file.
 
+## Scalability beyond 8 clients and concurrent readers
+
+The trial binary accepts 1-64 writer CPUs (`--cpus`) and, optionally, reader
+threads (`--reader-cpus`, distinct CPUs; the process affinity must be exactly the
+union). `run.py` keeps its 1-8 client sweep; the 1-64 sweep and the reader/writer
+matrix live in `scale_rw.py`, which imports run.py's power, clock, sampler, perf and
+metric helpers:
+
+```sh
+export BUILD=.worktree/redb-build-01 RUN=.worktree/redb-scale-rw-01
+python3 -m integration.redb.scale_rw --prepare-only --build-dir "$BUILD" --output-root "$RUN" --power-setup S1
+python3 -m integration.redb.scale_rw --run scale --output-root "$RUN"   # 1-64 writers, all1 + half1_half64
+python3 -m integration.redb.scale_rw --run rw    --output-root "$RUN"   # W=8 x R in 0,1,4,8,16; R=8 x W in 1,2,4,8
+python3 -m integration.redb.scale_rw --run perf  --output-root "$RUN"   # perf counters: W=32/64 (mcs, fc, fc_pq); W=8 R=0/16
+python3 -m integration.redb.scale_rw --analyze scale --output-root "$RUN"   # likewise rw, perf
+```
+
+`--run` takes `MEASUREMENT_LOCK` itself, exclusively, per (cohort, W, R) group of
+variants, so other jobs can interleave between groups; the runner pins itself to CPU
+127 (outside every client CPU). Placement: writers on the first W physical cores (CPUs
+0-31 = node 0, 32-63 = node 1; cells above 32 writers are marked `cross_socket`),
+readers on distinct physical cores of node 0 (CPUs 8.. for W <= 8, else after the
+writers), every cell under `numactl --membind=0`.
+
+A reader loop is one read transaction at a time: `begin_read`, the last key of a random
+writer that is already known to have data (every 64th transaction first probes a random
+writer, so the work does not depend on how evenly the writers' lock shares the table), 4 point gets of random keys of that writer below it, and a scan of
+16 consecutive keys. A writer's keys are contiguous from 0, so every get must hit and every
+payload must be exact; a miss fails the cell. Nothing is shared with the writers, so the
+reader load adds no coherence traffic of its own to their lines. Per cell: read txn/s,
+ops/s (gets + scans), `begin_read` and whole-transaction latency (8 sub-buckets per power of
+two, bucket upper bounds), and snapshot staleness sampled on every 16th transaction (records
+committed between the snapshot and a second `begin_read` after the reads; redb has no
+public read-transaction id). In `--perf` cells reader instructions and misses are part of
+the process totals.
+
+The gate's `trial-*` cases run the timed trial itself for every variant: 64 and 40 writers
+across both sockets with exact contents and close/reopen (None and Immediate), and writers
+with 16/8/4 readers (zero misses, every reader completed transactions, readers saw the table
+grow during the 2 s cells).
+
 ## Known limits
 
 - **One closure per transaction.** No group commit (a combiner running several
@@ -459,8 +500,9 @@ million records per worker and a 512 MiB database file.
   per-closure rollback; redb's `ephemeral_savepoint` refuses dirty transactions).
   No async or interactive transactions: they cannot be a closure run on a
   combiner.
-- **Reads outside the lock.** `begin_read` is not delegated or measured; reader
-  interference with commit (e.g. freed-page retention) is upstream behaviour.
+- **Reads outside the lock.** `begin_read` is not delegated; the `run.py` cohorts do not
+  measure it (`scale_rw.py` does, see above). Reader interference with commit (e.g.
+  freed-page retention) is upstream behaviour.
 - **Commit I/O inside the critical section.** Under `Immediate` (the control)
   each transaction holds the lock across fsync, so lock-algorithm differences
   are diluted. `None`, the primary regime, is not a durable-commit claim.
@@ -503,6 +545,6 @@ million records per worker and a 512 MiB database file.
   so the `transfer` service metrics (`service_jain`, `worker_service_share`,
   `service_utilization`) cover committed transfers only; aborts are counted in
   `aborted_transactions`.
-- One to eight pinned clients per trial (one per CPU, never more client threads
-  than CPUs; MCS/FC/FC-PQ spin, the Mutex/Condvar controls block, U-SCL may
+- One to 64 pinned clients per trial (one per CPU, never more client threads
+  than CPUs; `run.py` sweeps 1-8, `scale_rw.py` 1-64; MCS/FC/FC-PQ spin, the Mutex/Condvar controls block, U-SCL may
   yield or sleep); synthetic key/transfer streams, not a production trace.
