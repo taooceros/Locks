@@ -19,9 +19,10 @@
   number-align: center,
 )
 #set columns(gutter: 0.33in)
-#set text(font: "TeX Gyre Termes", size: 10pt, hyphenate: true)
+// 10pt on 12pt leading (USENIX): fixed 1em line box + 0.2em leading = 12pt pitch.
+#set text(font: "TeX Gyre Termes", size: 10pt, hyphenate: true, top-edge: 0.8em, bottom-edge: -0.2em)
 #show math.equation: set text(font: "TeX Gyre Termes Math")
-#set par(justify: true, first-line-indent: 1em, spacing: 0.5em, leading: 0.5em)
+#set par(justify: true, first-line-indent: 1em, spacing: 0.2em, leading: 0.2em)
 #show raw: set text(font: "Nimbus Mono PS", size: 1.1em)
 #set heading(numbering: "1.1", supplement: none)
 #show heading: set text(weight: "bold")
