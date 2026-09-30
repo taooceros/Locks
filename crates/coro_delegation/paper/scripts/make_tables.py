@@ -10,22 +10,24 @@ bystander p99s, combiner worker) and `scripts/summarize_fcpq_sweep.py` (util,
 admin/op, gap/op, queue waits), which are imported, not re-derived.
 
 Measurement windows: runs whose JSON timestamp is before 2026-09-29 00:07:54
-UTC (unix 1790640474) ran at turbo clock ("09-28"); later runs ran with CPUs
-0-15 capped at 3.0 GHz ("09-29"). Each table states which window its rows
+UTC (unix 1790640474) ran at turbo clock ("09-28"); runs up to
+2026-09-29 22:00 UTC (unix 1790719200) ran with CPUs 0-15 capped at 3.0 GHz
+("09-29"); later runs are the "09-30" session (FINDINGS entries dated 09-30:
+async CFL, co1, co2; same 3.0 GHz cap). Each table states which window its rows
 come from; the script refuses to aggregate a cell that mixes windows.
 
+The current co-pq results are `co2-*` (ordinary-waker co-pq, one frozen binary,
+FINDINGS "ordinary-waker co-pq, same-window matrix"); `co1-*` used the old
+inline co-pq and is not read here.
+
 Also writes `numbers.typ`: `#let` bindings for the derived numbers the
-text quotes (model Jain, required light:heavy ratio, required per-op cost).
-The LIFO side check is read from `results/xrt-side-lifo.tar.zst` (Python
->= 3.14 for tarfile's zstd support).
+text quotes (model Jain, required light:heavy ratio, co2 medians and ratios).
 """
 import glob
 import json
 import os
-import re
-import statistics
+import statistics  # noqa: F401
 import sys
-import tarfile
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,16 +35,18 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(HERE, "..", "..", "scripts"))
 import summarize  # noqa: E402
 import summarize_fcpq_sweep as sweep  # noqa: E402
-import summarize_dispatch_pq as sdpq  # noqa: E402
+import summarize_co as sc  # noqa: E402
 
 CAP_UNIX = 1790640474  # 2026-09-29 00:07:54 UTC: 3.0 GHz cap set on CPUs 0-15
+S30_UNIX = 1790719200  # 2026-09-29 22:00 UTC: start of the session labelled 09-30
 CENSORED_US = 1e6       # a bystander p99 above 1 s is a censored sample
 
 
 # ---------------------------------------------------------------- loading --
 
 def window_of(r):
-    return "09-29" if int(r["timestamp"].split(":")[1]) >= CAP_UNIX else "09-28"
+    t = int(r["timestamp"].split(":")[1])
+    return "09-28" if t < CAP_UNIX else ("09-29" if t < S30_UNIX else "09-30")
 
 
 def metrics(r):
@@ -101,22 +105,6 @@ def load(results, pattern, key=None):
         ws = {m["window"] for m in runs}
         if len(ws) != 1:
             sys.exit("make_tables: cell %s in %s mixes windows %s" % (k, pattern, ws))
-    return cells
-
-
-def load_lifo(results):
-    """LIFO-slot side check: {(W, cont, lock, 'on'|'off'): [metrics]}."""
-    path = os.path.join(results, "xrt-side-lifo.tar.zst")
-    cells = defaultdict(list)
-    with tarfile.open(path, "r:zst") as tar:
-        for mem in tar.getmembers():
-            mm = re.match(r"xrt-side-lifo/out2/lifo(on|off)-(.+)-w(\d+)-(sus|bur)-r\d\.json$", mem.name)
-            if not mm:
-                continue
-            r = json.load(tar.extractfile(mem))
-            cells[(int(mm.group(3)), mm.group(4), mm.group(2), mm.group(1))].append(metrics(r))
-    if not cells:
-        sys.exit("make_tables: no LIFO side-check runs in %s" % path)
     return cells
 
 
@@ -245,26 +233,10 @@ def solve_x(target):
 
 
 CONT = {"sus": "sus.", "bur": "bur."}
+XRT_CELLS = [(8, "sus"), (8, "bur"), (16, "sus"), (16, "bur")]  # tokio-runtime cells of the 09-28 motivation figure
 
 
 # ----------------------------------------------------------------- tables --
-
-def t_motivation(res, out):
-    c = load(res, "matrix-*-w8-h8-*.json")
-    head = [["cell", "lock", "Mops/s", "svc. $J$", "burden $J$", "comb. p99", "other p99", "starved c/b"]]
-    body = []
-    for cont, b in (("sus", 0), ("sus", 31), ("bur", 0), ("bur", 31)):
-        if body:
-            body.append(MID)
-        for lock in ("dispatch", "ces", "fc-noyield", "fc", "fcpq"):
-            runs = c.get((cont, 8, b, lock))
-            if not runs:
-                continue
-            body.append(["%s b%d" % (CONT[cont], b), tt(lock), f(agg(runs, "thr"), 3, 1e-6), f(agg(runs, "sj")),
-                         f(agg(runs, "bj")), fus(agg(runs, "comb_p99")), fus(agg(runs, "noncomb_p99")),
-                         "%s/%s" % (fint(agg(runs, "starved_c")), fint(agg(runs, "starved_b")))])
-    write(out, "tab-motivation.typ", table("llrrrrrr", head, body))
-
 
 def t_fifo(res, out):
     c = load(res, "matrix-*-w8-h8-b31-sus-*.json")
@@ -281,331 +253,235 @@ def t_fifo(res, out):
     write(out, "tab-fifo.typ", table("lrrrrrr", head, body))
 
 
-def t_burden(res, out):
-    c = load(res, "p3-*-h8-*.json")
-    head = [["cell", "variant", "burden $J$", "comb. p99", "other p99", "starved c/b", "Mops/s", "/`ces`"]]
-    body = []
-    blocks = []
-    for cont, b in (("sus", 0), ("sus", 31), ("bur", 0), ("bur", 31)):
-        blocks.append((8, cont, b, ("ces", "ces-k64", "ces-k64-home", "ces-t64000-home",
-                                    "fc", "fc-home", "fc-remote")))
-    for cont, b in (("sus", 0), ("sus", 31), ("bur", 0), ("bur", 31)):
-        blocks.append((16, cont, b, ("ces", "ces-k64-home")))
-    for w, cont, b, variants in blocks:
-        ref = med(c.get((cont, w, b, "ces"), []), "thr")
-        if body:
-            body.append(MID)
-        for v in variants:
-            runs = c.get((cont, w, b, v))
-            if not runs:
-                continue
-            assert runs[0]["window"] == "09-28"
-            body.append(["W%d %s b%d" % (w, CONT[cont], b), tt(v), f(agg(runs, "bj")), fus(agg(runs, "comb_p99")),
-                         fus(agg(runs, "noncomb_p99")),
-                         "%s/%s" % (fint(agg(runs, "starved_c")), fint(agg(runs, "starved_b"))),
-                         f(agg(runs, "thr"), 3, 1e-6), ratio(med(runs, "thr"), ref)])
-    write(out, "tab-burden.typ", table("llrrrrrr", head, body))
-
-
-def service_row(label, win, runs):
-    x = med(runs, "lh") * med(runs, "cs_l") / med(runs, "cs_h")
-    wmax = agg(runs, "w_max")
-    return [label, win, f(agg(runs, "thr"), 3, 1e-6), f(agg(runs, "sj")), "%.3f" % model_jain(x),
-            f(agg(runs, "lh"), 2, rng=False), f(agg(runs, "util"), rng=False), fint(agg(runs, "o"), rng=False),
-            "%s / %s" % (f(agg(runs, "h_p50"), 1, rng=False), f(agg(runs, "h_p99"), 1)),
-            fint(wmax) if wmax else "--"]
-
-
-def t_service(res, out, nums):
+def t_service_nums(res, nums):
+    """Derived numbers of the policy text: FC-PQ clamp 8 / 16 (W8 b31 sus, 09-29)."""
     old = load(res, "p3-*-w8-h8-b31-sus-*.json")
-    ab = load(res, "p3ab-pre-*-w8-h8-b31-sus-*.json")
-    head = [["variant", "win.", "Mops/s", "svc. $J$", "model $J$", "L:H", "util", "non-CS/op",
-             "heavy p50 / p99 (µs)", "max wait"]]
-    body = []
-    for v in ("dispatch", "ces", "fc", "fc-remote", "fcpq", "fcpq-h8", "fcpq-h16", "fcpq-h16-home"):
-        runs = old[("sus", 8, 31, v)]
-        assert runs[0]["window"] == "09-28"
-        body.append(service_row(tt(v), "09-28", runs))
-    body.append(MID)
-    for v in ("fc-remote", "fcpq-h16-home"):
-        runs = ab[("sus", 8, 31, v)]
-        assert runs[0]["window"] == "09-29"
-        body.append(service_row(tt(v), "09-29", runs))
-    for cl in (8, 16, 32, 0):
-        v = "fcpq-h16-home-c%d-nmean" % cl
-        runs = old[("sus", 8, 31, v)]
-        assert runs[0]["window"] == "09-29"
-        body.append(service_row("#h(1em)" + tt("-c%d" % cl), "09-29", runs))
-    write(out, "tab-service.typ", table("llrrrrrrrr", head, body))
-
-    # Confirmation cells (09-29): clamp 8 vs 16 at W8 b0 and W16 b31.
-    allp3 = load(res, "p3-fcpq-h16-home-c*-nmean-*.json")
-    head = [["cell", "clamp", "Mops/s", "svc. $J$", "L:H", "heavy p99 (µs)", "burden $J$"]]
-    body = []
-    for cont, w, b in (("sus", 8, 31), ("sus", 8, 0), ("sus", 16, 31), ("bur", 8, 31), ("bur", 16, 31)):
-        if body:
-            body.append(MID)
-        for cl in (8, 16):
-            runs = allp3[(cont, w, b, "fcpq-h16-home-c%d-nmean" % cl)]
-            body.append(["W%d %s b%d" % (w, CONT[cont], b), "%d" % cl, f(agg(runs, "thr"), 3, 1e-6),
-                         f(agg(runs, "sj")), f(agg(runs, "lh"), 2, rng=False),
-                         f(agg(runs, "h_p99"), 1, rng=False), f(agg(runs, "bj"), rng=False)])
-    write(out, "tab-clamp-confirm.typ", table("llrrrrr", head, body))
-
-    # Derived numbers for the text (clamp 8 and clamp 16, W8 b31 sus, 09-29).
     c8 = old[("sus", 8, 31, "fcpq-h16-home-c8-nmean")]
     c16 = old[("sus", 8, 31, "fcpq-h16-home-c16-nmean")]
-    fcr = ab[("sus", 8, 31, "fc-remote")]
+    for runs in (c8, c16):
+        assert runs[0]["window"] == "09-29"
     x95 = solve_x(0.95)
     # class costs at the fair operating point (clamp 16), as in FINDINGS 09-29
     csl, csh = med(c16, "cs_l"), med(c16, "cs_h")
     lh95 = x95 * csh / csl
-    cbar95 = (lh95 * csl + csh) / (lh95 + 1)
     nums["XNinetyFive"] = "%.3f" % x95
     nums["LHNinetyFive"] = "%.2f" % lh95
-    nums["CbarNinetyFive"] = "%.0f" % cbar95
-    nums["ONeededEighty"] = "%.0f" % (cbar95 * (1 / 0.8 - 1))
-    for tag, runs in (("CEight", c8), ("CSixteen", c16), ("FcRemoteAB", fcr)):
-        nums["Cbar" + tag] = "%.0f" % med(runs, "cbar")
-        nums["O" + tag] = "%.0f" % med(runs, "o")
-        nums["Util" + tag] = "%.3f" % med(runs, "util")
-    nums["OFcOld"] = "%.0f" % med(old[("sus", 8, 31, "fc")], "o")
-    nums["UtilFcOld"] = "%.3f" % med(old[("sus", 8, 31, "fc")], "util")
-    o_fc = med(old[("sus", 8, 31, "fc")], "o")
-    nums["UtilAtOFcOld"] = "%.3f" % (cbar95 / (cbar95 + o_fc))
+    nums["CbarCEight"] = "%.0f" % med(c8, "cbar")
+    nums["CbarCSixteen"] = "%.0f" % med(c16, "cbar")
     nums["PromotedCEight"] = "%.3f" % med(c8, "promoted")
 
 
-XRT_ROWS = [("tokio", "tokio-mutex"), ("tokio", "tokio-mutex-unconstrained"), ("tokio", "async-lock"),
-            ("tokio", "std-mutex"), ("tokio", "parking-lot"), ("coro", "dispatch"),
-            ("coro", "dispatch-home"), ("coro", "ces-k64-home"), ("coro", "fc-remote"),
-            ("coro", "fcpq-h16-home")]
-XRT_CELLS = [(8, "sus"), (8, "bur"), (16, "sus"), (16, "bur")]
-
-
-def t_xrt(res, out, nums):
+def t_async_nums(res, nums):
+    """async-lock monopoly: tokio runs (09-28) in which exactly one client completed an operation."""
     tk = load(res, "tokio-*.json")
-    co = load(res, "xrt-*.json")
-
-    def runs_of(rt, lock, w, cont):
-        return (tk if rt == "tokio" else co).get((cont, w, None if rt == "tokio" else 31, lock))
-
-    for runs in list(tk.values()) + list(co.values()):
-        assert runs[0]["window"] == "09-28"
-
-    def xrt_head(sub):
-        return [[""] + [span("W%d %s" % (w, CONT[c]), 2) for w, c in XRT_CELLS],
-                rules(*[(2 + 2 * i, 3 + 2 * i) for i in range(len(XRT_CELLS))]),
-                ["variant"] + sub * len(XRT_CELLS)]
-
-    body = []
-    for rt, lock in XRT_ROWS:
-        if (rt, lock) == ("coro", "dispatch"):
-            body.append(MID)
-        row = [tt(lock)]
-        for w, cont in XRT_CELLS:
-            runs = runs_of(rt, lock, w, cont)
-            ref = med(runs_of("tokio", "tokio-mutex", w, cont), "thr")
-            row += [f(agg(runs, "thr"), 3, 1e-6), ratio(med(runs, "thr"), ref)]
-        body.append(row)
-    write(out, "tab-xrt-thr.typ", table("l" + "rr" * len(XRT_CELLS), xrt_head(["Mops/s", "×tm"]), body))
-
-    body = []
-    for rt, lock in XRT_ROWS:
-        if (rt, lock) == ("coro", "dispatch"):
-            body.append(MID)
-        row = [tt(lock)]
-        for w, cont in XRT_CELLS:
-            runs = runs_of(rt, lock, w, cont)
-            row += [f(agg(runs, "sj")), "%s/%s" % (fint(agg(runs, "starved_c")), fint(agg(runs, "starved_b")))]
-        body.append(row)
-    write(out, "tab-xrt-fair.typ", table("l" + "rr" * len(XRT_CELLS), xrt_head(["svc. $J$", "st. c/b"]), body))
-
-    lifo = load_lifo(res)
-    head = [["", span(tt("tokio-mutex"), 2), span(tt("async-lock"), 2),
-             span("coro / %s LIFO off" % tt("tokio-mutex"), 3)],
-            rules((2, 3), (4, 5), (6, 8)),
-            ["cell", "LIFO on", "off", "on", "off", tt("ces-k64-home"), tt("fc-remote"), tt("fcpq-h16-home")]]
-    body = []
-    for w, cont in XRT_CELLS:
-        off = med(lifo[(w, cont, "tokio-mutex", "off")], "thr")
-        row = ["W%d %s" % (w, CONT[cont])]
-        for lock in ("tokio-mutex", "async-lock"):
-            for mode in ("on", "off"):
-                row.append(f(agg(lifo[(w, cont, lock, mode)], "thr"), 3, 1e-6))
-        for lock in ("ces-k64-home", "fc-remote", "fcpq-h16-home"):
-            row.append(ratio(med(runs_of("coro", lock, w, cont), "thr"), off))
-        body.append(row)
-    write(out, "tab-lifo.typ", table("lrrrrrrr", head, body))
-    for runs in lifo.values():
-        assert runs[0]["window"] == "09-28"
-
-    def r_(lock, w, cont, base):
-        return med(runs_of("coro", lock, w, cont), "thr") / base
-
-    tm = {k: med(runs_of("tokio", "tokio-mutex", *k), "thr") for k in XRT_CELLS}
-    off = {k: med(lifo[(k[0], k[1], "tokio-mutex", "off")], "thr") for k in XRT_CELLS}
-    sus_on = [r_(l, w, c, tm[(w, c)]) for l in ("ces-k64-home", "fc-remote") for w, c in XRT_CELLS if c == "sus"]
-    bur_on = [r_(l, w, c, tm[(w, c)]) for l in ("ces-k64-home", "fc-remote") for w, c in XRT_CELLS if c == "bur"]
-    sus_off = [r_(l, w, c, off[(w, c)]) for l in ("ces-k64-home", "fc-remote") for w, c in XRT_CELLS if c == "sus"]
-    bur_off = [r_(l, w, c, off[(w, c)]) for l in ("ces-k64-home", "fc-remote")
-               for w, c in XRT_CELLS if c == "bur"]
-    nums["SusOnLo"], nums["SusOnHi"] = "%.2f" % min(sus_on), "%.2f" % max(sus_on)
-    nums["BurOnLo"], nums["BurOnHi"] = "%.2f" % min(bur_on), "%.2f" % max(bur_on)
-    nums["SusOffLo"], nums["SusOffHi"] = "%.2f" % min(sus_off), "%.2f" % max(sus_off)
-    nums["BurOffLo"], nums["BurOffHi"] = "%.2f" % min(bur_off), "%.2f" % max(bur_off)
-    # async-lock monopoly: runs in which exactly one client completed an operation.
     nclients = {"sus": 64, "bur": 16}
-    al = [(c, m) for w, c in XRT_CELLS for m in runs_of("tokio", "async-lock", w, c)]
+    al = [(cont, m) for (cont, w, b, lock), runs in tk.items() if lock == "async-lock" for m in runs]
+    assert all(m["window"] == "09-28" for _, m in al)
     nums["AsyncMonoRuns"] = "%d" % sum(1 for c, m in al if m["starved_c"] == nclients[c] - 1)
     nums["AsyncRuns"] = "%d" % len(al)
 
 
-def t_actor(res, out):
-    ref = load(res, "actorref-*.json")
-    p3 = load(res, "p3-*-h8-*.json")
-    xrt = load(res, "xrt-*.json")
-    head = [["cell", "variant", "win.", "Mops/s", "/`fc-remote`", "burden $J$", "comb. / other p99 (µs)",
-             "svc. $J$"]]
+def t_sync_nums(res, nums):
+    """co-fifo with the async step-aside (`-sremote`) against a synchronous release (`-snone`, as dropping the
+    guard), W8 b31, spin and yield. co-fifo is unchanged since the co1-* session (only co-pq changed), so this
+    pair is read from co1-* (09-30 window, an earlier session than co2-*; ratios only within co1)."""
+    for mode, glob_ in (("Spin", "co1-co-fifo-s*-k64-home-w8-h8-b31-*-r*.json"),
+                        ("Yield", "co1-co-fifo-s*-k64-home-pyield-w8-h8-b31-*-r*.json")):
+        c = load(res, glob_)
+        for cont in ("sus", "bur"):
+            a = c[(cont, 8, 31, "co-fifo-sremote-k64-home")]
+            s = c[(cont, 8, 31, "co-fifo-snone-k64-home")]
+            assert a[0]["window"] == s[0]["window"] == "09-30"
+            tag = cont.capitalize() + mode
+            nums["SyncOverAsyncThr" + tag] = "%.2f" % (med(s, "thr") / med(a, "thr"))
+            nums["AsyncThr" + tag] = "%.3f" % (med(a, "thr") * 1e-6)
+            nums["SyncThr" + tag] = "%.3f" % (med(s, "thr") * 1e-6)
+            nums["AsyncO" + tag] = "%.0f" % med(a, "o")
+            nums["SyncO" + tag] = "%.0f" % med(s, "o")
+
+
+# ------------------------------------------------------------------ clamp --
+
+def t_clamp_units(res, out):
+    """The clamp in its own unit: FC-PQ passes (09-29), dispatch-pq and co-pq hand-offs (09-29 / 09-30)."""
+    p3 = load(res, "p3-fcpq-h16-home-c*-nmean-*.json")
+    dpq = load(res, "dpq-*.json")
+    co2 = load_co2(res)
+    head = [["lock", "clamp", "win.", "svc. $J$", "L:H", "max. wait"]]
     body = []
 
-    base_win = [None]
+    def row(label, clamp, runs):
+        wmax = agg(runs, "w_max")
+        return [label, clamp, runs[0]["window"], f(agg(runs, "sj"), 3, rng=False),
+                f(agg(runs, "lh"), 2, rng=False), fint(wmax, rng=False) if wmax else "--"]
 
-    def row(cell, v, runs, base):
-        return [cell, tt(v), runs[0]["window"], f(agg(runs, "thr"), 3, 1e-6),
-                ratio(med(runs, "thr"), base) + ("#super[†]" if runs[0]["window"] != base_win[0] else ""),
-                f(agg(runs, "bj")),
-                "%s / %s" % (fus(agg(runs, "comb_p99"), rng=False), fus(agg(runs, "noncomb_p99"), rng=False)),
-                f(agg(runs, "sj"))]
-
-    for cont in ("sus", "bur"):
-        if body:
-            body.append(MID)
-        base = med(ref[(cont, 8, 31, "fc-remote")], "thr")
-        base_win[0] = ref[(cont, 8, 31, "fc-remote")][0]["window"]
-        cell = "W8 %s b31" % CONT[cont]
-        for v in ("dispatch", "ces-k64-home", "fc-remote"):
-            body.append(row(cell, v, ref[(cont, 8, 31, v)], base))
-        for v in ("actor", "actor-inline"):
-            body.append(row(cell, v, p3[(cont, 8, 31, v)], base))
-    for cont, w, b in (("sus", 8, 0), ("bur", 8, 0), ("sus", 16, 31), ("bur", 16, 31)):
-        body.append(MID)
-        cell = "W%d %s b%d" % (w, CONT[cont], b)
-        refruns = p3.get((cont, w, b, "fc-remote")) or xrt[(cont, w, b, "fc-remote")]
-        base = med(refruns, "thr")
-        base_win[0] = refruns[0]["window"]
-        body.append(row(cell, "fc-remote", refruns, base))
-        for v in ("actor", "actor-inline"):
-            body.append(row(cell, v, p3[(cont, w, b, v)], base))
-    write(out, "tab-actor.typ", table("lllrrrrr", head, body))
+    for cl, name in ((8, "8 passes"), (16, "16 passes"), (0, "off")):
+        body.append(row(tt("fcpq-h16-home"), name, p3[("sus", 8, 31, "fcpq-h16-home-c%d-nmean" % cl)]))
+    body.append(MID)
+    for v, name, lab in (("dispatch-pq-home", "16 hand-offs", "`dispatch-pq-home`"),
+                         ("dispatch-pq-home-c256", "256 hand-offs", "`dispatch-pq-home`"),
+                         ("dispatch-pq-c0", "off", "`dispatch-pq`")):
+        body.append(row(lab, name, dpq[("sus", 8, 31, v)]))
+    body.append(MID)
+    for v, name in (("co-pq-sremote-k64-c256", "256 hand-offs"), ("co-pq-sremote-k64-c0", "off")):
+        body.append(row(tt("co-pq"), name, co2[("sus", 8, "spin", v)]))
+    write(out, "tab-clamp.typ", table("llrrrr", head, body))
 
 
-# dispatch-pq (usage-ordered handoff mutex) against dispatch and FC-PQ,
-# 09-29 window (FINDINGS 2026-09-29 "dispatch-pq"). Variant names are the
-# JSON `lock` labels; dispatch-pq without a clamp suffix is clamp 16.
-DPQ_CELLS = [("sus", 8, 31), ("sus", 8, 0), ("sus", 16, 31), ("bur", 8, 31)]
-DPQ_VARIANTS = ["dispatch", "dispatch-pq", "dispatch-pq-home", "dispatch-pq-remote", "dispatch-pq-c0",
-                "dispatch-pq-c256", "dispatch-pq-home-c256", "dispatch-pq-remote-c256", "fc-remote",
-                "fcpq-h16-home-c16"]
-DPQ_FAIR = ("dispatch-pq-c0", "dispatch-pq-c256", "dispatch-pq-home-c256", "dispatch-pq-remote-c256")
-DPQ_FCPQ = "fcpq-h16-home-c16"
+# ------------------------------------------------------------------- co2 --
+#
+# The ordinary-waker co-pq matrix (results/co2-*, FINDINGS 2026-09-30
+# "ordinary-waker co-pq, same-window matrix"): coro-bench and tokio-bench
+# from one session. Keys: (contention, W, parallel mode, JSON lock label).
+
+CO2_LOCKS = [  # (JSON label, printed name, Typst-variable stem)
+    ("co-pq-sremote-k64-c256", "co-pq", "CoPq"),
+    ("co-pq-sremote-k64-c0", "co-pq-c0", "CoPqC0"),
+    ("dispatch-pq-home-c256", "dispatch-pq-home-c256", "Dpq"),
+    ("fcpq-h16-home-c16", "fcpq-h16-home-c16", "Fcpq"),
+    ("dispatch", "dispatch", "Disp"),
+    ("tokio-mutex", "tokio-mutex", "Tok"),
+    ("co-fifo-sremote-k64-home", "co-fifo", "CoFifo"),
+    ("ces-k64-home", "ces-k64-home", "Ces"),
+    ("fc-remote", "fc-remote", "Fc"),
+]
+CO2_NAME = {lab: (name, stem) for lab, name, stem in CO2_LOCKS}
 
 
-def load_handoff(results, pattern):
-    """{(cont, W, B, lock): [summarize_dispatch_pq.run_metrics]}: per-handoff cycle breakdown."""
+def co2_metrics(r, tokio):
+    """The metrics of summarize_co.py (coro) or the same set for a tokio run."""
+    if not tokio:
+        m = sc.run_metrics(r)
+    else:
+        hz = r["tsc_hz"]
+        t = r["measured_secs"] * hz
+        lc, hc = r["classes"]["light"], r["classes"]["heavy"]
+        cs = lc["service_cycles"] + hc["service_cycles"]
+        m = {"thr": r["throughput_ops_per_s"], "jain": r["service_jain"], "o": (t - cs) / r["total_ops"],
+             "lh": lc["ops"] / hc["ops"], "l_p99": summarize.us(lc["run_latency"]["p99"], hz),
+             "h_p99": summarize.us(hc["run_latency"]["p99"], hz), "burden": None,
+             "byst_p99": summarize.us(r["bystander_latency"]["p99"], hz), "starved_c": r["starved_clients"],
+             "starved_b": r.get("starved_bystanders"), "w_max": None}
+    m["window"] = window_of(r)
+    return m
+
+
+def load_co2(results):
+    """{(cont, W, mode, label): [metrics]} for every co2-*.json; all must be 09-30."""
     cells = defaultdict(list)
-    files = sorted(glob.glob(os.path.join(results, pattern)))
+    files = sorted(glob.glob(os.path.join(results, "co2-*.json")))
     if not files:
-        sys.exit("make_tables: no files match %s" % os.path.join(results, pattern))
+        sys.exit("make_tables: no co2-*.json in %s" % results)
     for fn in files:
         with open(fn) as fh:
             r = json.load(fh)
-        if window_of(r) != "09-29":
-            sys.exit("make_tables: %s is not in the 09-29 window" % fn)
         cfg = r["config"]
-        cells[(summarize.contention_label(cfg), cfg["workers"], cfg["balance_interval"], r["lock"])].append(
-            sdpq.run_metrics(r))
+        m = co2_metrics(r, os.path.basename(fn).startswith("co2-tokio-"))
+        if m["window"] != "09-30":
+            sys.exit("make_tables: %s is not in the 09-30 window" % fn)
+        m["sj"] = m["jain"]
+        cells[(summarize.contention_label(cfg), cfg["workers"], cfg["parallel_mode"], r["lock"])].append(m)
     return cells
 
 
-def dpq_label(v):
-    """Short variant label: placement + clamp (c16 is dispatch-pq's default clamp)."""
-    if not v.startswith("dispatch-pq"):
-        return tt(v)
-    rest = [p for p in v[len("dispatch-pq"):].split("-") if p]
-    place = rest[0] if rest and rest[0] in ("home", "remote") else "default"
-    clamp = next((p for p in rest if p.startswith("c")), "c16")
-    return "#h(0.8em)%s %s" % (place, clamp)
-
-
-def t_dpq(res, out, nums):
-    c = load(res, "dpq-*.json")
-    for runs in c.values():
-        assert runs[0]["window"] == "09-29"
-    cellname = {("sus", 8, 31): "W8 b31 sus.", ("sus", 8, 0): "W8 b0 sus.", ("sus", 16, 31): "W16 b31 sus.",
-                ("bur", 8, 31): "W8 b31 bur."}
-    head = [["", span(cellname[DPQ_CELLS[0]], 3)] + [span(cellname[k], 2) for k in DPQ_CELLS[1:]],
-            rules((2, 4), (5, 6), (7, 8), (9, 10)),
-            ["variant", "Mops/s", "util (×pq)", "svc. $J$"] + ["util (×pq)", "svc. $J$"] * 3]
+def t_co2(res, out, nums):
+    c = load_co2(res)
+    fair = ["co-pq-sremote-k64-c256", "dispatch-pq-home-c256", "fcpq-h16-home-c16"]
+    fifo = ["dispatch", "tokio-mutex", "co-fifo-sremote-k64-home", "ces-k64-home", "fc-remote"]
+    groups = [("sus", "spin", 4), ("sus", "yield", 3), ("bur", "spin", 3), ("bur", "yield", 3)]
+    ttl = {"sus": "sustained", "bur": "bursty"}
+    head = [[""] + [span("%s, %s" % (ttl[k], m), n) for k, m, n in groups],
+            rules((2, 5), (6, 8), (9, 11), (12, 14)),
+            ["lock"] + ["Mops/s", "$o$", "$J$", "L:H"] + ["Mops/s", "$o$", "$J$"] * 3]
     body = []
-    for v in DPQ_VARIANTS:
-        if v == "dispatch-pq":
+    for block in (fair, fifo):
+        if body:
             body.append(MID)
-            body.append([tt("dispatch-pq") + ": wake, clamp"] + [""] * 9)
-        if v == "fc-remote":
-            body.append(MID)
-        row = [dpq_label(v)]
-        for i, k in enumerate(DPQ_CELLS):
-            runs = c.get(k + (v,))
-            ref = med(c[k + (DPQ_FCPQ,)], "util")
-            if i == 0:
-                row.append(f(agg(runs, "thr"), 3, 1e-6, rng=False) if runs else "")
-            row.append("%s (%s)" % (f(agg(runs, "util"), rng=False), ratio(med(runs, "util"), ref)) if runs else "")
-            row.append(f(agg(runs, "sj"), rng=False) if runs else "")
-        body.append(row)
-    write(out, "tab-dpq.typ", table("lrrrrrrrrr", head, body))
+        for lab in block:
+            row = [tt(CO2_NAME[lab][0])]
+            for cont, mode, n in groups:
+                runs = c[(cont, 8, mode, lab)]
+                row += [f(agg(runs, "thr"), 3, 1e-6, rng=False), fint(agg(runs, "o"), rng=False),
+                        f(agg(runs, "jain"), 3, rng=False)]
+                if n == 4:
+                    row.append(f(agg(runs, "lh"), 2, rng=False))
+            body.append(row)
+    write(out, "tab-co2.typ", table("l" + "r" * 13, head, body))
 
-    # Numbers the text quotes: fair dispatch-pq (clamp 0 / 256) against the same cell's references.
-    def rat(k, v, ref, name):
-        return med(c[k + (v,)], name) / med(c[k + (ref,)], name)
+    # Every cell with every metric (appendix).
+    head = [["cell", "par", "lock", "Mops/s", "svc. $J$", "L:H", "$o$", "light / heavy p99 (µs)", "burden $J$",
+             "byst. p99 (µs)", "starved c/b"]]
+    body = []
+    for cont, w in (("sus", 8), ("sus", 16), ("bur", 8)):
+        for mode in ("spin", "yield"):
+            if body:
+                body.append(MID)
+            for lab, name, _ in CO2_LOCKS:
+                runs = c.get((cont, w, mode, lab))
+                if not runs:
+                    continue
+                body.append(["W%d %s" % (w, CONT[cont]), mode, tt(name), f(agg(runs, "thr"), 3, 1e-6),
+                             f(agg(runs, "jain"), 3, rng=False), f(agg(runs, "lh"), 2, rng=False),
+                             fint(agg(runs, "o")),
+                             "%s / %s" % (fint(agg(runs, "l_p99"), rng=False), fint(agg(runs, "h_p99"), rng=False)),
+                             f(agg(runs, "burden"), 3, rng=False), f(agg(runs, "byst_p99"), 1, rng=False),
+                             "%s/%s" % (fint(agg(runs, "starved_c"), rng=False),
+                                        fint(agg(runs, "starved_b"), rng=False))])
+    write(out, "tab-co2-detail.typ", table("lllrrrrrrrr", head, body))
 
-    def rng2(xs, d=2):
-        return "%.*f" % (d, min(xs)), "%.*f" % (d, max(xs))
+    # Numbers the text quotes: medians per cell, and the ratios between them.
+    def m_(cont, w, mode, lab, name):
+        return med(c[(cont, w, mode, lab)], name)
 
-    sus = [k for k in DPQ_CELLS if k[0] == "sus"]
-    fair = [(k, v) for k in sus for v in DPQ_FAIR if k + (v,) in c]
-    for tag, ref, name in (("UtilFc", DPQ_FCPQ, "util"), ("ThrFc", DPQ_FCPQ, "thr"),
-                           ("UtilDisp", "dispatch", "util"), ("ThrDisp", "dispatch", "thr")):
-        nums["Dpq%sLo" % tag], nums["Dpq%sHi" % tag] = rng2([rat(k, v, ref, name) for k, v in fair])
-    best = [max(rat(k, v, DPQ_FCPQ, "util") for v in DPQ_FAIR if k + (v,) in c) for k in sus]
-    nums["DpqBestUtilFcLo"], nums["DpqBestUtilFcHi"] = rng2(best)
-    bur = ("bur", 8, 31)
-    nums["DpqBurUtilFcLo"], nums["DpqBurUtilFcHi"] = rng2([rat(bur, v, DPQ_FCPQ, "util") for v in DPQ_FAIR])
-    nums["DpqFairJainMin"] = "%.3f" % min(m["sj"] for k, v in fair + [(bur, v) for v in DPQ_FAIR]
-                                          for m in c[k + (v,)])
-    nums["DpqPlainOLo"], nums["DpqPlainOHi"] = rng2([med(c[k + (v,)], "o") for k, v in fair], 0)
-    nums["DpqFairUtilLo"], nums["DpqFairUtilHi"] = rng2([med(c[k + (v,)], "util") for k, v in fair], 3)
-    nums["DpqFairLHLo"], nums["DpqFairLHHi"] = rng2([med(c[k + (v,)], "lh") for k, v in fair])
-    c16 = [med(c[("sus", 8, 31, v)], "sj") for v in ("dispatch-pq", "dispatch-pq-home", "dispatch-pq-remote",
-                                                     "dispatch-pq-c8")]
-    nums["DpqFifoJainLo"], nums["DpqFifoJainHi"] = rng2(c16, 3)
+    for (cont, w, mode, lab), runs in c.items():
+        stem = CO2_NAME[lab][1]
+        tag = "%s%s%s%s" % ("W16" if w == 16 else "", cont.capitalize(), mode.capitalize(), stem)
+        nums["Thr" + tag] = "%.3f" % (med(runs, "thr") * 1e-6)
+        nums["O" + tag] = "%.0f" % med(runs, "o")
+        nums["J" + tag] = "%.3f" % med(runs, "jain")
+        nums["LH" + tag] = "%.2f" % med(runs, "lh")
+        wm = agg(runs, "w_max")
+        if wm:
+            nums["Wait" + tag] = "%.0f" % wm[0]
 
-    # Per-handoff breakdown, instrumented W8 b31 sustained runs, fair variants.
-    h = load_handoff(res, "dpqi-dispatch-pq*-w8-h8-b31-sus-*.json")
+    def rat(cont, mode, a, b, name, w=8):
+        return m_(cont, w, mode, a, name) / m_(cont, w, mode, b, name)
 
-    def hm(v, name):
-        return statistics.median(m[name] for m in h[("sus", 8, 31, v)])
-
-    nums["DpqGtsLo"], nums["DpqGtsHi"] = rng2([hm(v, "g2s") for v in DPQ_FAIR], 0)
-    nums["DpqQueueLo"], nums["DpqQueueHi"] = rng2([hm(v, "queue") for v in DPQ_FAIR], 0)
-    nums["DpqSpinLo"], nums["DpqSpinHi"] = rng2([hm(v, "spin") for v in DPQ_FAIR], 0)
-    nums["DpqOLo"], nums["DpqOHi"] = rng2([hm(v, "o") for v in DPQ_FAIR], 0)
-    nums["DpqGtsShareLo"], nums["DpqGtsShareHi"] = rng2([100 * hm(v, "g2s") / hm(v, "o") for v in DPQ_FAIR], 0)
-    fi = load(res, "dpqi-%s-w8-h8-b31-sus-*.json" % DPQ_FCPQ)[("sus", 8, 31, DPQ_FCPQ)]
-    nums["FcpqAdminInst"] = "%.0f" % med(fi, "admin")
-    nums["FcpqGapInst"] = "%.0f" % med(fi, "gap")
-    nums["FcpqOInst"] = "%.0f" % med(fi, "o")
-    nums["DpqOOverFcpqLo"], nums["DpqOOverFcpqHi"] = rng2([hm(v, "o") / med(fi, "o") for v in DPQ_FAIR], 1)
+    PQ, FPQ, DPQ = "co-pq-sremote-k64-c256", "fcpq-h16-home-c16", "dispatch-pq-home-c256"
+    FIFO_IN, DISP, TOK = "co-fifo-sremote-k64-home", "dispatch", "tokio-mutex"
+    for mode in ("spin", "yield"):
+        M = mode.capitalize()
+        nums["PqOverFcpqThrSus" + M] = "%.2f" % rat("sus", mode, PQ, FPQ, "thr")
+        nums["PqOverDpqThrSus" + M] = "%.2f" % rat("sus", mode, PQ, DPQ, "thr")
+        nums["PqOverFcpqOSus" + M] = "%.1f" % rat("sus", mode, PQ, FPQ, "o")
+        nums["PqOverDpqOSus" + M] = "%.2f" % rat("sus", mode, PQ, DPQ, "o")
+        nums["DispOverCoFifoOSus" + M] = "%.1f" % rat("sus", mode, DISP, FIFO_IN, "o")
+        nums["CoFifoOverDispThrSus" + M] = "%.2f" % rat("sus", mode, FIFO_IN, DISP, "thr")
+        nums["CoFifoOverCesThrSus" + M] = "%.2f" % rat("sus", mode, FIFO_IN, "ces-k64-home", "thr")
+        nums["FcOverDispThrSus" + M] = "%.2f" % rat("sus", mode, "fc-remote", DISP, "thr")
+        nums["PqOverCesThrBur" + M] = "%.2f" % rat("bur", mode, PQ, "ces-k64-home", "thr")
+        nums["FcpqOverPqThrBur" + M] = "%.2f" % rat("bur", mode, FPQ, PQ, "thr")
+        nums["TokOverDispThrSus" + M] = "%.2f" % rat("sus", mode, TOK, DISP, "thr")
+        nums["TokOverDispThrBur" + M] = "%.2f" % rat("bur", mode, TOK, DISP, "thr")
+        nums["DispOverCesThrBur" + M] = "%.2f" % rat("bur", mode, DISP, "ces-k64-home", "thr")
+    nums["CoFifoOverFcThrSusSpin"] = "%.2f" % rat("sus", "spin", FIFO_IN, "fc-remote", "thr")
+    nums["DpqOverFcpqOSusSpin"] = "%.1f" % rat("sus", "spin", DPQ, FPQ, "o")
+    for lab, _, stem in CO2_LOCKS:
+        for cont in ("sus", "bur"):
+            nums["YieldOverSpin%s%s" % (cont.capitalize(), stem)] = "%.2f" % (
+                m_(cont, 8, "yield", lab, "thr") / m_(cont, 8, "spin", lab, "thr"))
+    nums["TokYieldOverSpinSus"] = "%.2f" % (m_("sus", 8, "yield", TOK, "thr") / m_("sus", 8, "spin", TOK, "thr"))
+    nums["TokYieldOverSpinBur"] = "%.2f" % (m_("bur", 8, "yield", TOK, "thr") / m_("bur", 8, "spin", TOK, "thr"))
+    pq_cells = {k: runs for k, runs in c.items() if k[3].startswith("co-pq")}
+    nums["CoPqJainMin"] = "%.3f" % min(med(runs, "jain") for runs in pq_cells.values())
+    nums["CoPqCells"] = "%d" % len(pq_cells)
+    nums["CoPqLHLo"] = "%.2f" % min(med(runs, "lh") for runs in pq_cells.values())
+    nums["CoPqLHHi"] = "%.2f" % max(med(runs, "lh") for runs in pq_cells.values())
+    nums["Co2Starved"] = "%d" % sum(m["starved_c"] + (m["starved_b"] or 0) for runs in c.values() for m in runs)
+    nums["Co2Runs"] = "%d" % sum(len(runs) for runs in c.values())
+    burd = [med(runs, "burden") for (cont, w, mode, lab), runs in c.items()
+            if cont == "sus" and w == 8 and CO2_NAME[lab][1] in ("CoFifo", "Ces", "Fc", "CoPq", "CoPqC0", "Fcpq")]
+    nums["BurdenSusLo"], nums["BurdenSusHi"] = "%.3f" % min(burd), "%.3f" % max(burd)
 
 
 LOC_GROUPS = [
@@ -615,7 +491,9 @@ LOC_GROUPS = [
     ("`fc` (delegation core)", ["coro_delegation/src/locks/fc.rs"]),
     ("`UsageQueue` + `fcpq` policy", ["coro_delegation/src/locks/fc_pq.rs"]),
     ("`dispatch-pq`", ["coro_delegation/src/locks/dispatch_pq.rs"]),
-    ("`actor`, `actor-inline`", ["coro_delegation/src/locks/actor.rs"]),
+    ("`actor`, `actor-inline`, `cfl` (references)", ["coro_delegation/src/locks/actor.rs",
+                                                       "coro_delegation/src/locks/cfl.rs"]),
+    ("`co-fifo`, `co-pq`", ["coro_delegation/src/locks/co_mutex.rs"]),
     ("stats, workload, `coro-bench`", ["coro_delegation/src/stats.rs", "coro_delegation/src/workload.rs",
                                        "coro_delegation/src/bin/coro_bench.rs",
                                        "coro_delegation/src/lib.rs", "coro_delegation/src/locks/mod.rs"]),
@@ -672,14 +550,13 @@ def main():
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here_paper, "tables")
     os.makedirs(out, exist_ok=True)
     nums = {}
-    t_motivation(res, out)
     t_fifo(res, out)
-    t_burden(res, out)
     t_loc(os.path.join(here_paper, "..", ".."), out, nums)
-    t_service(res, out, nums)
-    t_xrt(res, out, nums)
-    t_actor(res, out)
-    t_dpq(res, out, nums)
+    t_service_nums(res, nums)
+    t_async_nums(res, nums)
+    t_sync_nums(res, nums)
+    t_clamp_units(res, out)
+    t_co2(res, out, nums)
     write(out, "numbers.typ", ['#let %s = "%s"' % (k, v) for k, v in sorted(nums.items())], imports=False)
     print("make_tables: wrote %s" % ", ".join(sorted(os.listdir(out))))
 

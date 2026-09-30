@@ -5,6 +5,152 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-30 — ordinary-waker co-pq, same-window matrix
+
+Repeated measurement of the ordinary-waker `co-pq` (entry below) against the
+references, from ONE frozen binary in one session: `coro-bench` sha256
+`f82e0ef1803637035b3eccf6687ac40326eec51df8e2478799b8f6132e7463b3`
+(built from the working tree; no commit id recorded), `tokio-bench` sha256
+`5ff465a4b8e5e6c2a1a4562e32b21cd544289a59d3abd7f3ecddc321096c97f8`.
+CPUs 0-15 capped at 3.0 GHz (`scaling_max_freq` 3000000). Coro cells ran
+2026-09-30T03:08:57Z-03:13:34Z under `flock` (repeats outermost, spin and yield
+interleaved), tokio cells 03:13:49Z-03:14:17Z. 120 coro + 12 tokio runs, 3
+repeats each, 2 s window after 200 ms warm-up, workers pinned to CPUs 0..W-1.
+Files `results/co2-<label>-w<W>-h8-b31-<sus|bur>-<spin|yield>-r<i>.json`
+(`scripts/run_co2.sh`, flags explicit; tokio:
+`co2-tokio-mutex-w8-h8-<cont>-<mode>-r<i>.json`, `scripts/run_co2_tokio.sh`);
+table by `python3 scripts/summarize_co2.py results`.
+Labels: `co-pq-sremote-k64-c256` is `--lock co-pq` at the default clamp 256 (the
+`-sremote-k64` in the label the binary writes are default settings that do not
+apply to co-pq); `-c0` is `--starvation-clamp 0`; `co-fifo-sremote-k64-home` is
+step-aside remote, chain 64, home break. The `pw1-*` files in `results/` are an
+unfinished earlier attempt and are not used here.
+
+### Verdicts (W8, 64 clients sustained, parallel work 4000 cycles, b31, heavy 8x)
+
+- **Ordinary wakers are enough for service fairness.** `co-pq` reaches service
+  Jain 1.000 (spin) / 0.999 (yield) in all 10 of its cells (W8 sustained and
+  bursty, W16 sustained, both modes; clamp 256 and 0 at W8), L:H served
+  5.08-5.27, zero starved clients or bystanders, foreign-CS Jain 0.999-1.000.
+- **It is slow. This contradicts the expectation that an ordinary wake plus an
+  async step-aside would land near the executor-aware locks.** Sustained spin:
+  0.260 [0.260, 0.260] Mops/s at o = 5771 [5768, 5776] cycles/op, against
+  `fcpq-h16-home-c16` 0.592 [0.591, 0.598] at o = 1183 (co-pq 0.44x ops/s at
+  nearly the same served mix, L:H 5.25 vs 5.32; o 4.9x) and
+  `dispatch-pq-home-c256` 0.306 at o = 4567 (co-pq 0.85x ops/s, o 1.26x: worse
+  than the plain hand-off mutex with home wakes). Yield does not change it
+  (0.265, o 5624), nor does W16 (0.253 / 0.254, o 5953 / 5925). Executor
+  counters (one run): every acquisition is a hand-off with one async
+  step-aside; placements are all `default` (inline, remote, home 0). Why an
+  ordinary wake costs 4.5-5.8 k cycles on this executor is not measured
+  [INFERENCE: the grantee joins the back of the releaser's worker queue behind
+  bystanders and other clients; `dispatch` behaves alike].
+- **The executor-aware tricks are worth 4-5x in `o`.** FIFO mix, sustained spin
+  (ops/s ratios are like for like at one mix): `dispatch` 0.211 / o 5453 vs
+  `co-fifo` (inline hand-off, step-aside) 0.352 / 1200, `ces-k64-home` 0.360 /
+  1141, `fc-remote` 0.371 / 991. Fair mix: `co-pq` 0.260 / 5771,
+  `dispatch-pq-home-c256` 0.306 / 4567 vs `fcpq-h16-home-c16` (combining)
+  0.592 / 1183. Yield gives the same picture (co-fifo 0.351 / 1221; dispatch
+  0.216 / 5221; fcpq 0.590 / 1194). An inline usage-ordered hand-off (the old
+  inline co-pq, `co1-*`, 0.520 Mops/s, o 1519, another session, superseded
+  code) is not measured with the current implementation.
+- **Spin vs yield: no effect sustained, an effect bursty for ordinary-wake
+  locks.** Sustained medians spin / yield (Mops/s): co-pq 0.260 / 0.265,
+  co-fifo 0.352 / 0.351, ces 0.360 / 0.362, fc-remote 0.371 / 0.371, fcpq
+  0.592 / 0.590, dispatch 0.211 / 0.216, dispatch-pq-home 0.306 / 0.304
+  (none moves more than 3 %; tokio-mutex moves 1.48x, below). Bursty, yield
+  helps the ordinary-wake locks: co-pq 0.120 -> 0.152 (1.27x),
+  dispatch-pq-home-c256 0.137 -> 0.172 (1.26x), dispatch 0.069 -> 0.104
+  (1.49x, still 0.35x `ces-k64-home`), while the inline locks do not
+  (co-fifo 0.305 -> 0.299, ces 0.308 -> 0.292). Sustained o stays 4.5-5.8 k
+  cycles for every ordinary-wake lock under yield, so the review's harness
+  artefact (I1) does not explain the sustained ordinary-wake cost.
+- **Clamp 256 vs 0**: throughput and Jain identical (0.260 / 0.259 and 1.000 /
+  1.000 sustained spin), but the worst queue wait is 257 hand-offs at clamp 256
+  (sustained, both modes) against 3102 [921, 7260] (spin) and 1418 [705, 1481]
+  (yield) at clamp 0. Bursty: 142 [127, 195] (256) vs 143 [130, 152] (0) spin,
+  257 [118, 257] vs 464 [205, 630] yield. The clamp costs nothing here and
+  bounds the worst wait.
+- **Bursty (16 clients, 32 000 cycles parallel work).** `co-pq` is fair (0.999)
+  where `fcpq` is not (0.702 spin, 0.696 yield), at 0.120 Mops/s spin (0.152
+  yield) against `fcpq` 0.356 / 0.351, `ces-k64-home` 0.308 / 0.292, `co-fifo`
+  0.305 / 0.299, `dispatch-pq-home-c256` 0.137 / 0.172. Bursty `o` includes
+  lock idle time (16 clients cannot saturate a lock), so it is not a per-op
+  lock cost.
+- **tokio::sync::Mutex (same session, `tokio-bench`, FIFO mix).** Spin 0.233
+  [0.233, 0.234] Mops/s, o 4419 (sustained) and 0.072 / o 25425 (bursty);
+  yield 0.347 [0.346, 0.347], o 1340, and 0.324 [0.323, 0.325], o 1842. Under
+  yield it equals the inline-hand-off locks (`co-fifo` 0.351 / o 1221, `ces`
+  0.362 / 1109; bursty 0.299, 0.292) and is 1.6x (sustained) / 3.1x (bursty)
+  the coro `dispatch` (0.216 / 0.104). Under spin it pays the LIFO-slot cost of
+  REVIEW I1 [INFERENCE: the wake lands in the unlocker's LIFO slot, behind its
+  parallel spin; this run did not toggle the slot]. Service Jain 0.671 (FIFO),
+  no starved client. The LIFO slot is thus tokio's own inline hand-off; our
+  `dispatch` has no counterpart (REVIEW I5). No usage-ordered lock was run on
+  tokio.
+- **Burden (foreign-CS Jain for ces/co-*, combining-cycles Jain for
+  fc/fcpq)**: 0.976-1.000 in every W8 sustained cell, lowest `fc-remote` spin
+  0.976 [0.973, 0.989]. Bystander p99 0.8-3.7 us in every sustained W8 cell;
+  bursty `ces-k64-home` / `co-fifo` 44.7 us spin and 29.8 us yield, `fc-remote`
+  and `fcpq` 29.8 us in both modes.
+- **Caveats.** The CS is a TSC-timed spin (no locality effect); `o` is a
+  residual elapsed time and in the bursty cells contains lock-idle time; usage
+  is cumulative and no client was intermittent (REVIEW I2); one machine; one
+  window with CPUs 0-15 capped at 3.0 GHz, so compare only inside this table.
+
+### Table (median [min, max] of 3; latencies are run-latency p99 in us)
+
+| cell | par | lock | n | Mops/s | svc. Jain | L:H | o | light / heavy p99 (µs) | burden J | byst p99 (µs) | starved c/b |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| W8 sus | spin | `co-pq-sremote-k64-c256` | 3 | 0.260 [0.260, 0.260] | 1.000 [1.000, 1.000] | 5.25 [5.24, 5.26] | 5771 [5768, 5776] | 194 [194, 194] / 804 [804, 834] | 1.000 [1.000, 1.000] | 3.3 [3.3, 3.3] | 0 / 0 |
+| W8 sus | spin | `co-pq-sremote-k64-c0` | 3 | 0.259 [0.259, 0.260] | 1.000 [1.000, 1.000] | 5.27 [5.26, 5.27] | 5804 [5799, 5817] | 194 [194, 194] / 834 [804, 834] | 1.000 [1.000, 1.000] | 3.3 [3.3, 3.3] | 0 / 0 |
+| W8 sus | spin | `co-fifo-sremote-k64-home` | 3 | 0.352 [0.352, 0.352] | 0.674 [0.674, 0.674] | 1.00 [1.00, 1.00] | 1200 [1199, 1206] | 186 [186, 186] / 186 [186, 186] | 0.993 [0.992, 0.993] | 3.0 [2.9, 3.1] | 0 / 0 |
+| W8 sus | spin | `ces-k64-home` | 3 | 0.360 [0.359, 0.361] | 0.668 [0.668, 0.668] | 1.00 [1.00, 1.00] | 1141 [1132, 1154] | 186 [186, 186] / 186 [186, 186] | 0.997 [0.997, 1.000] | 2.9 [2.9, 2.9] | 0 / 0 |
+| W8 sus | spin | `fc-remote` | 3 | 0.371 [0.371, 0.373] | 0.665 [0.665, 0.665] | 1.00 [1.00, 1.00] | 991 [963, 993] | 179 [179, 179] / 179 [179, 186] | 0.976 [0.973, 0.989] | 3.1 [3.1, 3.1] | 0 / 0 |
+| W8 sus | spin | `fcpq-h16-home-c16` | 3 | 0.592 [0.591, 0.598] | 0.997 [0.997, 0.997] | 5.32 [5.32, 5.34] | 1183 [1151, 1185] | 357 [343, 357] / 626 [626, 626] | 0.999 [0.999, 1.000] | 3.1 [3.1, 3.1] | 0 / 0 |
+| W8 sus | spin | `dispatch` | 3 | 0.211 [0.211, 0.213] | 0.668 [0.668, 0.668] | 1.00 [1.00, 1.00] | 5453 [5360, 5466] | 313 [313, 313] / 313 [313, 313] | – | 0.8 [0.8, 0.9] | 0 / 0 |
+| W8 sus | spin | `dispatch-pq-home-c256` | 3 | 0.306 [0.304, 0.307] | 1.000 [1.000, 1.000] | 5.44 [5.41, 5.46] | 4567 [4546, 4590] | 164 [164, 164] / 685 [685, 715] | – | 3.7 [3.7, 3.7] | 0 / 0 |
+| W8 sus | spin | `tokio-mutex` | 3 | 0.233 [0.233, 0.234] | 0.671 [0.670, 0.671] | 1.00 [1.00, 1.00] | 4419 [4417, 4427] | 268 [268, 268] / 268 [268, 268] | – | 16.8 [16.8, 17.7] | 0 / 0 |
+| W8 sus | yield | `co-pq-sremote-k64-c256` | 3 | 0.265 [0.263, 0.265] | 0.999 [0.999, 0.999] | 5.24 [5.20, 5.26] | 5624 [5614, 5653] | 186 [186, 194] / 804 [804, 804] | 1.000 [1.000, 1.000] | 3.1 [3.1, 3.1] | 0 / 0 |
+| W8 sus | yield | `co-pq-sremote-k64-c0` | 3 | 0.264 [0.263, 0.264] | 0.999 [0.999, 0.999] | 5.23 [5.23, 5.24] | 5660 [5652, 5674] | 186 [186, 186] / 804 [804, 804] | 1.000 [1.000, 1.000] | 3.1 [3.1, 3.1] | 0 / 0 |
+| W8 sus | yield | `co-fifo-sremote-k64-home` | 3 | 0.351 [0.351, 0.351] | 0.674 [0.674, 0.675] | 1.00 [1.00, 1.00] | 1221 [1221, 1226] | 186 [186, 186] / 186 [186, 186] | 0.997 [0.997, 0.998] | 2.4 [2.4, 2.4] | 0 / 0 |
+| W8 sus | yield | `ces-k64-home` | 3 | 0.362 [0.360, 0.362] | 0.669 [0.668, 0.669] | 1.00 [1.00, 1.00] | 1109 [1105, 1141] | 179 [179, 186] / 179 [179, 186] | 0.998 [0.998, 0.998] | 2.3 [2.3, 2.4] | 0 / 0 |
+| W8 sus | yield | `fc-remote` | 3 | 0.371 [0.370, 0.374] | 0.665 [0.665, 0.666] | 1.00 [1.00, 1.00] | 1003 [957, 1003] | 179 [179, 179] / 179 [179, 179] | 0.992 [0.988, 0.998] | 2.7 [2.7, 2.7] | 0 / 0 |
+| W8 sus | yield | `fcpq-h16-home-c16` | 3 | 0.590 [0.589, 0.595] | 0.997 [0.997, 0.997] | 5.33 [5.33, 5.34] | 1194 [1165, 1201] | 343 [343, 343] / 596 [596, 596] | 0.999 [0.999, 0.999] | 2.9 [2.9, 2.9] | 0 / 0 |
+| W8 sus | yield | `dispatch` | 3 | 0.216 [0.215, 0.216] | 0.669 [0.669, 0.669] | 1.00 [1.00, 1.00] | 5221 [5181, 5247] | 313 [313, 313] / 313 [313, 313] | – | 2.3 [2.3, 2.3] | 0 / 0 |
+| W8 sus | yield | `dispatch-pq-home-c256` | 3 | 0.304 [0.303, 0.305] | 1.000 [1.000, 1.000] | 5.41 [5.40, 5.46] | 4601 [4587, 4603] | 164 [164, 171] / 715 [715, 715] | – | 2.3 [2.3, 2.3] | 0 / 0 |
+| W8 sus | yield | `tokio-mutex` | 3 | 0.347 [0.346, 0.347] | 0.671 [0.670, 0.671] | 1.00 [1.00, 1.00] | 1340 [1329, 1353] | 179 [179, 179] / 179 [179, 179] | – | 13.0 [13.0, 13.5] | 0 / 0 |
+| W16 sus | spin | `co-pq-sremote-k64-c256` | 3 | 0.253 [0.251, 0.254] | 1.000 [1.000, 1.000] | 5.17 [5.14, 5.18] | 5953 [5945, 6010] | 201 [201, 201] / 834 [834, 834] | 0.999 [0.999, 1.000] | 1.1 [1.1, 1.2] | 0 / 0 |
+| W16 sus | spin | `co-fifo-sremote-k64-home` | 3 | 0.344 [0.343, 0.346] | 0.677 [0.677, 0.678] | 1.00 [1.00, 1.00] | 1321 [1280, 1324] | 194 [194, 194] / 194 [186, 194] | 0.999 [0.996, 0.999] | 2.6 [2.6, 2.7] | 0 / 0 |
+| W16 sus | spin | `fcpq-h16-home-c16` | 3 | 0.597 [0.594, 0.597] | 0.997 [0.997, 0.997] | 5.28 [5.27, 5.29] | 1128 [1119, 1132] | 134 [134, 134] / 566 [566, 566] | 0.998 [0.997, 0.998] | 2.4 [2.4, 2.4] | 0 / 0 |
+| W16 sus | spin | `dispatch-pq-home-c256` | 3 | 0.299 [0.299, 0.312] | 1.000 [1.000, 1.000] | 5.33 [5.32, 5.37] | 4671 [4371, 4686] | 164 [156, 164] / 715 [685, 715] | – | 3.5 [3.1, 3.5] | 0 / 0 |
+| W16 sus | yield | `co-pq-sremote-k64-c256` | 3 | 0.254 [0.249, 0.258] | 0.999 [0.999, 0.999] | 5.16 [5.03, 5.18] | 5925 [5809, 6007] | 201 [194, 223] / 834 [804, 953] | 0.999 [0.999, 1.000] | 1.6 [1.5, 1.6] | 0 / 0 |
+| W16 sus | yield | `co-fifo-sremote-k64-home` | 3 | 0.343 [0.343, 0.344] | 0.677 [0.676, 0.677] | 1.00 [1.00, 1.00] | 1322 [1317, 1323] | 186 [186, 194] / 186 [186, 186] | 0.998 [0.997, 0.998] | 2.2 [2.2, 2.2] | 0 / 0 |
+| W16 sus | yield | `fcpq-h16-home-c16` | 3 | 0.592 [0.574, 0.597] | 0.997 [0.997, 0.998] | 5.27 [5.13, 5.30] | 1142 [1126, 1167] | 127 [127, 171] / 566 [566, 566] | 0.998 [0.997, 0.998] | 2.2 [2.2, 2.2] | 0 / 0 |
+| W16 sus | yield | `dispatch-pq-home-c256` | 3 | 0.295 [0.293, 0.297] | 1.000 [1.000, 1.000] | 5.30 [5.29, 5.34] | 4769 [4727, 4808] | 171 [171, 171] / 715 [715, 715] | – | 2.2 [2.2, 2.2] | 0 / 0 |
+| W8 bur | spin | `co-pq-sremote-k64-c256` | 3 | 0.120 [0.120, 0.120] | 0.999 [0.999, 0.999] | 5.09 [5.08, 5.10] | 15566 [15558, 15590] | 127 [127, 127] / 477 [477, 477] | 1.000 [1.000, 1.000] | 2.3 [2.3, 2.3] | 0 / 0 |
+| W8 bur | spin | `co-pq-sremote-k64-c0` | 3 | 0.120 [0.120, 0.120] | 0.999 [0.999, 0.999] | 5.08 [5.08, 5.09] | 15583 [15575, 15606] | 127 [127, 127] / 477 [477, 477] | 1.000 [1.000, 1.000] | 2.3 [2.3, 2.3] | 0 / 0 |
+| W8 bur | spin | `co-fifo-sremote-k64-home` | 3 | 0.305 [0.305, 0.305] | 0.692 [0.692, 0.692] | 1.09 [1.09, 1.09] | 2274 [2266, 2277] | 60 [60, 60] / 60 [60, 60] | 0.999 [0.999, 0.999] | 44.7 [42.8, 44.7] | 0 / 0 |
+| W8 bur | spin | `ces-k64-home` | 3 | 0.308 [0.296, 0.309] | 0.686 [0.685, 0.687] | 1.12 [1.11, 1.12] | 2357 [2352, 2653] | 63 [63, 67] / 63 [63, 67] | 0.999 [0.998, 0.999] | 44.7 [44.7, 44.7] | 0 / 0 |
+| W8 bur | spin | `fc-remote` | 3 | 0.297 [0.295, 0.299] | 0.666 [0.666, 0.667] | 1.00 [1.00, 1.00] | 2448 [2399, 2498] | 58 [58, 60] / 58 [58, 60] | 1.000 [1.000, 1.000] | 29.8 [29.8, 31.6] | 0 / 0 |
+| W8 bur | spin | `fcpq-h16-home-c16` | 3 | 0.356 [0.355, 0.357] | 0.702 [0.702, 0.703] | 1.23 [1.23, 1.23] | 1586 [1580, 1615] | 67 [67, 67] / 78 [78, 78] | 1.000 [1.000, 1.000] | 29.8 [29.8, 29.8] | 0 / 0 |
+| W8 bur | spin | `dispatch` | 3 | 0.069 [0.069, 0.069] | 0.678 [0.678, 0.679] | 1.00 [1.00, 1.00] | 26590 [26587, 26646] | 238 [238, 253] / 238 [238, 238] | – | 0.9 [0.8, 0.9] | 0 / 0 |
+| W8 bur | spin | `dispatch-pq-home-c256` | 3 | 0.137 [0.136, 0.137] | 1.000 [1.000, 1.000] | 5.35 [5.35, 5.39] | 13409 [13356, 13469] | 108 [108, 112] / 536 [506, 566] | – | 11.2 [5.1, 11.6] | 0 / 0 |
+| W8 bur | spin | `tokio-mutex` | 3 | 0.072 [0.072, 0.072] | 0.677 [0.677, 0.678] | 1.00 [1.00, 1.00] | 25425 [25404, 25431] | 209 [209, 209] / 209 [209, 209] | – | 1.7 [1.5, 1.8] | 0 / 0 |
+| W8 bur | yield | `co-pq-sremote-k64-c256` | 3 | 0.152 [0.152, 0.153] | 0.999 [0.999, 0.999] | 5.09 [5.08, 5.09] | 11690 [11664, 11699] | 93 [93, 93] / 402 [402, 402] | 1.000 [1.000, 1.000] | 6.5 [6.5, 6.5] | 0 / 0 |
+| W8 bur | yield | `co-pq-sremote-k64-c0` | 3 | 0.152 [0.152, 0.153] | 0.999 [0.999, 0.999] | 5.08 [5.08, 5.09] | 11688 [11659, 11698] | 93 [93, 93] / 402 [402, 402] | 1.000 [1.000, 1.000] | 6.3 [6.3, 6.5] | 0 / 0 |
+| W8 bur | yield | `co-fifo-sremote-k64-home` | 3 | 0.299 [0.298, 0.299] | 0.694 [0.694, 0.695] | 1.10 [1.10, 1.10] | 2446 [2425, 2453] | 56 [56, 56] / 56 [56, 56] | 1.000 [1.000, 1.000] | 29.8 [29.8, 29.8] | 0 / 0 |
+| W8 bur | yield | `ces-k64-home` | 3 | 0.292 [0.291, 0.293] | 0.686 [0.685, 0.686] | 1.11 [1.11, 1.11] | 2734 [2710, 2767] | 58 [58, 60] / 60 [60, 60] | 0.999 [0.999, 1.000] | 29.8 [29.8, 29.8] | 0 / 0 |
+| W8 bur | yield | `fc-remote` | 3 | 0.287 [0.287, 0.291] | 0.668 [0.667, 0.668] | 1.00 [1.00, 1.00] | 2715 [2616, 2718] | 58 [56, 58] / 58 [56, 58] | 1.000 [1.000, 1.000] | 29.8 [29.8, 29.8] | 0 / 0 |
+| W8 bur | yield | `fcpq-h16-home-c16` | 3 | 0.351 [0.347, 0.351] | 0.696 [0.696, 0.697] | 1.19 [1.18, 1.19] | 1613 [1612, 1676] | 52 [52, 52] / 60 [60, 60] | 1.000 [1.000, 1.000] | 29.8 [29.8, 29.8] | 0 / 0 |
+| W8 bur | yield | `dispatch` | 3 | 0.104 [0.103, 0.104] | 0.676 [0.676, 0.677] | 1.00 [1.00, 1.00] | 16151 [16046, 16218] | 186 [186, 186] / 186 [186, 186] | – | 4.2 [4.2, 4.4] | 0 / 0 |
+| W8 bur | yield | `dispatch-pq-home-c256` | 3 | 0.172 [0.166, 0.173] | 1.000 [1.000, 1.000] | 5.26 [5.26, 5.27] | 10040 [9975, 10554] | 82 [78, 82] / 357 [343, 372] | – | 12.1 [12.1, 14.9] | 0 / 0 |
+| W8 bur | yield | `tokio-mutex` | 3 | 0.324 [0.323, 0.325] | 0.671 [0.671, 0.672] | 1.02 [1.02, 1.02] | 1842 [1813, 1856] | 24 [24, 24] / 25 [25, 26] | – | 52.1 [50.3, 52.1] | 0 / 0 |
+
+`o` for `dispatch` bursty spin (26 590) and `tokio-mutex` (25 425) is about one
+32 000-cycle parallel spin: the grantee waits behind the unlocker's spin.
+Burden for `dispatch`, `dispatch-pq` and `tokio-mutex` is not defined (`-`).
+
 ## 2026-09-30 — co-pq uses ordinary wakers only
 
 Supersedes the Home-placement change below. `co-pq` now calls the selected

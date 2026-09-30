@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use workload::{Config, LockId, Report};
+use workload::{Config, LockId, ParallelMode, Report};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -51,6 +51,11 @@ struct Cli {
     /// Bystander work per poll, TSC cycles (default: = light CS)
     #[arg(long)]
     bystander_work_cycles: Option<u64>,
+    /// Client parallel work: spin (in the poll that finished the op, the
+    /// original) | yield (`yield_now().await`, then spin). Recorded as
+    /// `config.parallel_mode`, not in the label
+    #[arg(long, value_enum, default_value_t = ParallelMode::Spin)]
+    parallel_mode: ParallelMode,
     /// Random key space of the BTreeMap inserts
     #[arg(long, default_value_t = 65_536)]
     key_space: u64,
@@ -87,6 +92,7 @@ impl Cli {
             warmup_ms: self.warmup_ms,
             seed: self.seed,
             unique_keys: false,
+            parallel_mode: self.parallel_mode,
         }
     }
 }
@@ -157,11 +163,12 @@ fn main() {
 fn print_summary(r: &Report) {
     let us = |c: u64| c as f64 / r.tsc_hz * 1e6;
     eprintln!(
-        "{} (tokio) workers={} clients={} heavy_ratio={} measured={:.3}s ops={} throughput={:.0} ops/s",
+        "{} (tokio) workers={} clients={} heavy_ratio={} parallel_mode={} measured={:.3}s ops={} throughput={:.0} ops/s",
         r.lock,
         r.config.workers,
         r.config.clients,
         r.config.heavy_ratio,
+        r.config.parallel_mode.label(),
         r.measured_secs,
         r.total_ops,
         r.throughput_ops_per_s

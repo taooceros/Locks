@@ -4,8 +4,9 @@
 //! Identical to the original: shared `BTreeMap<u64, u64>`; a critical section
 //! inserts a key from a per-client xorshift stream (same seed derivation) and
 //! spins `class_cost` cycles; even client ids light, odd heavy
-//! (`heavy_ratio` x light); each client loops `run(cs).await` then spins
-//! `parallel_work` cycles; bystanders loop `spin(bystander_work)` +
+//! (`heavy_ratio` x light); each client loops `run(cs).await` then spends
+//! `parallel_work` cycles ([`ParallelMode`]: spun in the same poll, or after
+//! one `yield_now().await`); bystanders loop `spin(bystander_work)` +
 //! `yield_now().await`; warm-up -> measure -> stop, an op is attributed to the
 //! phase in which it started; service cycles are measured inside the critical
 //! section (insert + spin). Differences, all forced by the runtime:
@@ -192,6 +193,31 @@ pub struct Config {
     pub seed: u64,
     /// Sanity mode: every client inserts unique keys so `len == ops`.
     pub unique_keys: bool,
+    /// How a client spends its parallel work after each op (as
+    /// `coro_delegation`'s `config.parallel_mode`).
+    pub parallel_mode: ParallelMode,
+}
+
+/// How a client spends `parallel_work_cycles` after an op; same semantics
+/// as `coro_delegation::workload::ParallelMode` (REVIEW-2026-09-30 I1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ParallelMode {
+    /// Spin synchronously in the poll that finished the op (the original
+    /// harness; worst case for tokio's LIFO slot).
+    #[default]
+    Spin,
+    /// `tokio::task::yield_now().await`, then spin in a later poll.
+    Yield,
+}
+
+impl ParallelMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            ParallelMode::Spin => "spin",
+            ParallelMode::Yield => "yield",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -345,6 +371,9 @@ async fn client_task<L: BenchLock>(
             res.ops += 1;
             res.service_cycles += dt;
             res.run_latency.record(cycles().wrapping_sub(t0));
+        }
+        if cfg.parallel_mode == ParallelMode::Yield {
+            yield_now().await;
         }
         spin_cycles(cfg.parallel_work_cycles);
     }
