@@ -9,8 +9,15 @@ default = ["combiner_stat"]
 combiner_stat = []
 # Spin-then-park waiters in FC and FC-PQ (plan/2026-09-27/e0a-spin-then-park.md).
 spin_park = []
+# Wake-on-pick blocking waiters (TCLocks-style) in FC and FC-PQ; excludes
+# `spin_park` (plan/2026-09-30/fcpq-block-wake-on-pick.md).
+block_park = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# `RUSTFLAGS="--cfg loom"` selects the loom models (`dlock2/park/loom_model.rs`).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [build-dependencies]
 bindgen = "0"
@@ -24,6 +31,9 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_with = { version = "3" }
 serial_test = { version = "3" }
 criterion = { version = "0.5.1", features = ["html_reports"] }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"
 
 
 [dependencies]

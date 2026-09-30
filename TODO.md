@@ -85,6 +85,16 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   cs=20000: FC +19%, FC-PQ +10%, CPU-s 16.0 -> 13.5-15.1. 8 threads on 8
   CPUs: -1 to -4%. Tuning of the budget is left to E1/E3.)*
 
+- [x] **(a') Wake-on-pick blocking waiters (`block_park`).**
+  *(Implemented 2026-09-30 in `fcpq-block`,
+  [plan](plan/2026-09-30/fcpq-block-wake-on-pick.md). TCLocks-style
+  `WAITING -> PARKED` (waiter CAS) / `* -> PICKED` (combiner swap, wake iff
+  parked) on the E0(a) park word; wake at pick (FC scan, FC-PQ pop) before
+  the delegate, optional FC-PQ lookahead `DLOCK_WAKE_LOOKAHEAD=1`; no
+  deferred fence. Handshakes 2 and 3 kept. Loom model
+  `dlock2/park/loom_model.rs`; `thread_churn` test ported for FC and
+  FC-PQ. Measurement by the fcpq-block bench/redb runs.)*
+
 - [ ] **(b) Trim FC-PQ per-request tax.**
   Sample `__rdtscp` every k requests; bound heap arity.
   Target: FC-PQ/FC >= 0.95 at 1 worker.

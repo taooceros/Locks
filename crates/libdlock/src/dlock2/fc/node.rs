@@ -11,8 +11,8 @@ pub struct Node<T> {
     pub active: CachePadded<AtomicBool>,
     pub data: SyncUnsafeCell<MaybeUninit<T>>,
     pub complete: AtomicBool,
-    /// Futex word for spin-then-park; see `dlock2/park.rs`.
-    #[cfg(feature = "spin_park")]
+    /// Futex word for `spin_park` / `block_park`; see `dlock2/park.rs`.
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     pub park: crate::dlock2::park::ParkSlot,
     pub next: AtomicPtr<Node<T>>,
     #[cfg(feature = "combiner_stat")]
@@ -29,7 +29,7 @@ impl<T> Node<T> {
             age: 0.into(),
             active: AtomicBool::new(false).into(),
             complete: AtomicBool::new(false),
-            #[cfg(feature = "spin_park")]
+            #[cfg(any(feature = "spin_park", feature = "block_park"))]
             park: crate::dlock2::park::ParkSlot::new(),
             data: SyncUnsafeCell::new(MaybeUninit::uninit()),
             next: AtomicPtr::default(),

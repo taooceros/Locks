@@ -6,7 +6,7 @@ use lock_api::RawMutex;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use std::fmt::Debug;
 use std::mem::MaybeUninit;
-#[cfg(feature = "spin_park")]
+#[cfg(any(feature = "spin_park", feature = "block_park"))]
 use std::sync::atomic::AtomicU32;
 use std::thread::current;
 use std::{
@@ -18,7 +18,7 @@ use crossbeam::utils::{Backoff, CachePadded};
 
 use thread_local::ThreadLocal;
 
-#[cfg(feature = "spin_park")]
+#[cfg(any(feature = "spin_park", feature = "block_park"))]
 use crate::dlock2::park::{self, Parked, SpinBudget};
 use crate::{
     atomic_extension::AtomicExtension,
@@ -125,7 +125,7 @@ where
     combine_pass: SyncUnsafeCell<u64>,
     /// Waiters that published `PARKED` and are not yet resolved
     /// (`dlock2/park.rs`, handshake 2).
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     parked: CachePadded<AtomicU32>,
 }
 
@@ -148,7 +148,7 @@ where
             total_usage: SyncUnsafeCell::new(0),
             total_served: SyncUnsafeCell::new(0),
             combine_pass: SyncUnsafeCell::new(0),
-            #[cfg(feature = "spin_park")]
+            #[cfg(any(feature = "spin_park", feature = "block_park"))]
             parked: CachePadded::new(AtomicU32::new(0)),
         }
     }
@@ -162,7 +162,7 @@ where
         ));
     }
 
-    #[cfg(not(feature = "spin_park"))]
+    #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
     fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(Acquire) {
             return;
@@ -176,7 +176,7 @@ where
     /// SeqCst `complete = false`, so this and the combiner's
     /// `active = false; load complete` in `retire_or_requeue` cannot both
     /// miss; the CAS lets exactly one side enroll the node.
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(SeqCst) {
             return;
@@ -193,7 +193,7 @@ where
 
     /// A popped entry whose node was found complete: deactivate it so the
     /// owner re-enrolls next time, or push it back if a request is pending.
-    #[cfg(not(feature = "spin_park"))]
+    #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
     fn retire_or_requeue(&self, job_queue: &mut PQ, entry: UsageNode<'static, I>) {
         if entry.node.complete.load(Acquire) {
             entry.node.usage.store_release(entry.usage);
@@ -207,7 +207,7 @@ where
     /// `complete`; if the owner published a request and could still miss
     /// the deactivation, win the CAS and keep the entry queued so a parked
     /// owner is never left with an unenrolled request.
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     fn retire_or_requeue(&self, job_queue: &mut PQ, entry: UsageNode<'static, I>) {
         let node = entry.node;
         if !node.complete.load(Acquire) {
@@ -228,13 +228,13 @@ where
 
     /// Releases `combiner_lock`. Every release of the combiner lock, including
     /// one by a holder that did not combine (the forthcoming uncontended
-    /// fast path), must go through here: under `spin_park` the release is
+    /// fast path), must go through here: with a park feature the release is
     /// followed by the fenced `parked` check of handshake 2, re-acquiring and
     /// combining while some waiter is parked (or until another holder takes
     /// over that obligation).
     fn release_combiner(&self) {
         unsafe { self.combiner_lock.unlock() };
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         while park::parked_after_unlock(&self.parked) && self.combiner_lock.try_lock() {
             self.combine();
             unsafe { self.combiner_lock.unlock() };
@@ -324,6 +324,11 @@ where
                 let node = current.node;
 
                 if !node.complete.load(Acquire) {
+                    // `block_park`: popping the entry picks the request;
+                    // wake its owner now, before the delegate, if parked.
+                    #[cfg(feature = "block_park")]
+                    node.park.pick(&self.parked);
+
                     // Anti-starvation: if this node has been waiting too many
                     // passes, clamp its usage to the current queue minimum so
                     // it gets served promptly.
@@ -339,6 +344,16 @@ where
                     // core's cache line.
                     if let Some(next) = job_queue.peek() {
                         prefetch_node(next.node);
+                        // `block_park` lookahead: the next heap top is the
+                        // next pick unless the pass limit intervenes; wake
+                        // its owner so the futex latency overlaps this
+                        // delegate. A stale entry (request complete) is
+                        // skipped; a `PICKED` owner keeps spinning and its
+                        // `try_lock` polling covers a pass that ends first.
+                        #[cfg(feature = "block_park")]
+                        if park::WAKE_LOOKAHEAD >= 1 && !next.node.complete.load(Acquire) {
+                            next.node.park.pick(&self.parked);
+                        }
                     }
 
                     // alternatively we can potentially save one __rdtscp by using `end` here
@@ -438,13 +453,21 @@ where
         // release below publishes the new input without borrowing &mut Node.
         let node = unsafe { &*node.get() };
         unsafe { node.data.get().write(MaybeUninit::new(data)) };
-        #[cfg(not(feature = "spin_park"))]
+        // `block_park`: clear the `PICKED` left by the previous request;
+        // the SeqCst store below publishes the request after it.
+        #[cfg(feature = "block_park")]
+        node.park.reset();
+        #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
         node.complete.store(false, Release);
         // Handshake 3: SeqCst pairs with the combiner's SeqCst `active = false`.
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         node.complete.store(false, SeqCst);
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         let mut budget = SpinBudget::default();
+        // `block_park`: once a combiner has picked the request its owner
+        // only spins; `PICKED` is terminal for the request.
+        #[cfg(feature = "block_park")]
+        let mut picked = false;
 
         'outer: loop {
             self.push_if_unactive(node);
@@ -462,7 +485,11 @@ where
                 // which re-checks completion and enrollment, tries the lock
                 // once more, and only then sleeps (`dlock2/park.rs`).
                 #[cfg(feature = "spin_park")]
-                if budget.exhausted() {
+                let try_park = budget.exhausted();
+                #[cfg(feature = "block_park")]
+                let try_park = !picked && budget.exhausted();
+                #[cfg(any(feature = "spin_park", feature = "block_park"))]
+                if try_park {
                     match node.park.park_or_lock(
                         &self.parked,
                         &node.complete,
@@ -478,6 +505,8 @@ where
                             }
                         }
                         Parked::Retry => {}
+                        #[cfg(feature = "block_park")]
+                        Parked::Picked => picked = true,
                     }
                     continue 'outer;
                 }

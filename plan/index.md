@@ -19,6 +19,11 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     `spin_park` feature with measured smoke results; default builds unchanged
   - Scope: FC and FC-PQ waiter loop, wake/progress/enrollment protocol,
     `release_combiner()` contract that the FC-PQ fast path (E0(b)) must keep
+- [Blocking waiters: wake-on-pick](./2026-09-30/fcpq-block-wake-on-pick.md)
+  - Status: approved 2026-09-30; implementation and measurement in
+    `.worktree/jj/fcpq-block`
+  - Scope: TCLocks-style park/wake state word, wake when the combiner picks a
+    request, budget 0/5/100, FC-PQ lookahead; microbench then redb
 
 ### Theoretical analysis (formal version of the thesis)
 
@@ -48,6 +53,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
     (2026-09-23) is superseded by the publication analysis above
 
 ## By Date
+- 2026-09-30: [Blocking waiters: wake-on-pick](./2026-09-30/fcpq-block-wake-on-pick.md)
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 
 ### 2026-09-27

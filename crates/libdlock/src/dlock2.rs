@@ -23,7 +23,7 @@ pub mod dsm;
 pub mod fc;
 pub mod fc_ban;
 pub mod fc_sl;
-#[cfg(feature = "spin_park")]
+#[cfg(any(feature = "spin_park", feature = "block_park"))]
 pub mod park;
 pub mod rcl;
 

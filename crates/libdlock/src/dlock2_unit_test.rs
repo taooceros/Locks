@@ -374,6 +374,222 @@ mod idle_holder_release {
     }
 }
 
+// Ported from the E0(b) FC-PQ churn test (`fcpq-churn-test`, change
+// `vsxnputn`), generalized to FC. Short-lived threads exit right after their
+// last response, so `thread_local` hands later threads exited threads' nodes
+// (with their park word, usage and served history); with a park feature the
+// waiters of a wave park and are woken by hammers' combining passes.
+mod thread_churn {
+    use super::*;
+    use std::{
+        hint::spin_loop,
+        sync::atomic::{
+            AtomicBool, AtomicUsize,
+            Ordering::{Relaxed, SeqCst},
+        },
+    };
+
+    const ROUNDS: usize = if cfg!(miri) { 3 } else { 2_000 };
+    const MAX_REQUESTS: usize = 40;
+    const THINK_SPINS: usize = if cfg!(miri) { 10 } else { 200 };
+
+    #[derive(Debug)]
+    struct Request {
+        worker: usize,
+        sequence: usize,
+        ticket: u64,
+        /// How often this (worker, sequence) had executed, this run included.
+        executions: u32,
+    }
+
+    #[derive(Debug)]
+    struct State {
+        tickets: u64,
+        seen: Vec<Vec<u32>>,
+        executions: Arc<Vec<AtomicUsize>>,
+    }
+
+    fn serve(state: &mut State, mut request: Request) -> Request {
+        state.tickets += 1;
+        request.ticket = state.tickets;
+        // Rows grow on demand for workers of unbounded length.
+        let row = &mut state.seen[request.worker];
+        if row.len() <= request.sequence {
+            row.resize(request.sequence + 1, 0);
+        }
+        let seen = &mut row[request.sequence];
+        *seen += 1;
+        request.executions = *seen;
+        state.executions[request.worker].fetch_add(1, Relaxed);
+        request
+    }
+
+    type Serve = fn(&mut State, Request) -> Request;
+    type ChurnFC = FC<State, Request, Serve>;
+    type ChurnBTree = FCPQ<State, Request, BTreeSet<UsageNode<'static, Request>>, Serve>;
+    type ChurnBHeap = FCPQ<State, Request, BinaryHeap<Reverse<UsageNode<'static, Request>>>, Serve>;
+
+    fn new_lock<L>(make: fn(State, Serve) -> L, workers: usize) -> (Arc<L>, Arc<Vec<AtomicUsize>>) {
+        let executions = Arc::new(
+            (0..workers)
+                .map(|_| AtomicUsize::new(0))
+                .collect::<Vec<_>>(),
+        );
+        let state = State {
+            tickets: 0,
+            seen: vec![vec![0; MAX_REQUESTS]; workers],
+            executions: executions.clone(),
+        };
+        (Arc::new(make(state, serve)), executions)
+    }
+
+    fn issue<L: DLock2<Request>>(lock: &L, worker: usize, sequence: usize) -> u64 {
+        let response = lock.lock(Request {
+            worker,
+            sequence,
+            ticket: 0,
+            executions: 0,
+        });
+        assert_eq!(
+            (response.worker, response.sequence),
+            (worker, sequence),
+            "response delivered to the wrong request",
+        );
+        assert_eq!(
+            response.executions, 1,
+            "request ({worker}, {sequence}) executed {} times, ticket {}",
+            response.executions, response.ticket,
+        );
+        response.ticket
+    }
+
+    /// Sets the flag when dropped, so a failing test does not leave its
+    /// hammers spinning under the rest of the suite.
+    struct StopOnDrop(Arc<AtomicBool>);
+
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, SeqCst);
+        }
+    }
+
+    /// Two lock instances. Long-lived hammers alternate between them while
+    /// waves of short-lived threads each send 1..=40 requests to one lock
+    /// and exit right after their last response. Spinning threads alive at
+    /// once never exceed the available parallelism (one CPU: no hammers);
+    /// the per-lock tests are serial so they do not add up.
+    fn run<L>(make: fn(State, Serve) -> L)
+    where
+        L: DLock2<Request> + Send + Sync + 'static,
+    {
+        let cpus = thread::available_parallelism().map_or(1, |n| n.get());
+        let hammers = (cpus / 2).min(4);
+        let batch = (cpus - hammers).clamp(1, 6);
+        // Worker ids: hammers, then churn threads, then one probe per lock.
+        let probe = hammers + ROUNDS * batch;
+        let locks: Arc<[_; 2]> = Arc::new([(); 2].map(|_| new_lock(make, probe + 1)));
+        let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
+
+        let hammer_handles: Vec<_> = (0..hammers)
+            .map(|worker| {
+                let (locks, stop) = (locks.clone(), stop.0.clone());
+                thread::spawn(move || {
+                    let mut tickets = [Vec::new(), Vec::new()];
+                    let mut next = worker;
+                    while !stop.load(Relaxed) {
+                        let l = next % 2;
+                        tickets[l].push(issue(&*locks[l].0, worker, tickets[l].len()));
+                        next += 1;
+                    }
+                    tickets
+                })
+            })
+            .collect();
+
+        // tickets[l][worker]: tickets returned to `worker` by lock `l`.
+        let mut tickets = [vec![Vec::new(); probe + 1], vec![Vec::new(); probe + 1]];
+        for round in 0..ROUNDS {
+            let wave: Vec<_> = (0..batch)
+                .map(|k| {
+                    let locks = locks.clone();
+                    let worker = hammers + round * batch + k;
+                    let l = (round + k) % 2;
+                    let requests = 1 + (round * 7 + k * 3) % MAX_REQUESTS;
+                    let think = if k % 2 == 0 { THINK_SPINS } else { 0 };
+                    let handle = thread::spawn(move || {
+                        (0..requests)
+                            .map(|sequence| {
+                                (0..think).for_each(|_| spin_loop());
+                                issue(&*locks[l].0, worker, sequence)
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                    (l, worker, handle)
+                })
+                .collect();
+            for (l, worker, handle) in wave {
+                tickets[l][worker] = handle.join().expect("churn thread panicked");
+            }
+        }
+        drop(stop);
+        for (worker, handle) in hammer_handles.into_iter().enumerate() {
+            let [t0, t1] = handle.join().expect("hammer panicked");
+            (tickets[0][worker], tickets[1][worker]) = (t0, t1);
+        }
+
+        for l in 0..2 {
+            let total: usize = tickets[l].iter().map(Vec::len).sum();
+            // All issuers have exited, so a fresh thread may reuse one's node;
+            // its combine pass would run any request still enrolled.
+            let probe_ticket = {
+                let locks = locks.clone();
+                thread::spawn(move || issue(&*locks[l].0, probe, 0))
+                    .join()
+                    .expect("probe panicked")
+            };
+            assert_eq!(
+                probe_ticket,
+                total as u64 + 1,
+                "lock {l}: executions without a response",
+            );
+            tickets[l][probe].push(probe_ticket);
+            let executions = &locks[l].1;
+            for (worker, worker_tickets) in tickets[l].iter().enumerate() {
+                assert_eq!(
+                    executions[worker].load(Relaxed),
+                    worker_tickets.len(),
+                    "lock {l}, worker {worker}: executions != requests",
+                );
+            }
+            let mut all: Vec<u64> = tickets[l].concat();
+            all.sort_unstable();
+            assert_eq!(
+                all,
+                (1..=total as u64 + 1).collect::<Vec<_>>(),
+                "lock {l}: missing or duplicated execution",
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn fc() {
+        panic_after(Duration::from_secs(120), || run(ChurnFC::new));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn fc_pq_bheap() {
+        panic_after(Duration::from_secs(120), || run(ChurnBHeap::new));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn fc_pq_btree() {
+        panic_after(Duration::from_secs(120), || run(ChurnBTree::new));
+    }
+}
+
 // Reuse each worker's published node across many requests. The payload owns a
 // non-Copy heap allocation and is dropped by the caller, never by a stale PQ
 // entry or a stale copy left in a MaybeUninit slot.

@@ -12,7 +12,7 @@ use crossbeam::utils::{Backoff, CachePadded};
 use lock_api::RawMutex;
 use thread_local::ThreadLocal;
 
-#[cfg(feature = "spin_park")]
+#[cfg(any(feature = "spin_park", feature = "block_park"))]
 use crate::dlock2::park::{self, Parked, SpinBudget};
 use crate::dlock2::{DLock2, DLock2Delegate};
 
@@ -36,7 +36,7 @@ where
     local_node: ThreadLocal<SyncUnsafeCell<Node<I>>>,
     /// Waiters that published `PARKED` and are not yet resolved
     /// (`dlock2/park.rs`, handshake 2).
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     parked: CachePadded<AtomicU32>,
 }
 
@@ -55,13 +55,13 @@ where
             data: SyncUnsafeCell::new(data),
             head: AtomicPtr::new(std::ptr::null_mut()),
             local_node: ThreadLocal::new(),
-            #[cfg(feature = "spin_park")]
+            #[cfg(any(feature = "spin_park", feature = "block_park"))]
             parked: CachePadded::new(AtomicU32::new(0)),
         }
     }
 
     /// Links an unlinked node at the head. Callers have already set
-    /// `active`; the owner and (under `spin_park`) the cleaner use it.
+    /// `active`; the owner and (with a park feature) the cleaner use it.
     fn link_node(&self, node: &Node<I>) {
         // The list stores addresses, not exclusive borrows. Each ThreadLocal
         // allocation stays fixed until all calls finish and FC is dropped.
@@ -81,7 +81,7 @@ where
         }
     }
 
-    #[cfg(not(feature = "spin_park"))]
+    #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
     fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(Acquire) {
             return;
@@ -94,7 +94,7 @@ where
     /// SeqCst `complete = false`, so this and the cleaner's
     /// `active = false; load complete` cannot both miss; the CAS lets
     /// exactly one side link the node.
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     fn push_if_unactive(&self, node: &Node<I>) {
         if node.active.load(SeqCst) {
             return;
@@ -136,6 +136,10 @@ where
             let current = unsafe { current_nonnull.as_ref() };
 
             if current.active.load(Acquire) && !current.complete.load(Acquire) {
+                // `block_park`: the scan picked this request; wake its owner
+                // now, before the delegate, if it is parked.
+                #[cfg(feature = "block_park")]
+                current.park.pick(&self.parked);
                 // SAFETY: acquire of complete=false observes the requester's
                 // release publication. Combiner exclusion gives one reader/writer
                 // of the payload and age; complete=true hands the result back.
@@ -195,13 +199,13 @@ where
     }
 
     /// Releases `combiner_lock`. Every release of the combiner lock, including
-    /// one by a holder that did not combine, must go through here: under
-    /// `spin_park` the release is followed by the fenced `parked` check of
+    /// one by a holder that did not combine, must go through here: with a
+    /// park feature the release is followed by the fenced `parked` check of
     /// handshake 2, re-acquiring and combining while some waiter is parked
     /// (or until another holder takes over that obligation).
     fn release_combiner(&self) {
         unsafe { self.combiner_lock.unlock() };
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         while park::parked_after_unlock(&self.parked) && self.combiner_lock.try_lock() {
             self.combine_locked();
             unsafe { self.combiner_lock.unlock() };
@@ -237,7 +241,7 @@ where
         }
     }
 
-    #[cfg(not(feature = "spin_park"))]
+    #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
     fn retire_unlinked(&self, node: &Node<I>) {
         node.active.store(false, Release);
     }
@@ -253,7 +257,7 @@ where
     /// store in the total order, so its SeqCst `complete = false` (which it
     /// stored first) precedes the SeqCst load below, which then sees the
     /// pending request and re-links while the combiner lock is still held.
-    #[cfg(feature = "spin_park")]
+    #[cfg(any(feature = "spin_park", feature = "block_park"))]
     fn retire_unlinked(&self, node: &Node<I>) {
         node.active.store(false, SeqCst);
         if !node.complete.load(SeqCst)
@@ -293,13 +297,21 @@ where
         // taking the preceding result; release below publishes its input.
         let node = unsafe { &*node.get() };
         unsafe { node.data.get().write(MaybeUninit::new(data)) };
-        #[cfg(not(feature = "spin_park"))]
+        // `block_park`: clear the `PICKED` left by the previous request;
+        // the SeqCst store below publishes the request after it.
+        #[cfg(feature = "block_park")]
+        node.park.reset();
+        #[cfg(not(any(feature = "spin_park", feature = "block_park")))]
         node.complete.store(false, Release);
         // Handshake 3: SeqCst pairs with the cleaner's SeqCst `active = false`.
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         node.complete.store(false, SeqCst);
-        #[cfg(feature = "spin_park")]
+        #[cfg(any(feature = "spin_park", feature = "block_park"))]
         let mut budget = SpinBudget::default();
+        // `block_park`: once a combiner has picked the request its owner
+        // only spins; `PICKED` is terminal for the request.
+        #[cfg(feature = "block_park")]
+        let mut picked = false;
 
         'outer: loop {
             self.push_if_unactive(node);
@@ -317,7 +329,11 @@ where
                 // which re-checks completion and enrollment, tries the lock
                 // once more, and only then sleeps (`dlock2/park.rs`).
                 #[cfg(feature = "spin_park")]
-                if budget.exhausted() {
+                let try_park = budget.exhausted();
+                #[cfg(feature = "block_park")]
+                let try_park = !picked && budget.exhausted();
+                #[cfg(any(feature = "spin_park", feature = "block_park"))]
+                if try_park {
                     match node.park.park_or_lock(
                         &self.parked,
                         &node.complete,
@@ -333,6 +349,8 @@ where
                             }
                         }
                         Parked::Retry => {}
+                        #[cfg(feature = "block_park")]
+                        Parked::Picked => picked = true,
                     }
                     continue 'outer;
                 }

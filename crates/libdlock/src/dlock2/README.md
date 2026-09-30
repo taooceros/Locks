@@ -150,3 +150,59 @@ Why there is no lost wakeup and no stall:
   an unenrolled request. Unit tests shrink the spin budget to 5 us so that
   these paths are exercised; `dlock2_unit_test::idle_holder_release` covers
   a holder that unlocks without combining while waiters are parked.
+
+## Wake-on-pick blocking waiters (`block_park` feature)
+
+`block_park` (`libdlock/block_park`, forwarded by `dlock` and
+`upscaledb-bridge`; mutually exclusive with `spin_park`, enforced by a
+`compile_error!`) keeps the spin budget, the `parked` counter with its
+post-unlock check (handshake 2) and the enrollment CAS (handshake 3), and
+replaces handshake 1 by TCLocks' one-word wake-on-pick protocol
+(`kombmtx.c` `park_waiter` / `wake_up_waiter`, OSDI'23 section 3.4). Plan:
+`plan/2026-09-30/fcpq-block-wake-on-pick.md`.
+
+Park word states: `WAITING` (owner reset), `PARKED` (owner CAS),
+`PICKED` (combiner swap; terminal for the request).
+
+Waiter, per request (`lock()`):
+
+1. `park = WAITING` (Relaxed), `complete = false` (SeqCst), enroll if
+   `!active`; steps 2-3 as under `spin_park`.
+2. Budget exhausted, immediately after a failed `try_lock`: `parked += 1`;
+   `CAS(park, WAITING -> PARKED)`. If the CAS fails the word is `PICKED`:
+   `parked -= 1` and spin on `complete` (never park again for this
+   request). Otherwise `fence(SeqCst)`; re-read `complete` and `active`
+   (unpark and go to 1 if retired); one last `try_lock` (success: unpark,
+   become combiner); `futex_wait(park == PARKED)`. On return the word is
+   `PICKED`: take the result if complete, else spin on `complete`.
+
+Combiner, per served request, *before* the delegate: `swap(park,
+PICKED)`; if the old value was `PARKED`, `parked -= 1` and `futex_wake`.
+FC does this when the scan reaches an active, incomplete node; FC-PQ when
+the entry is popped from the heap. With `DLOCK_WAKE_LOOKAHEAD=1` FC-PQ also
+swaps the next heap top's word (if its request is incomplete) so that its
+wake latency overlaps the current delegate. After the delegate:
+`complete = true` (Release), nothing else; `release_combiner()` is the
+`spin_park` one.
+
+Why there is no lost wakeup: the waiter's CAS and the combiner's swap are
+RMWs on the same word, so one is first in the modification order. CAS
+first: the swap reads `PARKED`, the word changes before `futex_wake`, so a
+`futex_wait(PARKED)` either has not slept yet and returns `EAGAIN` or is
+woken. Swap first: the CAS fails and the waiter never sleeps. A waiter
+whose word is `PICKED` spins with `try_lock` polling, so a lookahead wake
+at the pass limit (request left enrolled but unserved) is covered by the
+waiter becoming the combiner or by the next holder's pass. The `parked`
+count is incremented before the CAS and decremented by whichever side
+reads `PARKED` (combiner swap, or the owner's `PARKED -> WAITING` unpark),
+so the unlocker's check keeps its meaning; a waiter preempted between the
+increment and its CAS makes the unlocker re-combine until it runs again
+(the same window as under `spin_park`).
+
+`dlock2/park/loom_model.rs` is a loom model of the protocol (owner vs
+combiner pick, idle holder, retirement, lookahead at the pass limit, next
+request after a served one; a three-thread scenario is kept but ignored,
+see its doc comment); `RUSTFLAGS="--cfg loom" cargo test -p libdlock
+--release --features block_park --lib dlock2::park::loom_model`.
+`dlock2_unit_test::thread_churn` covers exited threads' nodes being reused
+under both park features.
