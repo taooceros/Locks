@@ -4,7 +4,7 @@
 //! ```text
 //! let mut g = h.lock().await;   // fast path: one CAS; else enqueue, Pending
 //! g.insert(k, v);               // critical section: the task's own code
-//! g.unlock().await;             // CES-style release, may step aside once
+//! g.unlock().await;             // release, may step aside once
 //! ```
 //!
 //! One type, [`CoMutex<T, Q>`], with the successor policy `Q`:
@@ -18,7 +18,12 @@
 //! Otherwise ownership passes to the waiter `Q` selects (the lock stays held)
 //! and, per [`CoOptions`]:
 //!
-//! - CES release (default): the grantee is woken into this worker's run-next
+//! - `co-pq`: wake the grantee with its ordinary `Waker`, with no executor
+//!   placement hint. Async release self-wakes and returns `Pending` once
+//!   unless `StepAside::None` was requested. Both `Remote` and `Home` mean
+//!   this ordinary yield for co-pq; neither chooses a worker. Synchronous
+//!   drop only wakes the grantee. Inline/chain settings apply to co-fifo only.
+//! - `co-fifo` CES release: the grantee is woken into this worker's run-next
 //!   slot ([`executor::wake_inline`]) and the releaser *steps aside*: it
 //!   reschedules itself and returns `Pending` once, so the grantee's critical
 //!   section runs right after this poll, before the releaser's continuation.
@@ -31,8 +36,8 @@
 //!   worker's inline chain ([`executor::current_chain`]) has reached
 //!   `chain_bound` handoffs, the grantee is woken with `break_placement`
 //!   instead and the releaser continues (`Ready`): `ces`'s chain break.
-//! - [`StepAside::None`], and `Drop` of a guard or of a never-polled
-//!   `unlock()` future: synchronous release. The grantee is woken inline
+//! - For `co-fifo`, [`StepAside::None`], and `Drop` of a guard or of a
+//!   never-polled `unlock()` future: synchronous release, waking inline
 //!   (like tokio's LIFO slot) and the releaser continues its poll, so the
 //!   grantee runs only when that poll ends; the chain bound applies the same
 //!   way. Drops are counted in [`HandleStats::sync_drops`].
@@ -87,7 +92,7 @@
 
 use std::cell::UnsafeCell;
 use std::future::Future;
-use std::marker::PhantomPinned;
+use std::marker::{PhantomData, PhantomPinned};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::ptr::{self, NonNull};
@@ -617,12 +622,23 @@ impl<T, Q: WaitList> CoMutex<T, Q> {
     /// and a stepping policy, also reschedule the current task; the caller
     /// must then return `Pending` right away (returns `true`).
     fn place_grantee(&self, waker: &Waker, cx: Option<&Context<'_>>, st: &Counters) -> bool {
-        if self.chain_bound_reached() {
+        if Q::USAGE_ORDERED {
+            waker.wake_by_ref();
+            if let Some(cx) = cx {
+                if self.opts.step_aside != StepAside::None {
+                    cx.waker().wake_by_ref();
+                    Counters::bump(&st.step_asides);
+                    return true;
+                }
+            }
+            return false;
+        } else if self.chain_bound_reached() {
             Counters::bump(&st.chain_breaks);
             executor::wake_with(self.opts.break_placement, waker);
             return false;
+        } else {
+            executor::wake_inline(waker);
         }
-        executor::wake_inline(waker);
         match (cx, self.opts.step_aside) {
             (Some(cx), StepAside::Remote) => {
                 executor::reschedule_self_remote(cx);
@@ -775,6 +791,7 @@ impl<T, Q: WaitList> CoHandle<T, Q> {
                 worker,
                 foreign: home != NO_WORKER && worker != NO_WORKER && home != worker,
             },
+            _data: PhantomData,
         }
     }
 }
@@ -916,8 +933,31 @@ impl<T, Q: WaitList> Held<'_, T, Q> {
 
 /// Exclusive access to the protected value. Release with
 /// [`Guard::unlock`]`.await`; dropping it releases synchronously.
+///
+/// `Send` iff `T: Send`, `Sync` iff `T: Send + Sync` (like
+/// `&mut T`): a shared `&Guard` hands out `&T` on every thread holding it,
+/// so a `!Sync` payload must not make the guard `Sync`.
+///
+/// ```
+/// use std::cell::Cell;
+/// use coro_delegation::locks::co_mutex::{FifoList, Guard};
+/// fn send<S: Send>() {}
+/// fn sync<S: Sync>() {}
+/// sync::<Guard<'static, u64, FifoList>>();
+/// send::<Guard<'static, Cell<u64>, FifoList>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// use std::cell::Cell;
+/// use coro_delegation::locks::co_mutex::{FifoList, Guard};
+/// fn sync<S: Sync>() {}
+/// sync::<Guard<'static, Cell<u64>, FifoList>>();
+/// ```
 pub struct Guard<'a, T, Q: WaitList> {
     held: Held<'a, T, Q>,
+    /// `Held` reaches `T` only through `&CoHandle`, which is `Sync` for
+    /// `T: Send`; this marker adds the `&mut T` auto-trait bounds.
+    _data: PhantomData<&'a mut T>,
 }
 
 impl<'a, T, Q: WaitList> Guard<'a, T, Q> {
@@ -1553,22 +1593,19 @@ mod tests {
                     cs: 200,
                     max_gap: 0,
                 };
-                for r in [
-                    check::<FifoList>(opts(step, Some(K), 1), s()),
-                    check::<UsageList>(opts(step, Some(K), 1), s()),
-                ] {
-                    assert_eq!(r.max_chain, K, "W={workers} {step:?}");
-                    assert!(r.stats.chain_breaks > 0, "W={workers} {step:?}");
-                }
-                for r in [
-                    check::<FifoList>(opts(step, None, 1), s()),
-                    check::<UsageList>(opts(step, None, 1), s()),
-                ] {
-                    assert!(
-                        r.max_chain > K,
-                        "W={workers} {step:?}: max chain {}",
-                        r.max_chain
-                    );
+                let r = check::<FifoList>(opts(step, Some(K), 1), s());
+                assert_eq!(r.max_chain, K, "W={workers} {step:?}");
+                assert!(r.stats.chain_breaks > 0, "W={workers} {step:?}");
+                let r = check::<FifoList>(opts(step, None, 1), s());
+                assert!(
+                    r.max_chain > K,
+                    "W={workers} {step:?}: max chain {}",
+                    r.max_chain
+                );
+                assert_eq!(r.stats.chain_breaks, 0);
+                for bound in [Some(K), None] {
+                    let r = check::<UsageList>(opts(step, bound, 1), s());
+                    assert_eq!(r.max_chain, 0, "co-pq must not resume inline");
                     assert_eq!(r.stats.chain_breaks, 0);
                 }
             }

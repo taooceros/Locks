@@ -5,6 +5,44 @@ unless stated; differences inside the spread are not interpreted. Tables are
 produced by `python3 scripts/summarize.py results 'matrix-*.json'` (phase 2) and
 `python3 scripts/summarize.py results 'p3-*.json'` (phase 3).
 
+## 2026-09-30 — co-pq uses ordinary wakers only
+
+Supersedes the Home-placement change below. `co-pq` now calls the selected
+waiter's `wake_by_ref()` without any placement hint. Its async release
+self-wakes and returns `Pending` once, also without placement hints (unless
+step-aside is disabled). Ownership is granted before waking and the queue
+spinlock is released before the wake. The runtime chooses where tasks run.
+The queue still selects the lowest-usage waiter; co-fifo is unchanged.
+Neither the old inline `co1-*` data nor the Home-wake smoke below measures
+this new implementation.
+
+Verification: all 43 release tests passed, then one 2-second smoke under the
+measurement lock (W8 / 64 clients / heavy 8 / b31 / spin / clamp 256).
+It completed 517925 operations at 258955 ops/s, service Jain 0.9995,
+5812 non-CS elapsed cycles/op, with no starved clients or bystanders.
+Executor counters: inline = remote = home = 0; 517924 async step-asides.
+This is behavior verification, not a repeated performance comparison.
+
+## 2026-09-30 — co-pq changes to queued successor wake
+
+User-directed semantic cutover: `co-pq` wakes its chosen waiter on the
+waiter's last worker (`Placement::Home`), not the releaser's run-next slot.
+`unlock().await` still steps the releaser aside. The scheduler can steal the
+waiter; this is not a guarantee of a different physical worker.
+`co-fifo` remains inline. Chain-bound/break options no longer affect co-pq.
+
+The older `co1-*` corpus and the coroutine-style entry below describe the
+**old inline co-pq**, not this implementation. Do not reuse their performance
+claims for new runs with the same legacy label grammar.
+
+Verification: release test suites passed (43 tests including doctests).
+One 2-second smoke run, W8 / 64 clients / heavy 8 / b31 / spin / clamp 256,
+under the measurement lock: 314738 ops/s, service Jain 0.9994,
+4309 non-CS cycles/op, zero starved clients/bystanders.
+Inline placements and inline chains were both zero; 629497 handoffs
+completed. This single run verifies the changed path, not a repeated
+performance comparison.
+
 ## 2026-09-30 — coroutine-style mutex (lock().await / unlock().await)
 
 Binding API assumption from 2026-09-30 (RESEARCH.md "API assumption"): the
@@ -239,6 +277,14 @@ Other measured points:
 - Code review by the read-only LockAdvisor agent (protocol, step-aside,
   cancel-after-grant, guard across awaits, aliasing of the in-future node):
   no correctness issue. Its hardening and documentation notes are applied.
+- Fixed after the measurement: `Guard` was auto-`Sync` for any `T: Send`
+  because it reaches `T` only through `&CoHandle`, so a `!Sync` payload
+  (e.g. `Cell`) could be shared through `&Guard`. It now carries
+  `PhantomData<&'a mut T>`, making it `Sync` iff `T: Send + Sync`, with a
+  `compile_fail,E0277` doctest plus a passing companion. The harness payload
+  (`BTreeMap<u64, u64>`) is `Sync`, and the marker is zero-sized, so the
+  measured code is unchanged [INFERENCE: no codegen difference, not checked
+  by rebuilding the frozen binary].
 
 ### Provenance
 
