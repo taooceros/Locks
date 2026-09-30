@@ -24,7 +24,6 @@ import glob
 import json
 import math
 import os
-import subprocess
 import sys
 from collections import defaultdict
 
@@ -60,31 +59,24 @@ ERR = dict(ecolor="black", elinewidth=0.6, capsize=1.3, capthick=0.6)
 
 # ------------------------------------------------------------------ style --
 
-def lm_dir():
-    try:
-        p = subprocess.run(["kpsewhich", "lmroman10-regular.otf"], capture_output=True, text=True).stdout.strip()
-        if p:
-            return os.path.dirname(p)
-    except OSError:
-        pass
-    for d in glob.glob("/usr/share/texmf*/fonts/opentype/public/lm") + \
-            glob.glob("/usr/share/texlive/texmf-dist/fonts/opentype/public/lm"):
-        return d
-    return None
+FONT_FILES = [
+    "/usr/share/texmf/fonts/opentype/public/tex-gyre/texgyretermes-regular.otf",
+    "/usr/share/texmf/fonts/opentype/public/tex-gyre/texgyretermes-italic.otf",
+    "/usr/share/texmf/fonts/opentype/public/tex-gyre/texgyretermes-bold.otf",
+    "/usr/share/fonts/opentype/urw-base35/NimbusMonoPS-Regular.otf",
+]
 
 
 def setup_style():
-    d = lm_dir()
-    if d:
-        for f in ("lmroman10-regular", "lmroman10-italic", "lmroman10-bold", "lmmono10-regular"):
-            p = os.path.join(d, f + ".otf")
-            if os.path.exists(p):
-                font_manager.fontManager.addfont(p)
+    # Match the paper body (TeX Gyre Termes / Nimbus Mono PS).
+    for p in FONT_FILES:
+        if os.path.exists(p):
+            font_manager.fontManager.addfont(p)
     plt.rcParams.update({
         "font.family": "serif",
-        "font.serif": ["Latin Modern Roman", "DejaVu Serif"],
-        "font.monospace": ["Latin Modern Mono", "DejaVu Sans Mono"],
-        "mathtext.fontset": "cm",
+        "font.serif": ["TeX Gyre Termes", "Nimbus Roman", "DejaVu Serif"],
+        "font.monospace": ["Nimbus Mono PS", "DejaVu Sans Mono"],
+        "mathtext.fontset": "stix",
         "font.size": 8, "axes.titlesize": 8, "axes.labelsize": 8,
         "xtick.labelsize": 7.5, "ytick.labelsize": 7.5, "legend.fontsize": 7.5,
         "axes.linewidth": 0.6, "axes.titlepad": 3,

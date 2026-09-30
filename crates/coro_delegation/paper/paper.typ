@@ -2,26 +2,47 @@
 #import "tables/numbers.typ": *
 #import "figures/contract.typ": contract
 
+// Draft mode: TODO notes and working byline. `typst compile --input draft=false` for submission.
+#let draft = sys.inputs.at("draft", default: "true") != "false"
+
 // A number or result the text wants but no FINDINGS.md entry or JSON provides.
-#let todo(body) = text(fill: red, weight: "bold")[\[TODO: #body\]]
+#let todo(body) = if draft { text(fill: rgb("#b22222"), size: 8pt)[\[TODO: #body\]] }
 
 #let title = [Fair Locks for Coroutine Runtimes:\ Ordinary Wakers Buy Fairness, Executor Awareness Buys Speed]
 
 #set document(title: title)
-#set page(paper: "us-letter", margin: 0.72in, columns: 2, numbering: "1")
-#set columns(gutter: 0.25in)
-#set text(font: "New Computer Modern", size: 10pt)
-#set par(justify: true, first-line-indent: 1em, spacing: 0.65em, leading: 0.55em)
-#show raw: set text(font: "Latin Modern Mono", size: 1.25em)
+#set page(
+  paper: "us-letter",
+  margin: (x: 0.75in, y: 1in),
+  columns: 2,
+  numbering: "1",
+  number-align: center,
+)
+#set columns(gutter: 0.33in)
+#set text(font: "TeX Gyre Termes", size: 10pt, hyphenate: true)
+#show math.equation: set text(font: "TeX Gyre Termes Math")
+#set par(justify: true, first-line-indent: 1em, spacing: 0.5em, leading: 0.5em)
+#show raw: set text(font: "Nimbus Mono PS", size: 1.1em)
 #set heading(numbering: "1.1", supplement: none)
-#show heading: set block(above: 1.2em, below: 0.7em)
+#show heading: set text(weight: "bold")
 #show heading.where(level: 1): set text(size: 12pt)
-#show heading.where(level: 2): set text(size: 11pt)
-#set list(indent: 0pt, body-indent: 0.5em)
-#set enum(indent: 0pt, body-indent: 0.5em)
+#show heading.where(level: 1): set block(above: 1.1em, below: 0.6em)
+#show heading.where(level: 2): set text(size: 10pt)
+#show heading.where(level: 2): set block(above: 0.9em, below: 0.5em)
+#show heading.where(level: 3): it => [*#it.body.* ]
+#set list(indent: 0.4em, body-indent: 0.4em, spacing: 0.4em)
+#set enum(indent: 0.4em, body-indent: 0.4em, spacing: 0.4em)
 #set math.equation(numbering: none)
+#show figure.caption: set text(size: 9pt)
 #show figure.caption: set align(left)
+#show figure.caption: set par(justify: true, first-line-indent: 0pt)
+#show figure.caption: it => [*#it.supplement~#context it.counter.display(it.numbering):* #it.body]
+#show figure.where(kind: table): set figure.caption(position: top)
 #show figure: set block(breakable: false)
+#set figure(gap: 0.6em)
+#set place(clearance: 1.2em)
+#show bibliography: set text(size: 9pt)
+#show bibliography: set par(spacing: 0.4em, first-line-indent: 0pt)
 
 // A generated table in a float; `wide` spans both columns (LaTeX table*).
 // `placement: none` keeps it in the text flow.
@@ -47,18 +68,20 @@
   image(file, width: if wide { 7in } else { 3.3in }),
 )
 
-#place(top + center, float: true, scope: "parent", clearance: 2em)[
-  #text(size: 17pt)[#title]
-  #v(1em)
-  #text(size: 12pt)[Draft --- `crates/coro_delegation`]
-  #v(1.2em)
-  #block(width: 85%)[
-    #set text(size: 9pt)
-    #set par(first-line-indent: 0pt)
-    #align(center)[*Abstract*]
-    #v(0.3em)
-    In a coroutine runtime a lock decides _who_ gets ownership next, and, if its unlock is an explicit `await`, _when_ the releaser steps aside. We show that a lock is therefore a hidden scheduler that can subvert the executor: FIFO locks give lock time in proportion to critical-section cost (service Jain 0.65--0.67 for a 1:8 cost mix), and delegation locks concentrate combining on one worker (burden Jain $1\/W$), which lock-side wake placement repairs. We then separate policy from mechanism. A usage-ordered queue restores service fairness with _ordinary wakers only_: our `co-pq` reaches service Jain #(CoPqJainMin) or better in all #(CoPqCells) measured cells with no starved client. It is not cheap. At the sustained fair mix it spends #(OSusSpinCoPq) non-critical-section cycles per operation (spin harness), #(PqOverFcpqOSusSpin)× a usage-ordered combining lock (#(OSusSpinFcpq)). At the FIFO mix an inline hand-off (`co-fifo`, #(OSusSpinCoFifo)) runs within 5 % of the ops/s of a combining lock (#(OSusSpinFc)) and at #(DispOverCoFifoOSusSpin)× lower cost than an ordinary-waker hand-off (`dispatch`, #(OSusSpinDisp)). Executor awareness, not the fairness policy, buys speed, and the ordinary-wake cost depends on the runtime: `tokio::sync::Mutex` runs at #(OSusYieldTok) cycles per operation when clients yield after unlocking, #(TokOverDispThrSusYield)× the ops/s of our `dispatch`. The critical section is a TSC-timed spin, on one machine, with clients that never leave.
+#place(top + center, float: true, scope: "parent", clearance: 1.8em)[
+  #block(below: 1.2em, text(size: 14pt, weight: "bold")[#title])
+  #if draft [
+    #text(size: 11pt)[Draft --- `crates/coro_delegation`]
+  ] else [
+    #text(size: 11pt)[Anonymous Author(s) \ #text(size: 10pt)[Paper \#NNN]]
   ]
+]
+
+#align(center, text(size: 12pt, weight: "bold")[Abstract])
+#v(0.2em)
+#block[
+  #set par(first-line-indent: 0pt)
+    In a coroutine runtime a lock decides _who_ gets ownership next, and, if its unlock is an explicit `await`, _when_ the releaser steps aside. We show that a lock is therefore a hidden scheduler that can subvert the executor: FIFO locks give lock time in proportion to critical-section cost (service Jain 0.65--0.67 for a 1:8 cost mix), and delegation locks concentrate combining on one worker (burden Jain $1\/W$), which lock-side wake placement repairs. We then separate policy from mechanism. A usage-ordered queue restores service fairness with _ordinary wakers only_: our `co-pq` reaches service Jain #(CoPqJainMin) or better in all #(CoPqCells) measured cells with no starved client. It is not cheap. At the sustained fair mix it spends #(OSusSpinCoPq) non-critical-section cycles per operation (spin harness), #(PqOverFcpqOSusSpin)× a usage-ordered combining lock (#(OSusSpinFcpq)). At the FIFO mix an inline hand-off (`co-fifo`, #(OSusSpinCoFifo)) runs within 5 % of the ops/s of a combining lock (#(OSusSpinFc)) and at #(DispOverCoFifoOSusSpin)× lower cost than an ordinary-waker hand-off (`dispatch`, #(OSusSpinDisp)). Executor awareness, not the fairness policy, buys speed, and the ordinary-wake cost depends on the runtime: `tokio::sync::Mutex` runs at #(OSusYieldTok) cycles per operation when clients yield after unlocking, #(TokOverDispThrSusYield)× the ops/s of our `dispatch`. The critical section is a TSC-timed spin, on one machine, with clients that never leave.
 ]
 
 // ---------------------------------------------------------------------------
