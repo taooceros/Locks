@@ -17,6 +17,8 @@
 
 #include "sections/introduction.typ"
 
+#include "sections/experiments.typ"
+
 #include "sections/discussion.typ"
 
 #bibliography("refs.bib", style: "association-for-computing-machinery")
