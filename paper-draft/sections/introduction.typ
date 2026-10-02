@@ -16,7 +16,7 @@ We evaluate FC-PQ in two embedded databases, redb @redb and UpScaleDB. In redb, 
 
 This paper makes the following contributions:
 
-- We show that the cost of lock usage fairness comes from coupling who is served with where the critical section runs, which forces a fair lock to pay in migration or, if it reserves the lock, in idleness.
+- We identify the coupling of who is served with where the critical section runs as the source of two of the costs of lock usage fairness: a fair lock with this coupling pays in migration or, if it reserves the lock, in idleness.
 - We give an analysis framework that decomposes the price of fairness and predicts when delegation lowers it.
 - We design FC-PQ, a work-conserving, usage-fair delegation lock with a fast path proven sound for the uncontended case.
 - We evaluate FC-PQ in redb and UpScaleDB with service charged to the requester and a fixed CPU clock, and report which costs of fairness delegation removes and which remain.
