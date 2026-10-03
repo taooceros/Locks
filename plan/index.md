@@ -72,6 +72,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 ## By Date
 - 2026-09-29: [redb closure write API](./2026-09-29/redb-closure-write-api.md)
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
+- 2026-09-28: [Coroutine delegation-lock fairness study](./2026-09-28/coro-delegation-study.md) (side project, not thesis)
 
 ### 2026-09-28
 

@@ -77,6 +77,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done
   *(Done: `4d57e13` + `8e82f36` — MCS added as `DLock2Wrapper<RawMcsLock>`,
   uses per-lock ThreadLocal for queue nodes.)*
 - [x] **Fix FC-SL lost-request hang + usage data races** (2026-09-28, [plan](plan/2026-09-28/fcsl-lost-request-fix.md)): 2/12 hangs before, 350/350 passes after.
+- [x] **Exploratory coroutine delegation-lock fairness study** (side project, 2026-09-28, [plan](plan/2026-09-28/coro-delegation-study.md)): complete; results in [FINDINGS.md](crates/coro_delegation/FINDINGS.md).
 
 ---
 
