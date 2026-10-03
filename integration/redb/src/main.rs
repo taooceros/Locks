@@ -1,14 +1,16 @@
-//! One to eight saturated requesters, one pinned per `--cpus` entry, each
+//! One to sixty-four saturated requesters, one pinned per `--cpus` entry, each
 //! submitting whole redb write transactions as closures through one of seven
 //! variants (see writer.rs). Read transactions (`Database::begin_read`) never
 //! pass through any write lock or bridge. Each worker is charged the service
-//! time of its own bodies, wherever they ran.
-#[cfg(all(feature = "native", feature = "patched"))]
-compile_error!("build exactly one of the `native` and `patched` features");
-#[cfg(not(any(feature = "native", feature = "patched")))]
-compile_error!("build exactly one of the `native` and `patched` features");
+//! time of its own bodies, wherever they ran. Optional reader threads
+//! (`--reader-cpus`) run read transactions on their own CPUs during the same
+//! window (see `reader`).
+#[cfg(all(feature = "upstream", feature = "patched"))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
+#[cfg(not(any(feature = "upstream", feature = "patched")))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 extern crate redb_upstream as redb;
 
 mod selftest;
@@ -18,7 +20,10 @@ use std::{
     error::Error,
     fs,
     path::PathBuf,
-    sync::{Barrier, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Barrier, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -30,7 +35,14 @@ use writer::{
     transfer_body, Variant, WriteError, Writer, ACCOUNTS, MAX_RECORDS_PER_REQUEST, TABLE,
 };
 
-const MAX_WORKERS: usize = 8;
+const MAX_WORKERS: usize = 64;
+/// Default read transaction: `READER_GETS` point gets and one scan of `READER_SCAN` entries.
+const READER_GETS: usize = 4;
+const READER_SCAN: usize = 16;
+/// Every `READER_STALE_EVERY`-th read transaction samples snapshot staleness.
+const READER_STALE_EVERY: u64 = 16;
+/// Every `READER_DISCOVER_EVERY`-th read transaction probes a random writer for data.
+const READER_DISCOVER_EVERY: u64 = 64;
 const MAX_RECORDS_PER_WORKER: u64 = 8_000_000;
 const MAX_RECORDS: u64 = MAX_WORKERS as u64 * MAX_RECORDS_PER_WORKER;
 const WINDOW_MS: u64 = 250;
@@ -157,7 +169,7 @@ pub fn conserved_balances(db: &Database, accounts: u64) -> Result<Vec<u64>, Stri
 /// Features compiled into this binary (`--build-info`; echoed in every trial).
 #[derive(Serialize)]
 struct BuildInfo {
-    native: bool,
+    upstream: bool,
     patched: bool,
     test_hooks: bool,
     service_time: bool,
@@ -166,7 +178,7 @@ struct BuildInfo {
 }
 
 const BUILD_INFO: BuildInfo = BuildInfo {
-    native: cfg!(feature = "native"),
+    upstream: cfg!(feature = "upstream"),
     patched: cfg!(feature = "patched"),
     test_hooks: cfg!(feature = "test_hooks"),
     service_time: cfg!(feature = "service_time"),
@@ -390,6 +402,227 @@ fn worker(
     Ok(output)
 }
 
+/// Fine latency histogram: values below 16 ns index directly; above, 8 linear
+/// sub-buckets per power of two (bucket width <= 12.5 % of its lower bound).
+const FINE_BUCKETS: usize = 64 * 8;
+
+fn fine_index(ns: u64) -> usize {
+    let v = ns.max(1);
+    if v < 16 {
+        return v as usize;
+    }
+    let shift = 63 - v.leading_zeros() - 3;
+    (((shift + 1) << 3) + ((v >> shift) as u32 - 8)) as usize
+}
+
+fn splitmix(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct ReaderConfig {
+    gets: usize,
+    scan: usize,
+}
+
+#[derive(Serialize)]
+struct ReaderResult {
+    cpu: usize,
+    /// Completed read transactions (begin_read .. last read done).
+    read_txns: u64,
+    /// Point gets, scans (one per read transaction with a non-empty writer range) and scanned entries.
+    gets: u64,
+    scans: u64,
+    scan_entries: u64,
+    /// Discovery probes that hit a writer with no record in the snapshot yet.
+    empty_writer_ranges: u64,
+    /// Records in the reader's snapshots (`table.len()`): smallest and largest seen.
+    snapshot_len_min: u64,
+    snapshot_len_max: u64,
+    /// Staleness sampled on every READER_STALE_EVERY-th transaction: records committed
+    /// between the snapshot and a second begin_read after the transaction's reads.
+    stale_samples: u64,
+    stale_sum: u64,
+    stale_max: u64,
+    stale_nonzero: u64,
+    /// Whole read transaction and `begin_read` alone, fine log histograms (ns).
+    txn_ns_hist: Vec<u64>,
+    begin_ns_hist: Vec<u64>,
+}
+
+/// Largest sequence number of `owner`'s keys in the snapshot (`None`: none yet).
+fn last_seq(table: &redb::ReadOnlyTable<u64, u64>, owner: u64) -> Result<Option<u64>, String> {
+    const SEQ_MASK: u64 = (1 << 56) - 1;
+    let mut range = table
+        .range(owner..=(owner | SEQ_MASK))
+        .map_err(|e| e.to_string())?;
+    match range.next_back() {
+        None => Ok(None),
+        Some(pair) => {
+            let (k, _) = pair.map_err(|e| e.to_string())?;
+            Ok(Some(k.value() & SEQ_MASK))
+        }
+    }
+}
+
+/// One reader: loops read transactions until the window ends (timed) or the
+/// writers are done (smoke). Each transaction reads one snapshot: the chosen
+/// writer's last key in it (a writer already known to have data), `gets` point
+/// gets of random keys of that writer below it, and a scan of `scan` consecutive keys. A writer's keys are
+/// contiguous from 0, so every get must hit with the exact payload and the scan
+/// must be consecutive with exact payloads; anything else fails the cell. No
+/// state is shared with the writers (no counter that would add coherence traffic
+/// to their cache lines), and readers never enter a write lock.
+#[allow(clippy::too_many_arguments)]
+fn reader(
+    id: usize,
+    cpu: usize,
+    db: &Database,
+    config: ReaderConfig,
+    writers: usize,
+    seed: u64,
+    barrier: &Barrier,
+    start: &OnceLock<Instant>,
+    duration: Duration,
+    done: &AtomicBool,
+    smoke: bool,
+) -> Result<ReaderResult, String> {
+    let pinned = core_affinity::set_for_current(core_affinity::CoreId { id: cpu });
+    barrier.wait();
+    barrier.wait();
+    if !pinned {
+        return Err(format!("cannot pin reader {id} to CPU {cpu}"));
+    }
+    let begin = *start
+        .get()
+        .expect("main initialized clock between barriers");
+    let mut rng = seed ^ 0x5eed_0000_0000_0000 ^ ((id as u64 + 1) << 32);
+    let mut out = ReaderResult {
+        cpu,
+        read_txns: 0,
+        gets: 0,
+        scans: 0,
+        scan_entries: 0,
+        empty_writer_ranges: 0,
+        snapshot_len_min: u64::MAX,
+        snapshot_len_max: 0,
+        stale_samples: 0,
+        stale_sum: 0,
+        stale_max: 0,
+        stale_nonzero: 0,
+        txn_ns_hist: vec![0; FINE_BUCKETS],
+        begin_ns_hist: vec![0; FINE_BUCKETS],
+    };
+    const SEQ_MASK: u64 = (1 << 56) - 1;
+    let fail = |what: String| format!("reader {id}: {what}");
+    let mut known: Vec<u64> = Vec::new();
+    loop {
+        if smoke {
+            if done.load(Ordering::Acquire) {
+                break;
+            }
+        } else if begin.elapsed() >= duration {
+            break;
+        }
+        let started = Instant::now();
+        let read = db.begin_read().map_err(|e| fail(e.to_string()))?;
+        let begin_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        let table = read.open_table(TABLE).map_err(|e| fail(e.to_string()))?;
+        let len = table.len().map_err(|e| fail(e.to_string()))?;
+        // Reader work must not depend on how evenly the writers' lock shares the table:
+        // keys are never deleted, so a writer with data in an earlier snapshot stays
+        // non-empty. Transactions read a random known writer; every
+        // READER_DISCOVER_EVERY-th one (and while none is known) first probes a random
+        // writer to learn about more.
+        let mut chosen = None;
+        if known.is_empty() || out.read_txns % READER_DISCOVER_EVERY == 0 {
+            let w = splitmix(&mut rng) % writers as u64;
+            match last_seq(&table, w << 56).map_err(&fail)? {
+                Some(max_seq) => {
+                    if !known.contains(&w) {
+                        known.push(w);
+                    }
+                    chosen = Some((w << 56, max_seq));
+                }
+                None => out.empty_writer_ranges += 1,
+            }
+        }
+        if chosen.is_none() && !known.is_empty() {
+            let w = known[(splitmix(&mut rng) % known.len() as u64) as usize];
+            match last_seq(&table, w << 56).map_err(&fail)? {
+                Some(max_seq) => chosen = Some((w << 56, max_seq)),
+                None => return Err(fail(format!("writer {w}'s key range became empty"))),
+            }
+        }
+        match chosen {
+            None => {}
+            Some((owner, max_seq)) => {
+                for _ in 0..config.gets {
+                    let key = owner | (splitmix(&mut rng) % (max_seq + 1));
+                    match table.get(key).map_err(|e| fail(e.to_string()))? {
+                        Some(v) if v.value() == value(seed, key) => {}
+                        Some(v) => {
+                            return Err(fail(format!("key {key:#x} has payload {}", v.value())))
+                        }
+                        None => {
+                            return Err(fail(format!(
+                                "key {key:#x} <= last key of its writer is missing"
+                            )))
+                        }
+                    }
+                    out.gets += 1;
+                }
+                if config.scan > 0 {
+                    let first = splitmix(&mut rng) % (max_seq + 1);
+                    let mut expected = first;
+                    let range = table
+                        .range((owner | first)..=(owner | SEQ_MASK))
+                        .map_err(|e| fail(e.to_string()))?;
+                    for pair in range.take(config.scan) {
+                        let (k, v) = pair.map_err(|e| fail(e.to_string()))?;
+                        let key = k.value();
+                        if key != (owner | expected) || v.value() != value(seed, key) {
+                            return Err(fail(format!(
+                                "scan from {:#x}: got key {key:#x} or bad payload, expected {:#x}",
+                                owner | first,
+                                owner | expected
+                            )));
+                        }
+                        expected += 1;
+                        out.scan_entries += 1;
+                    }
+                    out.scans += 1;
+                }
+            }
+        }
+        let txn_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        out.read_txns += 1;
+        out.snapshot_len_min = out.snapshot_len_min.min(len);
+        out.snapshot_len_max = out.snapshot_len_max.max(len);
+        out.txn_ns_hist[fine_index(txn_ns)] += 1;
+        out.begin_ns_hist[fine_index(begin_ns)] += 1;
+        drop(table);
+        if out.read_txns % READER_STALE_EVERY == 0 {
+            let fresh = db.begin_read().map_err(|e| fail(e.to_string()))?;
+            let fresh_table = fresh.open_table(TABLE).map_err(|e| fail(e.to_string()))?;
+            let fresh_len = fresh_table.len().map_err(|e| fail(e.to_string()))?;
+            let stale = fresh_len.saturating_sub(len);
+            out.stale_samples += 1;
+            out.stale_sum += stale;
+            out.stale_max = out.stale_max.max(stale);
+            out.stale_nonzero += u64::from(stale > 0);
+        }
+    }
+    if out.read_txns == 0 {
+        out.snapshot_len_min = 0;
+    }
+    Ok(out)
+}
+
 fn verify(db: &Database, workers: &[WorkerResult], seed: u64) -> Result<u64, String> {
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let table = read.open_table(TABLE).map_err(|e| e.to_string())?;
@@ -461,6 +694,10 @@ struct Output {
     reopened_exact: bool,
     reopen_error: Option<String>,
     transfer: Option<TransferCheck>,
+    /// Reader threads (empty without `--reader-cpus`); read transactions never touch a write lock.
+    reader_cpus: Vec<usize>,
+    reader_config: ReaderConfig,
+    readers: Vec<ReaderResult>,
 }
 
 pub fn option(name: &str, args: &[String]) -> Result<String, String> {
@@ -470,19 +707,17 @@ pub fn option(name: &str, args: &[String]) -> Result<String, String> {
         .ok_or_else(|| format!("missing {name}"))
 }
 
-/// One client per CPU, 1..=MAX_WORKERS distinct CPUs.
-fn parse_cpus(value: &str) -> Result<Vec<usize>, String> {
+/// Distinct CPU IDs supported by the OS affinity mask, at most `max` of them.
+fn parse_cpu_list(value: &str, flag: &str, max: usize) -> Result<Vec<usize>, String> {
     let cpus: Vec<usize> = value
         .split(',')
         .map(|cpu| {
             cpu.parse::<usize>()
-                .map_err(|_| format!("invalid CPU in --cpus: {cpu}"))
+                .map_err(|_| format!("invalid CPU in {flag}: {cpu}"))
         })
         .collect::<Result<_, _>>()?;
-    if cpus.is_empty() || cpus.len() > MAX_WORKERS {
-        return Err(format!(
-            "--cpus requires 1..={MAX_WORKERS} CPUs, one per client"
-        ));
+    if cpus.is_empty() || cpus.len() > max {
+        return Err(format!("{flag} requires 1..={max} CPUs"));
     }
     if cpus.iter().any(|&cpu| cpu >= libc::CPU_SETSIZE as usize)
         || cpus
@@ -490,9 +725,16 @@ fn parse_cpus(value: &str) -> Result<Vec<usize>, String> {
             .enumerate()
             .any(|(i, cpu)| cpus[..i].contains(cpu))
     {
-        return Err("--cpus requires distinct CPU IDs supported by the OS affinity mask".into());
+        return Err(format!(
+            "{flag} requires distinct CPU IDs supported by the OS affinity mask"
+        ));
     }
     Ok(cpus)
+}
+
+/// One client per CPU, 1..=MAX_WORKERS distinct CPUs.
+fn parse_cpus(value: &str) -> Result<Vec<usize>, String> {
+    parse_cpu_list(value, "--cpus", MAX_WORKERS)
 }
 
 /// Workload of each client. `all1`: every client writes 1 record. `half1_halfK`
@@ -537,6 +779,29 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
     let duration_ms: u64 = option("--duration-ms", args)?.parse()?;
     let db_path = PathBuf::from(option("--database", args)?);
     let cpus = parse_cpus(&option("--cpus", args)?)?;
+    // Optional readers, one per CPU, disjoint from the writers' CPUs.
+    let reader_cpus = if args.iter().any(|arg| arg == "--reader-cpus") {
+        parse_cpu_list(
+            &option("--reader-cpus", args)?,
+            "--reader-cpus",
+            MAX_WORKERS,
+        )?
+    } else {
+        Vec::new()
+    };
+    if reader_cpus.iter().any(|cpu| cpus.contains(cpu)) {
+        return Err("--reader-cpus must be disjoint from --cpus".into());
+    }
+    let reader_config = ReaderConfig {
+        gets: match option("--reader-gets", args) {
+            Ok(v) => v.parse()?,
+            Err(_) => READER_GETS,
+        },
+        scan: match option("--reader-scan", args) {
+            Ok(v) => v.parse()?,
+            Err(_) => READER_SCAN,
+        },
+    };
     let smoke_transactions = if args.iter().any(|arg| arg == "--smoke-transactions") {
         Some(option("--smoke-transactions", args)?.parse::<u64>()?)
     } else {
@@ -557,21 +822,28 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     if !(0..libc::CPU_SETSIZE as usize).all(|cpu| {
         let allowed = unsafe { libc::CPU_ISSET(cpu, &affinity) };
-        allowed == cpus.contains(&cpu)
+        allowed == (cpus.contains(&cpu) || reader_cpus.contains(&cpu))
     }) {
-        return Err(format!("process affinity must be exactly the requested CPUs {cpus:?}").into());
+        return Err(format!(
+            "process affinity must be exactly the requested CPUs {cpus:?} + readers {reader_cpus:?}"
+        )
+        .into());
+    }
+    if transfer && !reader_cpus.is_empty() {
+        return Err("readers are defined for the insert cohorts only".into());
     }
     let db = create_database(&db_path)?;
     if transfer {
         seed_accounts(&db, TRANSFER_ACCOUNTS)?;
     }
     let writer = Writer::new(&db, variant)?;
-    let barrier = Barrier::new(clients + 1);
+    let barrier = Barrier::new(clients + reader_cpus.len() + 1);
     let start = OnceLock::new();
     let duration = Duration::from_millis(duration_ms);
     let mut perf = PerfControl::from_env()?;
     let perf_counted = perf.is_some();
-    let (workers, elapsed_ns, elapsed_tsc, process_cpu_ns) =
+    let done = AtomicBool::new(false);
+    let (workers, readers, elapsed_ns, elapsed_tsc, process_cpu_ns) =
         thread::scope(|scope| -> Result<_, Box<dyn Error + Send + Sync>> {
             let handles: Vec<_> = workloads
                 .iter()
@@ -594,6 +866,28 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
                     })
                 })
                 .collect();
+            let reader_handles: Vec<_> = reader_cpus
+                .iter()
+                .enumerate()
+                .map(|(id, &cpu)| {
+                    let (db, barrier, start, done) = (&db, &barrier, &start, &done);
+                    scope.spawn(move || {
+                        reader(
+                            id,
+                            cpu,
+                            db,
+                            reader_config,
+                            clients,
+                            seed,
+                            barrier,
+                            start,
+                            duration,
+                            done,
+                            smoke_transactions.is_some(),
+                        )
+                    })
+                })
+                .collect();
             barrier.wait();
             if let Some(perf) = perf.as_mut() {
                 perf.send("enable")?;
@@ -612,6 +906,15 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
                     Err(_) => failures.push("worker panic".to_string()),
                 }
             }
+            done.store(true, Ordering::Release);
+            let mut readers = Vec::with_capacity(reader_handles.len());
+            for handle in reader_handles {
+                match handle.join() {
+                    Ok(Ok(result)) => readers.push(result),
+                    Ok(Err(error)) => failures.push(error),
+                    Err(_) => failures.push("reader panic".to_string()),
+                }
+            }
             let elapsed_ns = begin.elapsed().as_nanos().min(u64::MAX as u128) as u64;
             let elapsed_tsc = tsc() - tsc_begin;
             let process_cpu_ns = cpu_time_ns()? - cpu_begin;
@@ -621,7 +924,7 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
             if !failures.is_empty() {
                 return Err(failures.join("; ").into());
             }
-            Ok((workers, elapsed_ns, elapsed_tsc, process_cpu_ns))
+            Ok((workers, readers, elapsed_ns, elapsed_tsc, process_cpu_ns))
         })?;
     // Reads stay outside the write gate: verification runs while it is still held.
     // Transfer: the fixed-insert table stays empty and balances are conserved.
@@ -690,6 +993,9 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
         reopened_exact,
         reopen_error,
         transfer,
+        reader_cpus,
+        reader_config,
+        readers,
     };
     println!("{}", serde_json::to_string(&output)?);
     if output.durability == "immediate" && !output.reopened_exact {

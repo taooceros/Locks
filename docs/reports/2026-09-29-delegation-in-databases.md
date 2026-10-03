@@ -113,7 +113,7 @@ Contributions:
 
 | Lock | Who executes the CS | Ordering | Waiting | Fairness it targets |
 |---|---|---|---|---|
-| native (redb upstream) | requester | redb `Mutex<State>` + Condvar; whoever wakes first | block (futex) | none |
+| `upstream` (redb, unmodified) | requester | redb `Mutex<State>` + Condvar; whoever wakes first | block (futex) | none |
 | MCS | requester | FIFO queue | spin | acquisition (turns) |
 | U-SCL | requester | slice owner; over-users banned | futex hand-off, `nanosleep` while banned, `sched_yield` after 20 spins | usage (held time), 2 × 2400 × 1000 TSC cycles ≈ 2.2 ms slice |
 | FC | combiner | publication-list scan | spin | none beyond scan order |
@@ -164,7 +164,7 @@ result does `[U1]`.
 The redb body reads the TSC (`rdtscp`) on the *executing* thread when `begin`
 returns and again when commit or abort returns. The executing thread is the
 combiner for FC/FC-PQ and the requester otherwise. The tick difference returns
-to the requester with the outcome and is **charged to the requester**. Native
+to the requester with the outcome and is **charged to the requester**. `upstream`
 measures the same span around the same public calls `[R1]`. For client $i$
 with requests $R_i$ completed in the window:
 
@@ -205,7 +205,7 @@ separated `[R1, R2]`.
 | formal-01 (S0) | 504 cells, 0 failed | `[R1]` |
 | perf-01 / perf-02 (S0) | 168 / 168 cells (+240 overhead cells), 0 failed | `[R1, R2]` |
 | **perf-03 (S1)** | 168 cells (7 variants), 0 failed, 0 power-state changes | `[R2]` |
-| **formal-03 (S1)** | 360 cells (native, MCS, U-SCL, FC, FC-PQ × 2 durabilities × 3 cohorts × 4 client counts × 3 reps), 0 failed | `[R2]` |
+| **formal-03 (S1)** | 360 cells (`upstream`, MCS, U-SCL, FC, FC-PQ × 2 durabilities × 3 cohorts × 4 client counts × 3 reps), 0 failed | `[R2]` |
 
 Every table shows the median [min, max] of **3 repetitions**. These ranges are
 not confidence intervals.
@@ -247,7 +247,7 @@ flowchart LR
 - **What it cannot test.** Reader/writer fairness (readers are never
   serialised) and the effect of a non-critical section (clients resubmit
   immediately).
-- **Controls.** `refactored` runs the same body under redb's own Mutex/Condvar
+- **Controls.** `upstream_gate` runs the same body under redb's own Mutex/Condvar
   and is 4-6 % faster than upstream when uncontended `[INFERENCE: codegen]`.
   It was in formal-01 (S0) but not in formal-03 `[R1]`.
 
@@ -255,7 +255,7 @@ flowchart LR
 
 | Lock | service_jain 2 / 4 / 8 clients | long svc share 2 / 4 / 8 | tx_jain 2 / 4 / 8 |
 |---|---|---|---|
-| native | 0.582 [0.500, 0.676] / 0.261 [0.250, 0.505] / 0.233 [0.199, 0.330] | 0.924 / 0.978 / 0.503 | 0.777 / 0.292 / 0.293 |
+| `upstream` | 0.582 [0.500, 0.676] / 0.261 [0.250, 0.505] / 0.233 [0.199, 0.330] | 0.924 / 0.978 / 0.503 | 0.777 / 0.292 / 0.293 |
 | MCS | 0.854 [0.852, 0.863] / 0.857 [0.855, 0.867] / 0.859 [0.859, 0.873] | 0.707 / 0.704 / 0.702 | 1.000 / 1.000 / 1.000 |
 | FC | 0.833 [0.827, 0.848] / 0.842 [0.828, 0.851] / 0.850 [0.837, 0.856] | 0.724 / 0.716 / 0.709 | 1.000 / 0.999 / 1.000 |
 | U-SCL | 1.000 / 1.000 / 1.000 | 0.503 / 0.504 / 0.504 | 0.826 / 0.826 / 0.821 |
@@ -270,9 +270,9 @@ Source: `[R3]` (service_jain table), `[R4]` rows 48-62 (tx_jain).
   time.
 - **S0 → S1 barely changes the order.** FC-PQ 0.965/1.000/0.963 →
   0.941/0.995/0.946 `[R2]`.
-- **Where the costs are homogeneous, every non-native lock is fair.** In
-  `all1` and `half1_half8` all four non-native locks have service_jain
-  ≥ 0.989. Native stays unfair (0.22-0.58, with a different winner per run)
+- **Where the costs are homogeneous, every lock other than `upstream` is fair.** In
+  `all1` and `half1_half8` all four of those locks have service_jain
+  ≥ 0.989. `upstream` stays unfair (0.22-0.58, with a different winner per run)
   `[R2]`.
 - **Immediate control, S1.** FC-PQ's `half1_half64` service_jain is
   0.958/0.982/0.988 `[R4]` rows 112, 117, 122.
@@ -281,7 +281,7 @@ Source: `[R3]` (service_jain table), `[R4]` rows 48-62 (tx_jain).
 
 `all1` tx/s:
 
-| clients | native | MCS | U-SCL | FC | FC-PQ |
+| clients | `upstream` | MCS | U-SCL | FC | FC-PQ |
 |---|---|---|---|---|---|
 | 1 | 32,139 [31,848, 32,420] | 33,506 [33,428, 33,607] | 33,428 [33,330, 33,704] | 33,356 [33,198, 33,446] | 33,563 [33,252, 33,744] |
 | 2 | 31,116 [31,094, 31,234] | 27,480 [27,434, 27,617] | 31,948 [31,916, 32,044] | 32,556 [32,488, 32,591] | 32,214 [32,213, 32,358] |
@@ -290,7 +290,7 @@ Source: `[R3]` (service_jain table), `[R4]` rows 48-62 (tx_jain).
 
 `half1_half64`, tx/s; records/s:
 
-| clients | native | MCS | U-SCL | FC | FC-PQ |
+| clients | `upstream` | MCS | U-SCL | FC | FC-PQ |
 |---|---|---|---|---|---|
 | 2 | 11,914 [9,954, 12,012]; 593,250 [532,106, 637,024] | 14,394 [13,704, 14,510]; 467,773 [445,412, 471,575] | 19,982 [18,382, 20,152]; 359,722 [345,100, 360,370] | 15,743 [14,845, 15,749]; 511,244 [481,580, 511,679] | 17,542 [16,333, 17,608]; 441,818 [413,863, 443,076] |
 | 4 | 10,458 [9,930, 19,098]; 617,589 [306,221, 635,552] | 13,964 [13,204, 14,000]; 453,798 [429,130, 455,000] | 19,588 [17,938, 19,701]; 353,330 [336,278, 353,979] | 15,024 [14,348, 15,236]; 489,595 [459,948, 495,148] | 18,702 [18,364, 20,558]; 325,866 [313,729, 373,297] |
@@ -308,18 +308,18 @@ Source: `[R3]` (timed-throughput table and the S1 formal-03 ratio column).
 
 Readings:
 
-- **Homogeneous mix (`all1`).** FC-PQ ≈ FC ≈ U-SCL ≈ native at every client
+- **Homogeneous mix (`all1`).** FC-PQ ≈ FC ≈ U-SCL ≈ `upstream` at every client
   count, 29.7-32.6k tx/s, and MCS is 15-19 % lower (FC-PQ/MCS 1.17-1.24). Fairness policy does not
   change lock speed.
 - **Heterogeneous mix.** FC-PQ serves the 1-record writers more, so it completes
   more transactions but fewer records than FC and MCS: FC-PQ/FC records/s is
   0.67-0.90. This is a *reallocation*, not a speed-up. Records/s is lower
   because the fair policy gives the short writers their share of time.
-- **Native's high records/s** at 2-4 clients comes from one 64-record client
+- **`upstream`'s high records/s** at 2-4 clients comes from one 64-record client
   monopolising the lock (long svc share 0.92-0.98). It is unfairness, not
   efficiency.
 - **CPU cost.** The spinning locks use 2c CPU-s per 2 s window (15.99 at 8
-  clients). U-SCL uses 3.94 and native 2.09 (`half1_half64` c8) `[R4]`. At
+  clients). U-SCL uses 3.94 and `upstream` 2.09 (`half1_half64` c8) `[R4]`. At
   equal throughput, FC-PQ burns ≈4× U-SCL's CPU. This is a spin-policy cost
   that E0(a) (spin-then-park) is meant to address.
 - **Immediate control.** The FC-PQ ratios are 0.96-1.21 (`all1` and
@@ -329,7 +329,7 @@ Readings:
 
 HITM loads per committed transaction (process total, user mode):
 
-| cohort | clients | native | MCS | U-SCL | FC | FC-PQ |
+| cohort | clients | `upstream` | MCS | U-SCL | FC | FC-PQ |
 |---|---|---|---|---|---|---|
 | all1 | 2 / 4 / 8 | 1 / 1 / 1 | 93 / 104 / 107 | 2 / 2 / 2 | 8 / 16 / 21 | 11 / 15 / 10 |
 | half1_half64 | 2 / 4 / 8 | 0 / 1 / 1 | 106 / 120 / 126 | 5 / 5 / 5 | 11 / 24 / 30 | 13 / 18 / 12 |
@@ -342,8 +342,8 @@ Source: `[R5]` rows 12-60. S0 formal-01 agrees: MCS 94-126, FC-PQ 10-20 `[R1]`.
 - **Reordering for fairness did not cost locality.** FC-PQ is slightly above
   FC at 2 clients (11 vs 8, 13 vs 11) and below it at 4-8 clients (10-18 vs
   16-30), while serving a different order.
-- **Native and U-SCL show few HITMs for another reason.** A holder runs long
-  stretches (native monopolises; U-SCL runs a 2.2 ms slice), so there is
+- **`upstream` and U-SCL show few HITMs for another reason.** A holder runs long
+  stretches (`upstream` monopolises; U-SCL runs a 2.2 ms slice), so there is
   little hand-off to migrate `[R1]`.
 - **LLC misses are ≤ 3/tx in `all1` and ≤ 14/tx in `half1_half64` for every
   lock.** Migration is L2-to-L2, not DRAM `[R1]`.
@@ -532,7 +532,7 @@ sweep (§7).
 ### 6.4 Threats to validity
 
 - **Few repetitions.** 3 per cell; ranges are not confidence intervals. Some
-  native cells are bimodal (whichever client wins).
+  `upstream` cells are bimodal (whichever client wins).
 - **Clock.** S1 cells off target by 3-5 % (U-SCL at 2.85-2.93 GHz) may carry
   C6-exit cost; S2 would price it `[R2]`. Only F = 3.0 GHz was tried.
 - **Process-total counters.** Combiner and waiter are not separated. Spinning
@@ -541,7 +541,7 @@ sweep (§7).
   starts after `begin`, so `WriteTransaction` construction is excluded for
   every variant.
 - **Mixed waiting policies.** Spinning (MCS/FC/FC-PQ) is compared with blocking
-  or sleeping (native, U-SCL), so CPU-s is a policy cost, not energy.
+  or sleeping (`upstream`, U-SCL), so CPU-s is a policy cost, not energy.
 - **Narrow redb request shape.** Fixed `u64 → u64` inserts, one table, and
   `None` durability, which is not a durability claim. Synthetic keys `[R1]`.
 - **One host, one socket.** No cross-socket placement.

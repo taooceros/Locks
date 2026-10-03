@@ -4,14 +4,14 @@
 --prepare-only snapshots binaries from a verified, instrumented build (build.py)
 and freezes their source/patch/binary identity and CPU/NUMA placement. --smoke
 runs a small timed cohort (all variants, the client sweep, 3 repetitions,
-including the transfer workload) whose analysis includes the refactored-vs-native
+including the transfer workload) whose analysis includes the upstream_gate-vs-upstream
 control check. --run runs the formal matrix only when explicitly requested.
 Every failure is retained.
 
 Clients: a cell with c clients runs c pinned requesters on the first c prepared
 CPUs, and the trial process is restricted to exactly those CPUs (never more
-client threads than CPUs). Waiting: MCS/FC/FC-PQ spin, native/refactored/
-bridge_mutex block (Mutex/Condvar, futex), U-SCL may yield, futex-wait or sleep. Cohorts: all1 = every client writes 1 record per request
+client threads than CPUs). Waiting: MCS/FC/FC-PQ spin, upstream/upstream_gate/
+std_mutex block (Mutex/Condvar, futex), U-SCL may yield, futex-wait or sleep. Cohorts: all1 = every client writes 1 record per request
 (any c); half1_halfK = half the requests carry 1 record and half K: with c even
 the first c/2 clients write 1 record and the other c/2 write K (2 clients = one
 of each); a single client alternates 1, K, 1, K, ... (the same request mix
@@ -63,7 +63,9 @@ import time
 from integration.redb.build import OUT, load_build
 
 HERE = Path(__file__).resolve().parents[2]
-VARIANTS = ('native', 'refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
+VARIANTS = ('upstream', 'upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
+# Legacy names: results recorded before the 2026-09-29 rename use these; the analysis loaders map them.
+LEGACY_NAMES = {'native': 'upstream', 'refactored': 'upstream_gate', 'bridge_mutex': 'std_mutex'}
 COHORTS = ('all1', 'half1_half8', 'half1_half64')
 # Transfer: 2 reads + 2 updates per closure, abort on insufficient balance. Smoke only.
 TRANSFER_COHORT = 'transfer'
@@ -116,7 +118,7 @@ POWER_SETUPS = ("S0", "S1", "S2")
 DEFAULT_FIXED_GHZ = 3.0
 CLOCK_TOLERANCE = 0.02  # S1/S2: a cell's clock must be within +-2 % of F
 CPU_SYS = Path("/sys/devices/system/cpu")
-MAX_CLIENTS = 8  # the trial binary's worker limit
+MAX_CLIENTS = 64  # the trial binary's worker limit (the sweep here stays 1-8; see scale_rw.py for 1-64)
 MAX_RECORDS_PER_WORKER = 8_000_000
 MAX_RECORDS = MAX_CLIENTS * MAX_RECORDS_PER_WORKER
 
@@ -646,9 +648,9 @@ def metrics(entry):
             "reopen_error": result["reopen_error"]}
 
 
-COMPARISONS = (("refactored", "native"), ("bridge_mutex", "refactored"),
-               ("fc_pq", "fc"), ("fc_pq", "native"), ("fc_pq", "mcs"), ("fc_pq", "uscl"),
-               ("mcs", "bridge_mutex"), ("uscl", "mcs"), ("fc", "bridge_mutex"))
+COMPARISONS = (("upstream_gate", "upstream"), ("std_mutex", "upstream_gate"),
+               ("fc_pq", "fc"), ("fc_pq", "upstream"), ("fc_pq", "mcs"), ("fc_pq", "uscl"),
+               ("mcs", "std_mutex"), ("uscl", "mcs"), ("fc", "std_mutex"))
 
 
 def ratio(a, b):
@@ -684,25 +686,25 @@ def paired_effects(rows, group_list):
 
 
 def control_check(rows, group_list):
-    """refactored vs native per durability/cohort/clients: repeat-level spread is the noise."""
+    """upstream_gate vs upstream per durability/cohort/clients: repeat-level spread is the noise."""
     checks = []
     for durability in DURABILITIES:
         for cohort, clients in group_list:
             values = {}
-            for variant in ("native", "refactored"):
+            for variant in ("upstream", "upstream_gate"):
                 values[variant] = [r["throughput_tx_s"] for r in rows if not r["failure"]
                                    and r["cohort"] == cohort and r["clients"] == clients
                                    and r["durability"] == durability and r["variant"] == variant]
-            native, refactored = values["native"], values["refactored"]
+            upstream, upstream_gate = values["upstream"], values["upstream_gate"]
             base = {"durability": durability, "cohort": cohort, "clients": clients}
-            if len(native) < 2 or len(refactored) < 2:
+            if len(upstream) < 2 or len(upstream_gate) < 2:
                 checks.append({**base, "verdict": "insufficient repeats"})
                 continue
-            native_median, refactored_median = statistics.median(native), statistics.median(refactored)
-            spread = max((max(v) - min(v)) / statistics.median(v) for v in (native, refactored))
-            value = refactored_median / native_median
-            checks.append({**base, "native_tx_s": native, "refactored_tx_s": refactored,
-                           "median_ratio_refactored_over_native": value,
+            upstream_median, upstream_gate_median = statistics.median(upstream), statistics.median(upstream_gate)
+            spread = max((max(v) - min(v)) / statistics.median(v) for v in (upstream, upstream_gate))
+            value = upstream_gate_median / upstream_median
+            checks.append({**base, "upstream_tx_s": upstream, "upstream_gate_tx_s": upstream_gate,
+                           "median_ratio_upstream_gate_over_upstream": value,
                            "noise_relative_range": spread,
                            "verdict": "within noise" if abs(value - 1) <= spread else "outside noise"})
     return checks
@@ -751,12 +753,12 @@ def markdown(table, checks):
                      f"{fmt(row['long_service_share'], 3)} | {fmt(row['process_cpu_seconds'], 2)} | "
                      f"{fmt(row['fast_path_hit_rate'], 3)} | {fmt(row['clock_ghz'], 2)} | "
                      f"{row['clock_off_target_cells']}/{row['cells']} | {fmt(row['tx_s_at_ref'], 0)} |")
-    lines += ["", "| durability | cohort | clients | refactored/native (median tx/s) | noise range | verdict |",
+    lines += ["", "| durability | cohort | clients | upstream_gate/upstream (median tx/s) | noise range | verdict |",
               "|---|---|---|---|---|---|"]
     for check in checks:
-        if "median_ratio_refactored_over_native" in check:
+        if "median_ratio_upstream_gate_over_upstream" in check:
             lines.append(f"| {check['durability']} | {check['cohort']} | {check['clients']} | "
-                         f"{check['median_ratio_refactored_over_native']:.3f} | "
+                         f"{check['median_ratio_upstream_gate_over_upstream']:.3f} | "
                          f"{check['noise_relative_range']:.3f} | {check['verdict']} |")
         else:
             lines.append(f"| {check['durability']} | {check['cohort']} | {check['clients']} | — | — | {check['verdict']} |")
@@ -936,6 +938,8 @@ def load_rows(root, kind):
         entry = json.loads(path.read_text())
         row = {key: entry[key] for key in ("cohort", "clients", "durability", "variant", "repeat", "seed",
                                            "binary", "binary_sha256")}
+        row["variant"] = LEGACY_NAMES.get(row["variant"], row["variant"])
+        row["binary"] = LEGACY_NAMES.get(row["binary"], row["binary"])
         row["raw_result"] = str(path.relative_to(root))
         row["failure"] = entry.get("parse_error") or ("timeout" if entry["timed_out"] else
                           f"exit {entry['exit_code']}" if entry["exit_code"] != 0 else None)
@@ -965,14 +969,14 @@ def analyze(root, smoke=False):
     write_json(analysis / "summary.json", {
         "cohort_kind": kind, "regimes": {"primary": "none", "control": "immediate"},
         "clients": identity["clients"], "groups": group_list,
-        "table": table, "refactored_vs_native": checks,
+        "table": table, "upstream_gate_vs_upstream": checks,
         "paired_effects": paired_effects(rows, group_list), "rows": rows,
         "failures": sum(bool(r["failure"]) for r in rows), "clock": clock_summary(rows, identity),
         "power": {k: v for k, v in (identity.get("power") or {"setup": "S0"}).items() if k != "state"},
         "caveats": ["None durability is the primary regime; Immediate (fsync inside the critical section) is a control. None is not a durable-commit claim.",
                     "service_jain is Jain over per-client service time (rdtscp ticks inside the body, charged to the requester); tx_jain counts transactions.",
                     "At 1 client every Jain index is 1 by definition; a 1-client half cohort alternates request sizes in one client.",
-                    "Waiting: MCS/FC/FC-PQ spin; native/refactored/bridge_mutex block (Mutex/Condvar, futex); U-SCL may sched_yield, futex-wait or nanosleep (its ban).",
+                    "Waiting: MCS/FC/FC-PQ spin; upstream/upstream_gate/std_mutex block (Mutex/Condvar, futex); U-SCL may sched_yield, futex-wait or nanosleep (its ban).",
                     "The critical section includes commit I/O.",
                     "Reads are outside every write lock and are not measured here.",
                     "Transaction size changes completed mix; total tx/s is not isolated lock overhead.",
