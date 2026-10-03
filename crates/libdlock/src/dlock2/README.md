@@ -83,6 +83,16 @@ all default-off; [plan](../../../../plan/2026-09-27/e0b-fcpq-fast-path.md)):
 | `fcpq_fast_path` | `lock()` tries the combiner lock before publishing its request. If the caller's node is inactive and both the PQ and the admission ring are empty, the caller runs its own request and charges usage, `total_usage` and `total_served` with the same timestamps as `combine()` (D1, D2, D4) |
 | `fcpq_fast_path_notime` | The same bypass without timestamps or usage charge; isolates timestamp cost and is fairness-incorrect by design. Mutually exclusive with `fcpq_fast_path` |
 | `fcpq_fast_path_stat` | Per-thread hit counter: `FCPQ::get_fast_path_hits()` (calling thread) and `FCPQ::fast_path_hits()` (sum, exact once callers have joined) |
+| `combiner_pass_stat` | Combiner pass counters for FC and FC-PQ: `pass_stats()` returns passes, empty passes, bodies, combiner changes (the combiner differs from the previous pass's), cap violations and a bodies-per-pass histogram, taken under the combiner lock. Default-off; used only by a separate stats build (plan `2026-09-29/fcpq-pass-length-ablation.md`) |
+
+**Pass length (`PassCap`).** `combine()` pops at most `H` queue entries per pass.
+`FCPQ::new` keeps `PassCap::Fixed(64)`; `FCPQ::with_pass_cap(data, delegate, cap)` selects
+`Fixed(n)` (n >= 1) or `Active`, the number of entries in the queue when the pass starts
+(after the announcement ring has been drained), so one combiner runs about one body per
+enrolled node, as FC's single sweep does. A pop of a completed node counts against the cap
+without running a body, so a pass runs at most `cap` bodies. The cap is a runtime field read
+once per pass (a const generic would change the lock's type at every use and cannot express
+`Active`); the unit tests `pass_cap_tests` check that no pass exceeds its cap.
 
 The gate runs once per request, before the request is written to the node
 (payload, `complete=false`). A combiner that still holds the node from an

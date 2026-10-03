@@ -32,6 +32,8 @@ pub mod clh;
 pub mod fc_pq;
 pub mod mcs;
 pub mod mutex;
+#[cfg(any(test, feature = "combiner_pass_stat"))]
+pub mod pass_stat;
 pub mod pthread_mutex;
 pub mod shfl_lock;
 pub mod spinlock;

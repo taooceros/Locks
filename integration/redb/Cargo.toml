@@ -5,27 +5,30 @@ edition = "2021"
 
 [workspace]
 
-# Cross-crate thin LTO for native, patched and test_hooks alike: without it the
+# Cross-crate thin LTO for upstream, patched and test_hooks alike: without it the
 # insert closure (monomorphised here, not in redb) measured 2-4% slower than the
 # former in-redb fixed body; with it all variants match (README "Known limits").
 [profile.release]
 lto = "thin"
 
-# Exactly one of `native` and `patched` per binary; build.py selects them and
+# Exactly one of `upstream` and `patched` per binary; build.py selects them and
 # records the resolved feature sets in build.json.
 [features]
-native = ["dep:redb_upstream"]
+upstream = ["dep:redb_upstream"]
 patched = ["dep:redb", "dep:libdlock"]
 test_hooks = ["patched", "redb/dlock_test_hooks"]
-# rdtscp service time of each write body, charged to its requester (native: the
+# rdtscp service time of each write body, charged to its requester (upstream: the
 # same span in this harness; patched: inside redb's shared closure body).
 service_time = ["redb?/dlock_service_time"]
 # E0(b) FC-PQ fast path and its per-thread hit counter (libdlock features).
 fcpq_fast_path = ["libdlock?/fcpq_fast_path"]
 fcpq_fast_path_stat = ["libdlock?/fcpq_fast_path_stat"]
+# Combiner pass counters of FC and FC-PQ (bodies per pass, combiner changes);
+# only the separate stats binary carries them (build.py `patched_stats`).
+combiner_pass_stat = ["libdlock?/combiner_pass_stat"]
 
 [dependencies]
-# Upstream redb 3.1.0 from crates.io, untouched (the `native` variant).
+# Upstream redb 3.1.0 from crates.io, untouched (the `upstream` variant).
 redb_upstream = { package = "redb", version = "=3.1.0", optional = true }
 # The same crate archive with the numbered patches in patches/ applied by build.py.
 redb = { path = "../../.worktree/redb-src/redb-3.1.0", optional = true }

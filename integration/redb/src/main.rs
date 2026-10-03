@@ -3,12 +3,12 @@
 //! variants (see writer.rs). Read transactions (`Database::begin_read`) never
 //! pass through any write lock or bridge. Each worker is charged the service
 //! time of its own bodies, wherever they ran.
-#[cfg(all(feature = "native", feature = "patched"))]
-compile_error!("build exactly one of the `native` and `patched` features");
-#[cfg(not(any(feature = "native", feature = "patched")))]
-compile_error!("build exactly one of the `native` and `patched` features");
+#[cfg(all(feature = "upstream", feature = "patched"))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
+#[cfg(not(any(feature = "upstream", feature = "patched")))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 extern crate redb_upstream as redb;
 
 mod selftest;
@@ -27,7 +27,8 @@ use redb::{Database, Durability, ReadableDatabase, ReadableTable, ReadableTableM
 use serde::Serialize;
 
 use writer::{
-    transfer_body, Variant, WriteError, Writer, ACCOUNTS, MAX_RECORDS_PER_REQUEST, TABLE,
+    transfer_body, CombinerPassStats, Variant, WriteError, Writer, ACCOUNTS,
+    MAX_RECORDS_PER_REQUEST, TABLE,
 };
 
 const MAX_WORKERS: usize = 8;
@@ -35,6 +36,21 @@ const MAX_RECORDS_PER_WORKER: u64 = 8_000_000;
 const MAX_RECORDS: u64 = MAX_WORKERS as u64 * MAX_RECORDS_PER_WORKER;
 const WINDOW_MS: u64 = 250;
 const WINDOWS: usize = 8;
+
+/// Response-time histogram with 8 sub-buckets per octave (12.5 % resolution):
+/// values 1..=7 ns have their own bucket; from 8 ns, bucket
+/// `(log2 - 2) * 8 + next three bits`. run.py decodes the bounds.
+const HDR_BUCKETS: usize = 62 * 8;
+
+fn hdr_index(ns: u64) -> usize {
+    let value = ns.max(1);
+    let log = 63 - value.leading_zeros() as usize;
+    if log < 3 {
+        value as usize
+    } else {
+        (log - 2) * 8 + ((value >> (log - 3)) & 7) as usize
+    }
+}
 
 /// Transfer cohort: fixed account set, initial balance and amount range.
 pub const TRANSFER_ACCOUNTS: u64 = 1024;
@@ -157,21 +173,23 @@ pub fn conserved_balances(db: &Database, accounts: u64) -> Result<Vec<u64>, Stri
 /// Features compiled into this binary (`--build-info`; echoed in every trial).
 #[derive(Serialize)]
 struct BuildInfo {
-    native: bool,
+    upstream: bool,
     patched: bool,
     test_hooks: bool,
     service_time: bool,
     fcpq_fast_path: bool,
     fcpq_fast_path_stat: bool,
+    combiner_pass_stat: bool,
 }
 
 const BUILD_INFO: BuildInfo = BuildInfo {
-    native: cfg!(feature = "native"),
+    upstream: cfg!(feature = "upstream"),
     patched: cfg!(feature = "patched"),
     test_hooks: cfg!(feature = "test_hooks"),
     service_time: cfg!(feature = "service_time"),
     fcpq_fast_path: cfg!(feature = "fcpq_fast_path"),
     fcpq_fast_path_stat: cfg!(feature = "fcpq_fast_path_stat"),
+    combiner_pass_stat: cfg!(feature = "combiner_pass_stat"),
 };
 
 /// Profile cohort only (run.py --perf): `perf stat --delay=-1 --control
@@ -264,6 +282,16 @@ struct WorkerResult {
     /// FC-PQ fast-path hits over all of this worker's requests (fc_pq with
     /// `fcpq_fast_path_stat` only).
     fast_path_hits: Option<u64>,
+    /// Bodies this worker's thread ran for other requesters while it was the
+    /// combiner, over all of its requests (FC and FC-PQ variants only).
+    served_for_others: Option<u64>,
+    /// Every body this worker's thread ran, its own requests included: the requests
+    /// served while it was the combiner (FC and FC-PQ variants only). The sum over
+    /// workers equals the committed transactions of an insert cohort.
+    executed_bodies: Option<u64>,
+    /// Response time of the same requests as `response_ns_log2`, finer:
+    /// sparse `[bucket, count]` pairs, 8 sub-buckets per octave (`hdr_index`).
+    response_ns_hdr: Vec<(u32, u64)>,
     /// Committed transactions only.
     #[serde(serialize_with = "serialize_histogram")]
     response_ns_log2: [u64; 64],
@@ -321,7 +349,11 @@ fn worker(
         service_tsc_ticks: 0,
         fast_path_hits: None,
         response_ns_log2: [0; 64],
+        served_for_others: None,
+        executed_bodies: None,
+        response_ns_hdr: Vec::new(),
     };
+    let mut response_hdr = [0_u64; HDR_BUCKETS];
     let mut buffer = [(0, 0); MAX_RECORDS_PER_REQUEST];
     let mut transfers = Transfers::new(seed, id, TRANSFER_ACCOUNTS);
     loop {
@@ -384,9 +416,18 @@ fn worker(
             output.window_records[window] += batch;
             output.service_tsc_ticks += service_tsc;
             output.response_ns_log2[(63 - response_ns.max(1).leading_zeros()) as usize] += 1;
+            response_hdr[hdr_index(response_ns)] += 1;
         }
     }
     output.fast_path_hits = writer.fast_path_hits();
+    output.served_for_others = writer.served_for_others();
+    output.executed_bodies = writer.executed_bodies();
+    output.response_ns_hdr = response_hdr
+        .iter()
+        .enumerate()
+        .filter(|(_, &count)| count > 0)
+        .map(|(bucket, &count)| (bucket as u32, count))
+        .collect();
     Ok(output)
 }
 
@@ -461,6 +502,8 @@ struct Output {
     reopened_exact: bool,
     reopen_error: Option<String>,
     transfer: Option<TransferCheck>,
+    /// FC / FC-PQ pass counters (`combiner_pass_stat` build only).
+    pass_stats: Option<CombinerPassStats>,
 }
 
 pub fn option(name: &str, args: &[String]) -> Result<String, String> {
@@ -637,6 +680,7 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
     let live = live_balances
         .as_ref()
         .map_or(live_insert, |b| b.len() as u64);
+    let pass_stats = writer.pass_stats();
     drop(writer);
     drop(db);
     // Close/reopen checks normal process-close persistence, NOT crash/power-loss durability.
@@ -690,6 +734,7 @@ fn trial(args: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
         reopened_exact,
         reopen_error,
         transfer,
+        pass_stats,
     };
     println!("{}", serde_json::to_string(&output)?);
     if output.durability == "immediate" && !output.reopened_exact {

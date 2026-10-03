@@ -33,6 +33,14 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
   - Scope: `integration/redb/**`
 - [redb perf-02: clock-normalised counters](./2026-09-28/redb-perf-02-clock.md) — done: ref_tsc + per-client clock; FC/FC-PQ two levels = clock; perf overhead ≈ 1 %; fixed 3.0 GHz rerun: FC-PQ/U-SCL 2.4-3.4× → 0.92-1.27×; S2 (C6 off) open
 
+### FC-PQ pass-length (H) ablation in redb (2026-09-29)
+
+- [FC-PQ pass-length ablation](./2026-09-29/fcpq-pass-length-ablation.md)
+  - Status: active (workspace `fcpq-h-ablation`, bookmark `experiment/fcpq-pass-length`)
+  - Scope: tests whether combiner tenure (FC-PQ's per-pass pop cap H = 64) explains
+    FC-PQ's redb advantage over FC; variants `fc_pq_hn` (H = active) and `fc_pq_h8`
+    (H = 8) next to `fc_pq` (H = 64, unchanged)
+
 ### redb closure-style delegated write API (implemented 2026-09-29)
 
 - [redb closure write API](./2026-09-29/redb-closure-write-api.md)
@@ -71,6 +79,7 @@ documents live in subfolders under `plan/YYYY-MM-DD/`.
 
 ## By Date
 - 2026-09-29: [redb closure write API](./2026-09-29/redb-closure-write-api.md)
+- 2026-09-29: [FC-PQ pass-length ablation](./2026-09-29/fcpq-pass-length-ablation.md)
 - 2026-09-28: [FC-SL lost-request fix](./2026-09-28/fcsl-lost-request-fix.md)
 
 ### 2026-09-28

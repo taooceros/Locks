@@ -7,7 +7,7 @@ identity build.json records. Every write is a closure submitted to the variant
 integrity check, which reports leaked pages of a transaction that was not rolled
 back. Per variant (primary binary):
   contents        exact contents after every request, both durabilities, close/reopen;
-                  fc_pq: a lone requester takes the E0(b) fast path on all 90 requests
+                  fc_pq, fc_pq_hn, fc_pq_h8: a lone requester takes the E0(b) fast path on all 90 requests
   errors          shape rejections, duplicate-key abort, abort releases the lock,
                   transaction-ID order; bridge variants also: one gate per DB, public
                   begin_write waits for the gate, ID order across gate entry/exit,
@@ -34,7 +34,7 @@ back. Per variant (primary binary):
 Patched variants additionally run the test_hooks binary:
   stress-*, transfer-*, closure-panic
                   plus in-body occupancy assertion (max 1) and bridge-level combiner
-                  evidence (FC/FC-PQ ran calls on other threads; refactored, Mutex,
+                  evidence (FC/FC-PQ ran calls on other threads; upstream_gate, std_mutex,
                   MCS and U-SCL never did); stress-* also checks service conservation
                   (charged to requesters == measured on executors)
   paused-writer   reads proceed and see the committed snapshot while a writer is
@@ -51,7 +51,7 @@ from integration.redb.build import OUT, load_build
 from integration.upscaledb.runner.process_execution import capture_command
 
 ROOT = Path(__file__).resolve().parents[2]
-VARIANTS = ('native', 'refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq')
+VARIANTS = ('upstream', 'upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq', 'fc_pq_hn', 'fc_pq_h8')
 STRESS = (('stress', ('--durability', 'immediate')), ('stress', ('--durability', 'none')))
 TRANSFER = (('transfer', ('--durability', 'immediate')), ('transfer', ('--durability', 'none')))
 PRIMARY_CASES = (('contents', ()), ('errors', ()), ('savepoints', ()), *STRESS,
@@ -107,9 +107,9 @@ def main():
     results, failures = [], []
     for variant in args.variants:
         plan = [(manifest['variant_binary'][variant], case, extra, False) for case, extra in PRIMARY_CASES]
-        if variant != 'native':
+        if variant != 'upstream':
             plan += [('test_hooks', case, extra, False) for case, extra in HOOK_CASES]
-            if variant != 'refactored':
+            if variant != 'upstream_gate':
                 plan.append(('test_hooks', 'body-panic', (), True))
         for binary_name, case, extra, failstop in plan:
             ok, record = run_case(binaries[binary_name], binary_name, variant, case, extra, output, failstop)

@@ -3,9 +3,9 @@
 //! transaction: begin -> closure -> commit on `Ok` / abort on `Err`. A panic in
 //! the closure aborts the transaction and is re-raised on the requester.
 //!
-//! - `native`: upstream redb 3.1.0 public API, this file's `native_write`.
-//! - `refactored`: patched redb's shared body under redb's own tracker lock.
-//! - `bridge_mutex`/`mcs`/`uscl`/`fc`/`fc_pq`: patched redb's shared body
+//! - `upstream`: upstream redb 3.1.0 public API, this file's `upstream_write`.
+//! - `upstream_gate`: patched redb's shared body under redb's own tracker lock.
+//! - `std_mutex`/`mcs`/`uscl`/`fc`/`fc_pq`: patched redb's shared body
 //!   submitted through `Bridge`; the lock backend is redb's write-serialisation
 //!   mechanism.
 //!
@@ -15,11 +15,11 @@
 //! Service time (`service_time` feature): TSC ticks from `begin` returning to
 //! commit/abort returning, read with `rdtscp` on the thread that runs the body
 //! and returned to the requester with the outcome (`Written::service_tsc`).
-//! Patched variants measure it inside redb's shared closure body; `native`
+//! Patched variants measure it inside redb's shared closure body; `upstream`
 //! measures the identical span here.
 use std::fmt;
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 use redb::Database;
 use redb::{
     CommitError, Durability, ReadableTable, SavepointError, SetDurabilityError, StorageError,
@@ -32,28 +32,34 @@ pub const MAX_RECORDS_PER_REQUEST: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
-    Native,
-    Refactored,
-    BridgeMutex,
+    Upstream,
+    UpstreamGate,
+    StdMutex,
     Mcs,
     Uscl,
     Fc,
     FcPq,
+    /// FC-PQ with the per-pass pop cap = entries enrolled at pass start.
+    FcPqHn,
+    /// FC-PQ with a per-pass pop cap of 8.
+    FcPqH8,
 }
 
 impl Variant {
     pub fn parse(name: &str) -> Result<Self, String> {
         let variant = match name {
-            "native" => Self::Native,
-            "refactored" => Self::Refactored,
-            "bridge_mutex" => Self::BridgeMutex,
+            "upstream" => Self::Upstream,
+            "upstream_gate" => Self::UpstreamGate,
+            "std_mutex" => Self::StdMutex,
             "mcs" => Self::Mcs,
             "uscl" => Self::Uscl,
             "fc" => Self::Fc,
             "fc_pq" => Self::FcPq,
+            "fc_pq_hn" => Self::FcPqHn,
+            "fc_pq_h8" => Self::FcPqH8,
             _ => return Err(format!("unknown variant: {name}")),
         };
-        if (variant == Self::Native) != cfg!(feature = "native") {
+        if (variant == Self::Upstream) != cfg!(feature = "upstream") {
             return Err(format!("variant {name} is not built into this binary"));
         }
         Ok(variant)
@@ -61,24 +67,31 @@ impl Variant {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Native => "native",
-            Self::Refactored => "refactored",
-            Self::BridgeMutex => "bridge_mutex",
+            Self::Upstream => "upstream",
+            Self::UpstreamGate => "upstream_gate",
+            Self::StdMutex => "std_mutex",
             Self::Mcs => "mcs",
             Self::Uscl => "uscl",
             Self::Fc => "fc",
             Self::FcPq => "fc_pq",
+            Self::FcPqHn => "fc_pq_hn",
+            Self::FcPqH8 => "fc_pq_h8",
         }
     }
 
     pub fn delegated(self) -> bool {
-        !matches!(self, Self::Native | Self::Refactored)
+        !matches!(self, Self::Upstream | Self::UpstreamGate)
     }
 
     /// FC and FC-PQ may run a closure on a combiner thread; Mutex, MCS and
     /// U-SCL run it on the requester.
     pub fn combining(self) -> bool {
-        matches!(self, Self::Fc | Self::FcPq)
+        matches!(self, Self::Fc | Self::FcPq | Self::FcPqHn | Self::FcPqH8)
+    }
+
+    /// FC-PQ with any per-pass cap (`fc_pq` = 64, `fc_pq_hn` = active, `fc_pq_h8` = 8).
+    pub fn is_fc_pq(self) -> bool {
+        matches!(self, Self::FcPq | Self::FcPqHn | Self::FcPqH8)
     }
 }
 
@@ -140,7 +153,7 @@ redb_error!(
 );
 
 /// A completed write: the transaction ID when the variant exposes it (patched
-/// variants; `None` for upstream native redb), the closure's value and the
+/// variants; `None` for upstream redb), the closure's value and the
 /// body's service time in TSC ticks (0 without the `service_time` feature).
 #[derive(Debug)]
 pub struct Written<R> {
@@ -150,6 +163,21 @@ pub struct Written<R> {
 }
 
 pub type WriteResult<R> = Result<Written<R>, WriteError>;
+
+/// Combiner pass counters of an FC or FC-PQ lock (`combiner_pass_stat` build).
+/// A pass is one `combine()` call, a fast-path request being a one-body pass;
+/// `bodies_hist[min(bodies, 65)]` counts passes by bodies run.
+#[derive(Debug, serde::Serialize)]
+pub struct CombinerPassStats {
+    pub passes: u64,
+    pub empty_passes: u64,
+    pub bodies: u64,
+    pub combiner_changes: u64,
+    pub combiner_changes_nonempty: u64,
+    pub cap_violations: u64,
+    pub max_bodies: u64,
+    pub bodies_hist: Vec<u64>,
+}
 
 /// Fixed-insert workload: 1..=64 new `u64 -> u64` records into `TABLE` with one
 /// durability mode; a key that already exists aborts the whole transaction.
@@ -218,7 +246,7 @@ impl Writer<'_> {
     }
 }
 
-#[cfg(all(feature = "native", feature = "service_time"))]
+#[cfg(all(feature = "upstream", feature = "service_time"))]
 #[inline(always)]
 fn service_clock() -> u64 {
     let mut aux = 0_u32;
@@ -226,21 +254,21 @@ fn service_clock() -> u64 {
     unsafe { std::arch::x86_64::__rdtscp(&mut aux) }
 }
 
-#[cfg(all(feature = "native", not(feature = "service_time")))]
+#[cfg(all(feature = "upstream", not(feature = "service_time")))]
 #[inline(always)]
 fn service_clock() -> u64 {
     0
 }
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 pub struct Writer<'db> {
     db: &'db Database,
 }
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 impl<'db> Writer<'db> {
     pub fn new(db: &'db Database, variant: Variant) -> Result<Self, String> {
-        assert_eq!(variant, Variant::Native);
+        assert_eq!(variant, Variant::Upstream);
         Ok(Self { db })
     }
 
@@ -252,7 +280,7 @@ impl<'db> Writer<'db> {
         // Same service span as patched redb's body: begin returned -> commit/abort returned.
         let txn = self.db.begin_write()?;
         let admitted = service_clock();
-        let outcome = native_write(txn, f);
+        let outcome = upstream_write(txn, f);
         let service_tsc = service_clock().saturating_sub(admitted);
         outcome.map(|value| Written {
             transaction_id: None,
@@ -261,8 +289,22 @@ impl<'db> Writer<'db> {
         })
     }
 
-    /// FC-PQ fast-path hits; native has no FC-PQ.
+    /// FC-PQ fast-path hits; upstream has no FC-PQ.
     pub fn fast_path_hits(&self) -> Option<u64> {
+        None
+    }
+    /// Bodies this thread ran for other requesters; upstream has no combiner.
+    pub fn served_for_others(&self) -> Option<u64> {
+        None
+    }
+
+    /// Bodies this thread ran, its own requests included; upstream has no combiner.
+    pub fn executed_bodies(&self) -> Option<u64> {
+        None
+    }
+
+    /// Combiner pass counters; upstream has no combiner.
+    pub fn pass_stats(&self) -> Option<CombinerPassStats> {
         None
     }
 }
@@ -270,8 +312,8 @@ impl<'db> Writer<'db> {
 /// Upstream-API sequence identical to patched redb's closure body after begin:
 /// closure -> commit / abort, and an explicit abort after a caught closure panic
 /// before the panic is resumed.
-#[cfg(feature = "native")]
-fn native_write<F, R>(mut txn: WriteTransaction, f: F) -> Result<R, WriteError>
+#[cfg(feature = "upstream")]
+fn upstream_write<F, R>(mut txn: WriteTransaction, f: F) -> Result<R, WriteError>
 where
     F: FnOnce(&mut WriteTransaction) -> Result<R, WriteError>,
 {
@@ -309,7 +351,7 @@ mod patched {
     use std::sync::PoisonError;
 
     use libdlock::dlock2::fc::FC;
-    use libdlock::dlock2::fc_pq::{UsageNode, FCPQ};
+    use libdlock::dlock2::fc_pq::{PassCap, UsageNode, FCPQ};
     use libdlock::dlock2::mcs::RawMcsLock;
     use libdlock::dlock2::spinlock::DLock2Wrapper;
     use libdlock::dlock2::DLock2;
@@ -319,15 +361,15 @@ mod patched {
         fairlock_t, fairlock_thread_register,
     };
     use redb::dlock_private::{
-        execute_native_served, DelegatedCall, DelegatedWriteError, DelegatedWriteGate,
+        execute_upstream_gate_served, DelegatedCall, DelegatedWriteError, DelegatedWriteGate,
         RawDelegatedCall,
     };
     use redb::{Database, WriteTransaction};
 
-    use super::{Variant, WriteError, WriteResult, Written};
+    use super::{CombinerPassStats, Variant, WriteError, WriteResult, Written};
 
     pub enum Writer<'db> {
-        Refactored(&'db Database),
+        UpstreamGate(&'db Database),
         // Field order: the gate (delegated mode) ends before the bridge is dropped.
         Delegated {
             gate: DelegatedWriteGate<'db>,
@@ -338,8 +380,8 @@ mod patched {
     impl<'db> Writer<'db> {
         pub fn new(db: &'db Database, variant: Variant) -> Result<Self, String> {
             Ok(match variant {
-                Variant::Native => unreachable!("native is a separate binary"),
-                Variant::Refactored => Self::Refactored(db),
+                Variant::Upstream => unreachable!("upstream is a separate binary"),
+                Variant::UpstreamGate => Self::UpstreamGate(db),
                 _ => Self::Delegated {
                     gate: DelegatedWriteGate::enter(db).map_err(|e| e.to_string())?,
                     bridge: Bridge::new(variant),
@@ -353,7 +395,7 @@ mod patched {
             R: Send,
         {
             let served = match self {
-                Self::Refactored(db) => execute_native_served(db, f),
+                Self::UpstreamGate(db) => execute_upstream_gate_served(db, f),
                 Self::Delegated { gate, bridge } => {
                     gate.execute_served(f, |call| bridge.submit(call))
                 }
@@ -380,7 +422,42 @@ mod patched {
         pub fn fast_path_hits(&self) -> Option<u64> {
             match self {
                 Self::Delegated { bridge, .. } => bridge.fast_path_hits(),
-                Self::Refactored(_) => None,
+                Self::UpstreamGate(_) => None,
+            }
+        }
+
+        /// Bodies the calling thread ran for other requesters while it was the
+        /// combiner (all of its run, draining included); `None` for variants
+        /// without a combiner.
+        pub fn served_for_others(&self) -> Option<u64> {
+            match self {
+                Self::Delegated { bridge, .. } if bridge.combining => {
+                    Some(SERVED_FOR_OTHERS.with(Cell::get))
+                }
+                _ => None,
+            }
+        }
+
+        /// Every body the calling thread ran (its own requests and other requesters'), i.e.
+        /// the requests served while it was the combiner, over its whole run; `None` for
+        /// variants without a combiner. Minus `served_for_others` = its own requests that
+        /// ran on its own thread.
+        pub fn executed_bodies(&self) -> Option<u64> {
+            match self {
+                Self::Delegated { bridge, .. } if bridge.combining => {
+                    Some(EXECUTED_BODIES.with(Cell::get))
+                }
+                _ => None,
+            }
+        }
+
+        /// Combiner pass counters of the lock (FC and FC-PQ), exact once every
+        /// requester is joined; `None` without `combiner_pass_stat` and for
+        /// variants without a combiner.
+        pub fn pass_stats(&self) -> Option<CombinerPassStats> {
+            match self {
+                Self::Delegated { bridge, .. } => bridge.pass_stats(),
+                Self::UpstreamGate(_) => None,
             }
         }
     }
@@ -390,8 +467,23 @@ mod patched {
     #[derive(Debug)]
     pub struct Request {
         call: Option<RawDelegatedCall>,
+        /// Address of the requesting thread's `THREAD_MARK` (identifies the
+        /// requester without a `Thread` handle).
+        requester_mark: usize,
         #[cfg(feature = "test_hooks")]
         requester: std::thread::ThreadId,
+    }
+    thread_local! {
+        /// Bodies this thread ran on behalf of another requester.
+        static SERVED_FOR_OTHERS: Cell<u64> = const { Cell::new(0) };
+        /// Bodies this thread ran, whoever requested them.
+        static EXECUTED_BODIES: Cell<u64> = const { Cell::new(0) };
+        /// Its address identifies the thread while it lives.
+        static THREAD_MARK: u8 = const { 0 };
+    }
+
+    fn thread_mark() -> usize {
+        THREAD_MARK.with(|mark| mark as *const u8 as usize)
     }
 
     /// Test-hook build: calls executed on a thread other than their requester.
@@ -408,6 +500,10 @@ mod patched {
         #[cfg(feature = "test_hooks")]
         if request.requester != std::thread::current().id() {
             REMOTE_EXECUTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        EXECUTED_BODIES.with(|executed| executed.set(executed.get() + 1));
+        if request.requester_mark != thread_mark() {
+            SERVED_FOR_OTHERS.with(|served| served.set(served.get() + 1));
         }
         let call = request.call.take().unwrap_or_else(|| std::process::abort());
         // SAFETY: the requester is blocked in Bridge::submit until this returns.
@@ -486,13 +582,15 @@ mod patched {
         FcPq(PqLock),
     }
 
-    /// Synchronous submission bridge shared by `bridge_mutex`, `mcs`, `uscl`,
+    /// Synchronous submission bridge shared by `std_mutex`, `mcs`, `uscl`,
     /// `fc`, `fc_pq`. Mutex, MCS and U-SCL run the closure on the requesting
     /// thread; FC/FC-PQ may run it on a combiner. Nested submissions are refused
     /// (the call is dropped unrun, so the gate reports `NotExecuted`); any panic
     /// in a backend aborts.
     pub struct Bridge {
         backend: Backend,
+        /// Whether the lock has a combiner (FC, FC-PQ): `served_for_others` applies.
+        combining: bool,
     }
 
     thread_local! {
@@ -527,14 +625,23 @@ mod patched {
         fn new(variant: Variant) -> Self {
             let delegate = delegate as FnDelegate;
             let backend = match variant {
-                Variant::BridgeMutex => Backend::Mutex(std::sync::Mutex::new(())),
+                Variant::StdMutex => Backend::Mutex(std::sync::Mutex::new(())),
                 Variant::Mcs => Backend::Mcs(McsLock::new((), delegate)),
                 Variant::Uscl => Backend::Uscl(UsclLock::new()),
                 Variant::Fc => Backend::Fc(FcLock::new((), delegate)),
                 Variant::FcPq => Backend::FcPq(PqLock::new((), delegate)),
-                Variant::Native | Variant::Refactored => unreachable!("not a bridge variant"),
+                Variant::FcPqHn => {
+                    Backend::FcPq(PqLock::with_pass_cap((), delegate, PassCap::Active))
+                }
+                Variant::FcPqH8 => {
+                    Backend::FcPq(PqLock::with_pass_cap((), delegate, PassCap::Fixed(8)))
+                }
+                Variant::Upstream | Variant::UpstreamGate => unreachable!("not a bridge variant"),
             };
-            Self { backend }
+            Self {
+                backend,
+                combining: variant.combining(),
+            }
         }
 
         fn submit(&self, call: DelegatedCall<'_>) {
@@ -545,6 +652,7 @@ mod patched {
             // before `lock` returns; a returned unrun call aborts below.
             let request = Request {
                 call: Some(unsafe { call.into_raw() }),
+                requester_mark: thread_mark(),
                 #[cfg(feature = "test_hooks")]
                 requester: std::thread::current().id(),
             };
@@ -570,6 +678,30 @@ mod patched {
                 Backend::FcPq(lock) => lock.get_fast_path_hits(),
                 _ => None,
             }
+        }
+
+        #[cfg(feature = "combiner_pass_stat")]
+        fn pass_stats(&self) -> Option<CombinerPassStats> {
+            let stats = match &self.backend {
+                Backend::Fc(lock) => lock.pass_stats(),
+                Backend::FcPq(lock) => lock.pass_stats(),
+                _ => return None,
+            };
+            Some(CombinerPassStats {
+                passes: stats.passes,
+                empty_passes: stats.empty_passes,
+                bodies: stats.bodies,
+                combiner_changes: stats.combiner_changes,
+                combiner_changes_nonempty: stats.combiner_changes_nonempty,
+                cap_violations: stats.cap_violations,
+                max_bodies: stats.max_bodies,
+                bodies_hist: stats.bodies_hist,
+            })
+        }
+
+        #[cfg(not(feature = "combiner_pass_stat"))]
+        fn pass_stats(&self) -> Option<CombinerPassStats> {
+            None
         }
     }
 }

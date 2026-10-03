@@ -5,6 +5,7 @@ mod node;
 
 pub type FCPQ<T, I, PQ, F, L = RawSpinLock> = lock::FCPQ<T, I, PQ, F, L>;
 pub type UsageNode<'a, I> = lock::UsageNode<'a, I>;
+pub use lock::PassCap;
 
 #[cfg(test)]
 pub(crate) use lock::ENROLL_WINDOW_HOOK;

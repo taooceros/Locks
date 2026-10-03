@@ -18,6 +18,10 @@ fcpq_fast_path = []
 fcpq_fast_path_notime = []
 # Per-thread fast-path hit counter: FCPQ::get_fast_path_hits/fast_path_hits.
 fcpq_fast_path_stat = []
+# Combiner pass statistics for FC and FC-PQ (bodies per pass, combiner changes;
+# FC-PQ pass-length ablation, plan/2026-09-29/fcpq-pass-length-ablation.md).
+# Default-off: only a separate stats build carries the counters.
+combiner_pass_stat = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
