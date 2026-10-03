@@ -7,8 +7,8 @@ applied in order. The patched tree is placed at the fixed Cargo path dependency
 .worktree/redb-src/redb-3.1.0; an existing tree must be byte-identical to a fresh
 application or the build stops. Three binaries are built with --locked:
 
-  native      upstream crates.io redb, untouched          (variant native)
-  patched     patched redb                                (refactored, bridge_mutex, mcs, uscl, fc, fc_pq)
+  upstream    upstream crates.io redb, untouched          (variant upstream)
+  patched     patched redb                                (upstream_gate, std_mutex, mcs, uscl, fc, fc_pq)
   test_hooks  patched redb + dlock_test_hooks probes      (correctness gate only)
 
 Every binary is instrumented (service_time: rdtscp around each write body) and the
@@ -40,16 +40,16 @@ OUT = ROOT / '.worktree/redb'
 CRATE = 'redb-3.1.0.crate'
 CRATE_URL = 'https://static.crates.io/crates/redb/' + CRATE
 CRATE_SHA256 = 'ae323eb086579a3769daa2c753bb96deb95993c534711e0dbe881b5192906a06'
-PATCHED_VARIANTS = ['refactored', 'bridge_mutex', 'mcs', 'uscl', 'fc', 'fc_pq']
+PATCHED_VARIANTS = ['upstream_gate', 'std_mutex', 'mcs', 'uscl', 'fc', 'fc_pq']
 INSTRUMENTATION = ['service_time', 'fcpq_fast_path_stat']
 BINARIES = {
-    'native': {'features': ['native', 'service_time'], 'variants': ['native']},
+    'upstream': {'features': ['upstream', 'service_time'], 'variants': ['upstream']},
     'patched': {'features': ['patched', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat'],
                 'variants': PATCHED_VARIANTS},
     'test_hooks': {'features': ['test_hooks', 'service_time', 'fcpq_fast_path', 'fcpq_fast_path_stat'],
                    'variants': PATCHED_VARIANTS},
 }
-VARIANT_BINARY = {'native': 'native', **{variant: 'patched' for variant in PATCHED_VARIANTS}}
+VARIANT_BINARY = {'upstream': 'upstream', **{variant: 'patched' for variant in PATCHED_VARIANTS}}
 
 
 def sha256(data):
@@ -91,7 +91,7 @@ def crate_bytes():
 
 
 def locked_registry_checksum():
-    """The checksum Cargo.lock pins for the registry redb used by `native`."""
+    """The checksum Cargo.lock pins for the registry redb used by `upstream`."""
     lines = (HERE / 'Cargo.lock').read_text().splitlines()
     for index, line in enumerate(lines):
         if line == 'name = "redb"' and lines[index + 1] == 'version = "3.1.0"':
@@ -165,7 +165,7 @@ def resolved_features(features):
             resolved[key] = sorted(node['features'])
     # cargo metadata resolves the whole graph; keep only dependencies this build enables.
     enabled = set(resolved.get('redb_transactions', []))
-    if 'native' in enabled:
+    if 'upstream' in enabled:
         resolved.pop('libdlock', None)
         resolved.pop('redb', None)
     else:

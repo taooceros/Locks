@@ -3,9 +3,9 @@
 //! transaction: begin -> closure -> commit on `Ok` / abort on `Err`. A panic in
 //! the closure aborts the transaction and is re-raised on the requester.
 //!
-//! - `native`: upstream redb 3.1.0 public API, this file's `native_write`.
-//! - `refactored`: patched redb's shared body under redb's own tracker lock.
-//! - `bridge_mutex`/`mcs`/`uscl`/`fc`/`fc_pq`: patched redb's shared body
+//! - `upstream`: upstream redb 3.1.0 public API, this file's `upstream_write`.
+//! - `upstream_gate`: patched redb's shared body under redb's own tracker lock.
+//! - `std_mutex`/`mcs`/`uscl`/`fc`/`fc_pq`: patched redb's shared body
 //!   submitted through `Bridge`; the lock backend is redb's write-serialisation
 //!   mechanism.
 //!
@@ -15,11 +15,11 @@
 //! Service time (`service_time` feature): TSC ticks from `begin` returning to
 //! commit/abort returning, read with `rdtscp` on the thread that runs the body
 //! and returned to the requester with the outcome (`Written::service_tsc`).
-//! Patched variants measure it inside redb's shared closure body; `native`
+//! Patched variants measure it inside redb's shared closure body; `upstream`
 //! measures the identical span here.
 use std::fmt;
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 use redb::Database;
 use redb::{
     CommitError, Durability, ReadableTable, SavepointError, SetDurabilityError, StorageError,
@@ -32,9 +32,9 @@ pub const MAX_RECORDS_PER_REQUEST: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
-    Native,
-    Refactored,
-    BridgeMutex,
+    Upstream,
+    UpstreamGate,
+    StdMutex,
     Mcs,
     Uscl,
     Fc,
@@ -44,16 +44,16 @@ pub enum Variant {
 impl Variant {
     pub fn parse(name: &str) -> Result<Self, String> {
         let variant = match name {
-            "native" => Self::Native,
-            "refactored" => Self::Refactored,
-            "bridge_mutex" => Self::BridgeMutex,
+            "upstream" => Self::Upstream,
+            "upstream_gate" => Self::UpstreamGate,
+            "std_mutex" => Self::StdMutex,
             "mcs" => Self::Mcs,
             "uscl" => Self::Uscl,
             "fc" => Self::Fc,
             "fc_pq" => Self::FcPq,
             _ => return Err(format!("unknown variant: {name}")),
         };
-        if (variant == Self::Native) != cfg!(feature = "native") {
+        if (variant == Self::Upstream) != cfg!(feature = "upstream") {
             return Err(format!("variant {name} is not built into this binary"));
         }
         Ok(variant)
@@ -61,9 +61,9 @@ impl Variant {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Native => "native",
-            Self::Refactored => "refactored",
-            Self::BridgeMutex => "bridge_mutex",
+            Self::Upstream => "upstream",
+            Self::UpstreamGate => "upstream_gate",
+            Self::StdMutex => "std_mutex",
             Self::Mcs => "mcs",
             Self::Uscl => "uscl",
             Self::Fc => "fc",
@@ -72,7 +72,7 @@ impl Variant {
     }
 
     pub fn delegated(self) -> bool {
-        !matches!(self, Self::Native | Self::Refactored)
+        !matches!(self, Self::Upstream | Self::UpstreamGate)
     }
 
     /// FC and FC-PQ may run a closure on a combiner thread; Mutex, MCS and
@@ -140,7 +140,7 @@ redb_error!(
 );
 
 /// A completed write: the transaction ID when the variant exposes it (patched
-/// variants; `None` for upstream native redb), the closure's value and the
+/// variants; `None` for upstream redb), the closure's value and the
 /// body's service time in TSC ticks (0 without the `service_time` feature).
 #[derive(Debug)]
 pub struct Written<R> {
@@ -218,7 +218,7 @@ impl Writer<'_> {
     }
 }
 
-#[cfg(all(feature = "native", feature = "service_time"))]
+#[cfg(all(feature = "upstream", feature = "service_time"))]
 #[inline(always)]
 fn service_clock() -> u64 {
     let mut aux = 0_u32;
@@ -226,21 +226,21 @@ fn service_clock() -> u64 {
     unsafe { std::arch::x86_64::__rdtscp(&mut aux) }
 }
 
-#[cfg(all(feature = "native", not(feature = "service_time")))]
+#[cfg(all(feature = "upstream", not(feature = "service_time")))]
 #[inline(always)]
 fn service_clock() -> u64 {
     0
 }
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 pub struct Writer<'db> {
     db: &'db Database,
 }
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 impl<'db> Writer<'db> {
     pub fn new(db: &'db Database, variant: Variant) -> Result<Self, String> {
-        assert_eq!(variant, Variant::Native);
+        assert_eq!(variant, Variant::Upstream);
         Ok(Self { db })
     }
 
@@ -252,7 +252,7 @@ impl<'db> Writer<'db> {
         // Same service span as patched redb's body: begin returned -> commit/abort returned.
         let txn = self.db.begin_write()?;
         let admitted = service_clock();
-        let outcome = native_write(txn, f);
+        let outcome = upstream_write(txn, f);
         let service_tsc = service_clock().saturating_sub(admitted);
         outcome.map(|value| Written {
             transaction_id: None,
@@ -261,7 +261,7 @@ impl<'db> Writer<'db> {
         })
     }
 
-    /// FC-PQ fast-path hits; native has no FC-PQ.
+    /// FC-PQ fast-path hits; upstream has no FC-PQ.
     pub fn fast_path_hits(&self) -> Option<u64> {
         None
     }
@@ -270,8 +270,8 @@ impl<'db> Writer<'db> {
 /// Upstream-API sequence identical to patched redb's closure body after begin:
 /// closure -> commit / abort, and an explicit abort after a caught closure panic
 /// before the panic is resumed.
-#[cfg(feature = "native")]
-fn native_write<F, R>(mut txn: WriteTransaction, f: F) -> Result<R, WriteError>
+#[cfg(feature = "upstream")]
+fn upstream_write<F, R>(mut txn: WriteTransaction, f: F) -> Result<R, WriteError>
 where
     F: FnOnce(&mut WriteTransaction) -> Result<R, WriteError>,
 {
@@ -319,7 +319,7 @@ mod patched {
         fairlock_t, fairlock_thread_register,
     };
     use redb::dlock_private::{
-        execute_native_served, DelegatedCall, DelegatedWriteError, DelegatedWriteGate,
+        execute_upstream_gate_served, DelegatedCall, DelegatedWriteError, DelegatedWriteGate,
         RawDelegatedCall,
     };
     use redb::{Database, WriteTransaction};
@@ -327,7 +327,7 @@ mod patched {
     use super::{Variant, WriteError, WriteResult, Written};
 
     pub enum Writer<'db> {
-        Refactored(&'db Database),
+        UpstreamGate(&'db Database),
         // Field order: the gate (delegated mode) ends before the bridge is dropped.
         Delegated {
             gate: DelegatedWriteGate<'db>,
@@ -338,8 +338,8 @@ mod patched {
     impl<'db> Writer<'db> {
         pub fn new(db: &'db Database, variant: Variant) -> Result<Self, String> {
             Ok(match variant {
-                Variant::Native => unreachable!("native is a separate binary"),
-                Variant::Refactored => Self::Refactored(db),
+                Variant::Upstream => unreachable!("upstream is a separate binary"),
+                Variant::UpstreamGate => Self::UpstreamGate(db),
                 _ => Self::Delegated {
                     gate: DelegatedWriteGate::enter(db).map_err(|e| e.to_string())?,
                     bridge: Bridge::new(variant),
@@ -353,7 +353,7 @@ mod patched {
             R: Send,
         {
             let served = match self {
-                Self::Refactored(db) => execute_native_served(db, f),
+                Self::UpstreamGate(db) => execute_upstream_gate_served(db, f),
                 Self::Delegated { gate, bridge } => {
                     gate.execute_served(f, |call| bridge.submit(call))
                 }
@@ -380,7 +380,7 @@ mod patched {
         pub fn fast_path_hits(&self) -> Option<u64> {
             match self {
                 Self::Delegated { bridge, .. } => bridge.fast_path_hits(),
-                Self::Refactored(_) => None,
+                Self::UpstreamGate(_) => None,
             }
         }
     }
@@ -486,7 +486,7 @@ mod patched {
         FcPq(PqLock),
     }
 
-    /// Synchronous submission bridge shared by `bridge_mutex`, `mcs`, `uscl`,
+    /// Synchronous submission bridge shared by `std_mutex`, `mcs`, `uscl`,
     /// `fc`, `fc_pq`. Mutex, MCS and U-SCL run the closure on the requesting
     /// thread; FC/FC-PQ may run it on a combiner. Nested submissions are refused
     /// (the call is dropped unrun, so the gate reports `NotExecuted`); any panic
@@ -527,12 +527,12 @@ mod patched {
         fn new(variant: Variant) -> Self {
             let delegate = delegate as FnDelegate;
             let backend = match variant {
-                Variant::BridgeMutex => Backend::Mutex(std::sync::Mutex::new(())),
+                Variant::StdMutex => Backend::Mutex(std::sync::Mutex::new(())),
                 Variant::Mcs => Backend::Mcs(McsLock::new((), delegate)),
                 Variant::Uscl => Backend::Uscl(UsclLock::new()),
                 Variant::Fc => Backend::Fc(FcLock::new((), delegate)),
                 Variant::FcPq => Backend::FcPq(PqLock::new((), delegate)),
-                Variant::Native | Variant::Refactored => unreachable!("not a bridge variant"),
+                Variant::Upstream | Variant::UpstreamGate => unreachable!("not a bridge variant"),
             };
             Self { backend }
         }

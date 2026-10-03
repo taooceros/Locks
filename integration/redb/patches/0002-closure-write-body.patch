@@ -15,19 +15,19 @@ index 74eb267..a6a5316 100644
  [lib]
 diff --git a/src/dlock_private.rs b/src/dlock_private.rs
 new file mode 100644
-index 0000000..3c96bd9
+index 0000000..beb4132
 --- /dev/null
 +++ b/src/dlock_private.rs
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,487 @@
 +//! Locks integration: private closure-style write path. NOT a redb public API.
 +//!
 +//! A caller submits one whole write transaction as a closure
 +//! `FnOnce(&mut WriteTransaction) -> Result<R, E>`. One body runs it for both
 +//! entry points: begin, the closure, then commit on `Ok` or abort on `Err`.
 +//!
-+//! - [`execute_native`] admits the writer through redb's original
++//! - [`execute_upstream_gate`] admits the writer through redb's original
 +//!   `TransactionTracker` Mutex/Condvar writer lock, on the calling thread (the
-+//!   `refactored` control).
++//!   `upstream_gate` control).
 +//! - [`DelegatedWriteGate::execute`] hands the same body to an external delegation
 +//!   lock through a synchronous submit closure. The body may run on another thread
 +//!   (an FC/FC-PQ combiner). It never takes the tracker's writer lock; the gate
@@ -53,7 +53,7 @@ index 0000000..3c96bd9
 +//!   anywhere else in a delegated body (begin, commit, abort, the one-writer
 +//!   assertion, the bridge) aborts the process.
 +//! - Documented, not enforced: no `begin_write` inside a closure (it waits on the
-+//!   gate forever, or on itself for `execute_native`, as a second upstream
++//!   gate forever, or on itself for `execute_upstream_gate`, as a second upstream
 +//!   `begin_write` would); no nested submission (the bridge refuses it, see
 +//!   [`DelegatedWriteError::NotExecuted`]); no waiting on other threads' progress
 +//!   (it stalls the lock, and a combiner serving other requesters). Closures run
@@ -104,23 +104,26 @@ index 0000000..3c96bd9
 +
 +impl<E: fmt::Debug + fmt::Display> std::error::Error for DelegatedWriteError<E> {}
 +
-+/// `refactored` control: the shared body under redb's original tracker
++/// `upstream_gate` control: the shared body under redb's original tracker
 +/// Mutex/Condvar writer lock, on the calling thread. Returns the transaction ID
 +/// and the closure's value. A panic in the closure aborts the transaction and is
 +/// then resumed on the caller.
 +/// The bounds match [`DelegatedWriteGate::execute`], so one closure type is
 +/// accepted by every patched variant.
-+pub fn execute_native<F, R, E>(db: &Database, f: F) -> Result<(u64, R), DelegatedWriteError<E>>
++pub fn execute_upstream_gate<F, R, E>(
++    db: &Database,
++    f: F,
++) -> Result<(u64, R), DelegatedWriteError<E>>
 +where
 +    F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
 +    R: Send,
 +    E: Send + From<CommitError>,
 +{
-+    execute_native_served(db, f).outcome
++    execute_upstream_gate_served(db, f).outcome
 +}
 +
-+/// [`execute_native`] plus the body's service time.
-+pub fn execute_native_served<F, R, E>(db: &Database, f: F) -> Served<R, E>
++/// [`execute_upstream_gate`] plus the body's service time.
++pub fn execute_upstream_gate_served<F, R, E>(db: &Database, f: F) -> Served<R, E>
 +where
 +    F: FnOnce(&mut WriteTransaction) -> Result<R, E> + Send,
 +    R: Send,

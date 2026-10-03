@@ -3,12 +3,12 @@
 //! variants (see writer.rs). Read transactions (`Database::begin_read`) never
 //! pass through any write lock or bridge. Each worker is charged the service
 //! time of its own bodies, wherever they ran.
-#[cfg(all(feature = "native", feature = "patched"))]
-compile_error!("build exactly one of the `native` and `patched` features");
-#[cfg(not(any(feature = "native", feature = "patched")))]
-compile_error!("build exactly one of the `native` and `patched` features");
+#[cfg(all(feature = "upstream", feature = "patched"))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
+#[cfg(not(any(feature = "upstream", feature = "patched")))]
+compile_error!("build exactly one of the `upstream` and `patched` features");
 
-#[cfg(feature = "native")]
+#[cfg(feature = "upstream")]
 extern crate redb_upstream as redb;
 
 mod selftest;
@@ -157,7 +157,7 @@ pub fn conserved_balances(db: &Database, accounts: u64) -> Result<Vec<u64>, Stri
 /// Features compiled into this binary (`--build-info`; echoed in every trial).
 #[derive(Serialize)]
 struct BuildInfo {
-    native: bool,
+    upstream: bool,
     patched: bool,
     test_hooks: bool,
     service_time: bool,
@@ -166,7 +166,7 @@ struct BuildInfo {
 }
 
 const BUILD_INFO: BuildInfo = BuildInfo {
-    native: cfg!(feature = "native"),
+    upstream: cfg!(feature = "upstream"),
     patched: cfg!(feature = "patched"),
     test_hooks: cfg!(feature = "test_hooks"),
     service_time: cfg!(feature = "service_time"),
